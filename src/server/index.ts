@@ -137,12 +137,11 @@ const healthResponseSchema = {
     apiPrefix: { const: localApiRoutePrefix },
     architecture: {
       type: "object",
-      required: ["ui", "server", "storage", "cli"],
+      required: ["ui", "server", "storage"],
       properties: {
         ui: { const: productArchitecture.ui },
         server: { const: productArchitecture.server },
         storage: { const: productArchitecture.storage },
-        cli: { const: productArchitecture.cli },
       },
     },
   },

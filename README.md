@@ -6,7 +6,7 @@
 
 Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.
 
-`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app opened by the installed command, backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
+`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
 
 ## Status
 
@@ -19,47 +19,34 @@ Live Monobank sync is available through the same adapter boundary when `MONOBANK
 - Sync personal Monobank transactions into a durable local ledger.
 - Keep banking tokens and personal finance data off hosted project servers.
 - Support fixture-first development for tests, demos, and offline workflows.
-- Provide a small TypeScript API, local server boundary, and CLI launcher that can grow into SQLite storage, exports, reports, and a Vite web UI.
+- Provide a small TypeScript API, local server boundary, and browser UI that can grow into SQLite storage, exports, reports, and a Vite web app.
 
 ## Install
 
 ```sh
-npm install -g mono-ledger-sync
+npm install mono-ledger-sync
 ```
 
-## Usage
+## Local UI
 
 ```sh
-mono-ledger-sync
-mono-ledger-sync init --source fixture
-mono-ledger-sync sync --source fixture
-mono-ledger-sync sync run --source fixture --dry-run
-mono-ledger-sync sync run --source fixture --account fixture-account-uah-main --from 1775001600 --to 1777593599 --slice 1000000
-mono-ledger-sync export --format csv
-mono-ledger-sync export --format jsonl --account fixture-account-uah-main
-mono-ledger-sync export --preset accountant-handoff
-mono-ledger-sync data path
-mono-ledger-sync db backup
-mono-ledger-sync db export
-mono-ledger-sync db restore --from ~/.mono-ledger-sync/exports/default-2026-05-11T10-00-00Z.sqlite --yes
-mono-ledger-sync db inspect
-mono-ledger-sync db compact
-mono-ledger-sync data delete --yes
-mono-ledger-sync auth status --source fixture
-mono-ledger-sync auth test --source fixture
-mono-ledger-sync doctor
-mono-ledger-sync serve --source fixture
-mono-ledger-sync version
+npm run dev
 ```
 
-Running `mono-ledger-sync` without a command starts the local browser app. `sync run` writes Monobank-shaped data into the local SQLite ledger, `export` prints CSV, JSON, JSONL, or journal-style CSV from the active local database, `data path` shows where local files live, `db backup` creates a timestamped SQLite backup, `db export` creates a portable SQLite copy without secrets, `db restore --from <path> --yes` restores a local database copy, `db inspect` checks migrations and SQLite integrity, `db compact` runs SQLite vacuum, `data delete --yes` removes the local profile database files, `auth status` and `auth test` validate the selected source without revealing tokens, and `doctor` checks the local setup without printing secrets.
+`npm run dev` builds the package and starts the local Fastify server at
+`http://127.0.0.1:3000`. Fixture mode is the default, so the browser UI works
+without network access or banking credentials.
 
-Export presets are available for `accountant-handoff`, `monthly-personal-finance`, `bookkeeping`, `budget-analysis`, and `raw-transaction-archive`. Export file contents are deterministic for the same database state and filters so users can diff or version their own local data.
+Export presets are available through the local API and browser UI for
+`accountant-handoff`, `monthly-personal-finance`, `bookkeeping`,
+`budget-analysis`, and `raw-transaction-archive`. Export file contents are
+deterministic for the same database state and filters so users can diff or
+version their own local data.
 
 For live personal Monobank sync, keep the token in the environment for the current shell session:
 
 ```sh
-MONOBANK_TOKEN=... mono-ledger-sync sync --source monobank
+MONOBANK_TOKEN=... MONO_LEDGER_SYNC_SOURCE=monobank npm run dev
 ```
 
 ## Library API
@@ -102,7 +89,7 @@ npm run format
 on `http://127.0.0.1:3000`. The app exposes the browser UI at `/`, health and
 configuration endpoints, fixture endpoints, ledger summary/account/transaction
 endpoints, sync run endpoints, webhook hint ingestion, and CSV/JSON/JSONL exports.
-Use `npm run dev -- --port 3001` if port 3000 is already in use.
+Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
 
 Release automation is documented in [docs/release.md](docs/release.md).
 Common local workflows are documented in

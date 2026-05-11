@@ -1,11 +1,11 @@
 # Export for accountant
 
-Create a local ledger export without including tokens:
+Create a local ledger export without including tokens. Start the local UI, run
+fixture or live sync, then download CSV and JSONL exports from the Exports
+section.
 
 ```sh
-mono-ledger-sync sync --source fixture
-mono-ledger-sync export --format csv > mono-ledger-transactions.csv
-mono-ledger-sync export --format jsonl > mono-ledger-transactions.jsonl
+npm run dev
 ```
 
 Use CSV for spreadsheet review and JSONL for deterministic row-by-row archive

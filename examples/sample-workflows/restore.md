@@ -3,18 +3,12 @@
 Restore is intentionally manual until the confirmation flow is implemented.
 The current safe process is:
 
-```sh
-mono-ledger-sync data path --profile personal
-mono-ledger-sync db backup --profile personal
-```
+1. Open the local UI and note the active database path shown in the sidebar.
+2. Stop the local app.
+3. Copy the current SQLite database to a timestamped backup location.
+4. Replace the active database file with the backup copy you want to restore.
+5. Remove stale `-wal` and `-shm` sidecar files next to the active database.
+6. Start the local UI and confirm the ledger summary loads.
 
-After creating a fresh backup, stop the local app and replace the database file
-reported by `data path` with the backup copy you want to restore. Run
-`mono-ledger-sync doctor --profile personal` afterward to verify that the
-database opens and migrations are current.
-
-To remove the restored profile database and start over:
-
-```sh
-mono-ledger-sync data delete --profile personal --yes
-```
+To remove the restored profile database and start over, stop the local app and
+delete the profile database plus any matching SQLite sidecar files.

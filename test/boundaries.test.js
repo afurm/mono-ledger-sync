@@ -14,12 +14,11 @@ import {
   uiFramework,
 } from "mono-ledger-sync/ui";
 
-test("exposes the product architecture without loading CLI code", () => {
+test("exposes the product architecture without loading extra entrypoints", () => {
   assert.deepEqual(productArchitecture, {
     ui: "vite",
     server: "fastify",
     storage: "sqlite",
-    cli: "launcher",
   });
 });
 

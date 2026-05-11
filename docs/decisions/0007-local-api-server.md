@@ -14,7 +14,7 @@ The API server should be small, typed, fast to start, easy to test, and explicit
 
 Use Fastify for the local app API server.
 
-The installed command should start a local Fastify server, serve the production Vite build, expose the product API under a local route prefix such as `/api`, and open the browser UI. Local development can run Vite separately while proxying product API calls to the same Fastify route handlers.
+The local app should start a Fastify server, serve the production Vite build, and expose the product API under a local route prefix such as `/api`. Local development can run Vite separately while proxying product API calls to the same Fastify route handlers.
 
 Fastify route handlers should stay thin. They can validate requests, map HTTP errors, and call core services, but sync, storage, export, categorization, and Monobank logic must live outside the HTTP layer.
 
@@ -30,4 +30,4 @@ Default server behavior:
 
 ## Consequences
 
-Fastify gives the local product a focused HTTP boundary without turning the package into a public API server. The Vite UI, CLI launcher, and automation commands should all use the same core services behind this boundary, so local UI behavior and scripted behavior stay consistent.
+Fastify gives the local product a focused HTTP boundary without turning the package into a public API server. The Vite UI should use the same core services behind this boundary so local behavior stays consistent across the browser UI, tests, and API routes.

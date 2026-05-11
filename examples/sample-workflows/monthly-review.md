@@ -1,19 +1,18 @@
 # Monthly review
 
-Use fixture mode to rehearse the review flow without a token:
+Use fixture mode to rehearse the review flow without a token. Start the local
+UI, run fixture sync from the browser, then review transactions, categories,
+accounts, and export previews.
 
 ```sh
-mono-ledger-sync sync --source fixture
-mono-ledger-sync export --format csv
-mono-ledger-sync ui --source fixture
+npm run dev
 ```
 
-For a live profile, keep the token in the current shell and run the same flow:
+For a live profile, keep the token in the current shell and run the same browser
+flow against the Monobank source:
 
 ```sh
-MONOBANK_TOKEN=... mono-ledger-sync sync --source monobank --profile personal
-mono-ledger-sync export --profile personal --format csv
-mono-ledger-sync ui --profile personal --source monobank
+MONOBANK_TOKEN=... MONO_LEDGER_SYNC_SOURCE=monobank MONO_LEDGER_SYNC_PROFILE=personal npm run dev
 ```
 
 Review uncategorized rows first, then export the filtered month once categories

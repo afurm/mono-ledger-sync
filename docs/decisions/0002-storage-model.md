@@ -12,7 +12,7 @@ The project needs durable local storage that can be inspected, backed up, migrat
 
 SQLite is the canonical production storage engine.
 
-The storage layer will expose a `LedgerDb` boundary instead of letting the Vite web app, local app server, CLI, adapter, or export code write directly to SQLite. The database model will keep raw Monobank-shaped payloads separate from normalized ledger records.
+The storage layer will expose a `LedgerDb` boundary instead of letting the Vite web app, local app server, adapter, or export code write directly to SQLite. The database model will keep raw Monobank-shaped payloads separate from normalized ledger records.
 
 The initial schema should include forward-only migrations and tables for profiles, accounts, jars, sync cursors, sync runs, raw statement items, ledger entries, webhook events, currency rates, categories, category rules, merchants, budgets, recurring items, and transaction splits as the product grows.
 
@@ -20,4 +20,4 @@ Tokens should not be stored in SQLite by default. They should live in OS secure 
 
 ## Consequences
 
-SQLite keeps the product portable and local-first. Users can back up a single database file, inspect it with standard tools, and work offline. The tradeoff is that concurrent write behavior must stay simple and explicit, especially when the local web app and CLI commands can run at the same time.
+SQLite keeps the product portable and local-first. Users can back up a single database file, inspect it with standard tools, and work offline. The tradeoff is that concurrent write behavior must stay simple and explicit while the local web app is running.

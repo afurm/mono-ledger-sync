@@ -7,8 +7,8 @@
 The package follows semantic versioning:
 
 - Patch releases fix bugs, documentation mistakes, fixture data, packaging, and compatible internal behavior.
-- Minor releases add compatible CLI commands, local API routes, storage fields, export formats, or UI workflows.
-- Major releases may change CLI contracts, package exports, database compatibility, or default data locations.
+- Minor releases add compatible local API routes, storage fields, export formats, or UI workflows.
+- Major releases may change package exports, database compatibility, or default data locations.
 
 Do not tag a release until `package.json` and `package-lock.json` contain the intended version.
 

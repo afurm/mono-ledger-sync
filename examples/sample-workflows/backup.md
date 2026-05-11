@@ -1,23 +1,14 @@
 # Backup
 
-Show the active local database path:
+Open the local UI and use the database path shown in the sidebar. The same
+path is also available from `/api/app/config`.
 
-```sh
-mono-ledger-sync data path --profile personal
-```
+Stop the local app before copying the SQLite database. Copy the database file
+and any matching `-wal` or `-shm` sidecar files if SQLite created them during
+the session.
 
-Create a timestamped SQLite backup next to the profile database:
-
-```sh
-mono-ledger-sync db backup --profile personal
-```
-
-Inspect and compact the database after a large sync or before archiving:
-
-```sh
-mono-ledger-sync db inspect --profile personal
-mono-ledger-sync db compact --profile personal
-```
+After copying, start the local UI again and verify the ledger summary, account
+list, and recent transactions still load.
 
 Backups are local SQLite files. Store them in an encrypted folder or disk image
 when stricter privacy is needed.

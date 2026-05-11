@@ -3,9 +3,6 @@
   "version": "0.1.1",
   "description": "Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.",
   "type": "module",
-  "bin": {
-    "mono-ledger-sync": "dist/cli.js"
-  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -62,7 +59,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",
     "coverage": "npm run build && node --test --experimental-test-coverage test/*.test.js",
-    "dev": "npm run build && node dist/cli.js serve --source fixture",
+    "dev": "npm run build && node dist/server/dev.js",
     "format": "prettier --check .",
     "lint": "npm run typecheck",
     "prepublishOnly": "npm run typecheck && npm test",
@@ -81,7 +78,6 @@
     "banking",
     "banking-api",
     "typescript",
-    "cli",
     "sqlite",
     "open-source",
     "ukraine"

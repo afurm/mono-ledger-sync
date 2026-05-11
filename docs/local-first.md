@@ -17,16 +17,20 @@ The planned sync flow is pull-first. Webhook events can improve freshness, but f
 
 ## Moving and restoring data
 
-Use `mono-ledger-sync data path --profile <name>` to find the active database path. A portable copy can be created with `mono-ledger-sync db export --profile <name>`, and restored with `mono-ledger-sync db restore --from <copy.sqlite> --profile <name> --yes`.
+The local UI shows the active database path in the sidebar and exposes the same
+path through `/api/app/config`. Create portable backups by copying the SQLite
+database while the local app is stopped.
 
-Stop the local app before replacing or restoring a database. The restore command removes stale SQLite WAL/SHM sidecar files before copying the selected database into place.
+Stop the local app before replacing or restoring a database. Remove stale
+SQLite WAL/SHM sidecar files next to the database before copying the selected
+database into place.
 
 ## Stronger local privacy
 
 For stricter local privacy, place the data directory on an encrypted volume or encrypted folder before running the app:
 
-- macOS: create an encrypted Disk Utility image and pass its mounted folder with `--data-dir`.
+- macOS: create an encrypted Disk Utility image and set `MONO_LEDGER_SYNC_DATA_DIR` to its mounted folder.
 - Linux: use an encrypted home directory, LUKS volume, or Secret Service-backed encrypted storage.
-- Windows: use BitLocker or another encrypted folder/volume and pass that path with `--data-dir`.
+- Windows: use BitLocker or another encrypted folder/volume and set `MONO_LEDGER_SYNC_DATA_DIR` to that path.
 
 Backups and exports are ordinary local files. Store them in the same encrypted location if they contain sensitive transaction history.
