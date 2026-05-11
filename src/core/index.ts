@@ -5,7 +5,6 @@ export const productArchitecture = {
   ui: "vite",
   server: "fastify",
   storage: "sqlite",
-  cli: "launcher",
 } as const;
 
 export const supportedLedgerSources = ["fixture", "monobank"] as const;

@@ -15,6 +15,7 @@ import {
   bundledMonobankFixturesDir,
   createBundledFixtureMonobankAdapter,
   createFixtureMonobankAdapter,
+  createMonobankHttpAdapter,
   loadMonobankFixtureSet,
 } from "../dist/monobank/index.js";
 
@@ -289,4 +290,131 @@ test("fixture adapter serves offline client, currency, and statement data", asyn
     ["fixture-stmt-2026-04-01-salary"],
   );
   assert.deepEqual(missingAccount, []);
+});
+
+test("http adapter calls personal Monobank endpoints with X-Token", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const statement = await readFixture("statements/uah-main-2026-04.json");
+  const requests = [];
+  const rateLimitSleeps = [];
+  let now = 1_000;
+  const adapter = createMonobankHttpAdapter({
+    token: "fixture-token",
+    baseUrl: "https://api.example.test",
+    timeoutMs: 1_000,
+    now: () => now,
+    sleep: async (ms) => {
+      rateLimitSleeps.push(ms);
+      now += ms;
+    },
+    fetch: async (url, init) => {
+      requests.push({
+        url: String(url),
+        token: init.headers["X-Token"],
+        method: init.method ?? "GET",
+      });
+
+      if (String(url).endsWith("/personal/client-info")) {
+        return Response.json(clientInfo);
+      }
+
+      if (String(url).endsWith("/bank/currency")) {
+        return Response.json(currencyRates);
+      }
+
+      if (
+        String(url).endsWith(
+          "/personal/statement/fixture-account-uah-main/1775001600/1777593599",
+        )
+      ) {
+        return Response.json(statement);
+      }
+
+      if (String(url).endsWith("/personal/webhook")) {
+        return new Response(null, { status: 200 });
+      }
+
+      return Response.json({ message: "not found" }, { status: 404 });
+    },
+  });
+
+  assert.equal((await adapter.getClientInfo()).clientId, clientInfo.clientId);
+  assert.equal((await adapter.getCurrency()).length, currencyRates.length);
+  assert.equal(
+    (
+      await adapter.getStatement({
+        accountId: "fixture-account-uah-main",
+        from: 1775001600,
+        to: 1777593599,
+      })
+    ).length,
+    statement.length,
+  );
+  await adapter.setWebhook("https://localhost.example/webhook");
+
+  assert.deepEqual(
+    requests.map((request) => request.token),
+    ["fixture-token", "fixture-token", "fixture-token", "fixture-token"],
+  );
+  assert.equal(requests[3].method, "POST");
+  assert.deepEqual(rateLimitSleeps, [60_000, 60_000]);
+});
+
+test("http adapter redacts token-bearing API errors", async () => {
+  const adapter = createMonobankHttpAdapter({
+    token: "fixture-secret-token",
+    baseUrl: "https://api.example.test",
+    maxRetries: 0,
+    fetch: async () => {
+      return Response.json(
+        {
+          message:
+            "bad token fixture-secret-token for UA213223130000026007233566001",
+        },
+        { status: 403 },
+      );
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.getClientInfo(),
+    (error) => {
+      assert.equal(error.name, "MonobankApiError");
+      assert.doesNotMatch(error.message, /fixture-secret-token/);
+      assert.doesNotMatch(error.message, /UA213223130000026007233566001/);
+      assert.match(error.message, /\[redacted\]/);
+
+      return true;
+    },
+  );
+});
+
+test("http adapter retries transient server failures", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  let attempts = 0;
+  const sleeps = [];
+  let now = 0;
+  const adapter = createMonobankHttpAdapter({
+    token: "fixture-token",
+    baseUrl: "https://api.example.test",
+    now: () => now,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      now += ms;
+    },
+    fetch: async () => {
+      attempts += 1;
+
+      if (attempts === 1) {
+        return Response.json({ message: "temporary failure" }, { status: 500 });
+      }
+
+      return Response.json(clientInfo);
+    },
+  });
+
+  assert.equal((await adapter.getClientInfo()).clientId, clientInfo.clientId);
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [250, 59_750]);
 });

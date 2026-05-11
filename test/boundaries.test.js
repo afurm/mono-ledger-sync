@@ -14,12 +14,11 @@ import {
   uiFramework,
 } from "mono-ledger-sync/ui";
 
-test("exposes the product architecture without loading CLI code", () => {
+test("exposes the product architecture without loading extra entrypoints", () => {
   assert.deepEqual(productArchitecture, {
     ui: "vite",
     server: "fastify",
     storage: "sqlite",
-    cli: "launcher",
   });
 });
 
@@ -77,6 +76,8 @@ test("serves a local fixture overview page", async () => {
     assert.match(response.body, /Profile demo/);
     assert.match(response.body, /fixture-account-uah-main/);
     assert.match(response.body, /Salary payment/);
+    assert.match(response.body, /Local database/);
+    assert.match(response.body, /\/api\/exports\/ledger\?format=jsonl/);
     assert.match(response.body, /\/api\/fixtures\/client-info/);
     assert.match(response.body, /\/api\/fixtures\/statements/);
   } finally {

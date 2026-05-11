@@ -3,9 +3,6 @@
   "version": "0.1.1",
   "description": "Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.",
   "type": "module",
-  "bin": {
-    "mono-ledger-sync": "dist/cli.js"
-  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -25,6 +22,10 @@
       "types": "./dist/monobank/index.d.ts",
       "import": "./dist/monobank/index.js"
     },
+    "./privacy": {
+      "types": "./dist/privacy/index.d.ts",
+      "import": "./dist/privacy/index.js"
+    },
     "./server": {
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
@@ -32,6 +33,10 @@
     "./sqlite": {
       "types": "./dist/sqlite/index.d.ts",
       "import": "./dist/sqlite/index.js"
+    },
+    "./sync": {
+      "types": "./dist/sync/index.d.ts",
+      "import": "./dist/sync/index.js"
     },
     "./storage": {
       "types": "./dist/storage/index.d.ts",
@@ -44,6 +49,7 @@
   },
   "files": [
     "dist",
+    "examples/sample-workflows",
     "fixtures/monobank",
     "README.md",
     "LICENSE",
@@ -52,7 +58,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",
-    "dev": "npm run build && node dist/cli.js serve --source fixture",
+    "coverage": "npm run build && node --test --experimental-test-coverage test/*.test.js",
+    "dev": "npm run build && node dist/server/dev.js",
     "format": "prettier --check .",
     "lint": "npm run typecheck",
     "prepublishOnly": "npm run typecheck && npm test",
@@ -71,7 +78,6 @@
     "banking",
     "banking-api",
     "typescript",
-    "cli",
     "sqlite",
     "open-source",
     "ukraine"
@@ -93,11 +99,13 @@
     "access": "public"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.19.25",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "fastify": "^5.8.5"
   }
 }

@@ -2,6 +2,27 @@
 
 `mono-ledger-sync` publishes from GitHub Actions with npm Trusted Publishing. This avoids long-lived npm publish tokens and lets npm attach provenance to public releases.
 
+## Versioning policy
+
+The package follows semantic versioning:
+
+- Patch releases fix bugs, documentation mistakes, fixture data, packaging, and compatible internal behavior.
+- Minor releases add compatible local API routes, storage fields, export formats, or UI workflows.
+- Major releases may change package exports, database compatibility, or default data locations.
+
+Do not tag a release until `package.json` and `package-lock.json` contain the intended version.
+
+## Changelog workflow
+
+Every release PR should include a short changelog note in the PR body with:
+
+- Added
+- Changed
+- Fixed
+- Security or privacy notes, when relevant
+
+For now, GitHub Releases are generated from merged PRs and the release tag. Add a dedicated `CHANGELOG.md` once release notes become too large for GitHub's generated notes.
+
 ## One-time npm setup
 
 In the npm package settings for `mono-ledger-sync`, configure Trusted Publishing:
