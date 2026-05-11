@@ -1,4 +1,4 @@
 #!/usr/bin/env node
 import { runCli } from "./cli/index.js";
 
-runCli(process.argv, console, process);
+await runCli(process.argv, console, process);
