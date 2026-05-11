@@ -8,11 +8,13 @@ Status: Accepted
 
 The project needs reliable tests, demos, screenshots, and local development flows before users configure real Monobank credentials. Live API tests would be slow, privacy-sensitive, and brittle because personal API endpoints have strict rate limits.
 
+The local web UI should be useful from the first run, so fixture data must be good enough to drive real app pages, charts, filters, empty states, and export previews without a token.
+
 ## Decision
 
 Development starts with sanitized Monobank-shaped fixtures and a `FixtureMonobankAdapter`.
 
-The fixture adapter and future HTTP adapter must implement the same `MonobankAdapter` boundary. Core sync, storage, CLI, UI, rules, reports, and exports should work against fixture data before live API calls are required.
+The fixture adapter and future HTTP adapter must implement the same `MonobankAdapter` boundary. Core sync, storage, the Vite web UI, CLI launcher, rules, reports, and exports should work against fixture data before live API calls are required.
 
 Fixtures should cover client info, statement pages, currency rates, personal webhook events, empty states, invalid token responses, rate limits, and server errors. Fixture data should include representative Ukrainian merchants, income, card payments, transfers, subscriptions, cashback, multiple accounts, jars, and mixed currencies without using real personal data.
 
