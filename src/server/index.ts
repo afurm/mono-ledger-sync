@@ -1,6 +1,10 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { productArchitecture, type LedgerSource } from "../core/index.js";
+import {
+  loadMonobankFixtureSet,
+  type MonobankFixtureSet,
+} from "../monobank/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
@@ -47,6 +51,18 @@ export interface LocalApiHealth {
   architecture: typeof productArchitecture;
 }
 
+export interface LocalApiFixtureSummary {
+  source: "fixture";
+  profile: string;
+  accounts: number;
+  jars: number;
+  currencyRates: number;
+  statementAccounts: number;
+  statementItems: number;
+  webhookEvents: number;
+  errorStates: number;
+}
+
 const healthResponseSchema = {
   type: "object",
   required: ["status", "localOnly", "framework", "apiPrefix", "architecture"],
@@ -68,7 +84,56 @@ const healthResponseSchema = {
   },
 } as const;
 
-function registerLocalApiRoutes(app: FastifyInstance): void {
+const fixtureSummaryResponseSchema = {
+  type: "object",
+  required: [
+    "source",
+    "profile",
+    "accounts",
+    "jars",
+    "currencyRates",
+    "statementAccounts",
+    "statementItems",
+    "webhookEvents",
+    "errorStates",
+  ],
+  properties: {
+    source: { const: "fixture" },
+    profile: { type: "string" },
+    accounts: { type: "number" },
+    jars: { type: "number" },
+    currencyRates: { type: "number" },
+    statementAccounts: { type: "number" },
+    statementItems: { type: "number" },
+    webhookEvents: { type: "number" },
+    errorStates: { type: "number" },
+  },
+} as const;
+
+function summarizeFixtureSet(
+  fixtureSet: MonobankFixtureSet,
+  profile: string,
+): LocalApiFixtureSummary {
+  return {
+    source: "fixture",
+    profile,
+    accounts: fixtureSet.clientInfo.accounts.length,
+    jars: fixtureSet.clientInfo.jars?.length ?? 0,
+    currencyRates: fixtureSet.currencyRates.length,
+    statementAccounts: Object.keys(fixtureSet.statements).length,
+    statementItems: Object.values(fixtureSet.statements).reduce(
+      (count, statementItems) => count + statementItems.length,
+      0,
+    ),
+    webhookEvents: Object.keys(fixtureSet.webhookEvents ?? {}).length,
+    errorStates: Object.keys(fixtureSet.errors ?? {}).length,
+  };
+}
+
+function registerLocalApiRoutes(
+  app: FastifyInstance,
+  options: LocalApiServerOptions,
+): void {
   app.get(
     `${localApiRoutePrefix}/health`,
     {
@@ -86,6 +151,22 @@ function registerLocalApiRoutes(app: FastifyInstance): void {
       architecture: productArchitecture,
     }),
   );
+
+  app.get(
+    `${localApiRoutePrefix}/fixtures/summary`,
+    {
+      schema: {
+        response: {
+          200: fixtureSummaryResponseSchema,
+        },
+      },
+    },
+    async (): Promise<LocalApiFixtureSummary> => {
+      const fixtureSet = await loadMonobankFixtureSet();
+
+      return summarizeFixtureSet(fixtureSet, options.profile ?? "default");
+    },
+  );
 }
 
 export function createLocalApiServer(
@@ -96,7 +177,7 @@ export function createLocalApiServer(
   });
   let url: string | undefined;
 
-  registerLocalApiRoutes(app);
+  registerLocalApiRoutes(app, options);
 
   return {
     get url() {
