@@ -16,11 +16,18 @@ export {
   type SyncRun,
 } from "./storage/index.js";
 export {
+  createFixtureMonobankAdapter,
   type MonobankAccount,
   type MonobankAdapter,
   type MonobankClientInfo,
   type MonobankCurrencyRate,
+  type MonobankErrorResponse,
+  type MonobankFixtureSet,
+  type MonobankJar,
+  type MonobankManagedClient,
+  type MonobankPersonalWebhookEvent,
   type MonobankStatementItem,
+  type MonobankStatementItemWebhookEvent,
 } from "./monobank/index.js";
 export {
   createLocalApiServer,

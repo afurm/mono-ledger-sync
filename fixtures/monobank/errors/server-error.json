@@ -1,0 +1,5 @@
+{
+  "statusCode": 500,
+  "code": "server_error",
+  "message": "Synthetic upstream failure for retry and diagnostics tests"
+}
