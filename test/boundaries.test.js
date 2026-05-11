@@ -87,3 +87,61 @@ test("serves bundled fixture summary through the local API", async () => {
     await server.close();
   }
 });
+
+test("serves bundled fixture client info through the local API", async () => {
+  const server = createLocalApiServer({
+    profile: "demo",
+    source: "fixture",
+  });
+
+  try {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/fixtures/client-info",
+    });
+    const body = response.json();
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.source, "fixture");
+    assert.equal(body.profile, "demo");
+    assert.equal(body.clientInfo.clientId, "fixture-client-primary");
+    assert.equal(body.clientInfo.accounts.length, 2);
+  } finally {
+    await server.close();
+  }
+});
+
+test("serves bundled fixture statements through the local API", async () => {
+  const server = createLocalApiServer({
+    profile: "demo",
+    source: "fixture",
+  });
+
+  try {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/fixtures/statements",
+    });
+    const body = response.json();
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.source, "fixture");
+    assert.equal(body.profile, "demo");
+    assert.equal(body.totalItems, 7);
+    assert.deepEqual(
+      body.accounts.map((account) => account.accountId),
+      [
+        "fixture-account-uah-main",
+        "fixture-account-eur-savings",
+        "fixture-account-empty",
+      ],
+    );
+    assert.ok(
+      body.accounts[0].items.some(
+        (item) => item.id === "fixture-stmt-2026-04-01-salary",
+      ),
+    );
+  } finally {
+    await server.close();
+  }
+});

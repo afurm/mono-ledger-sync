@@ -3,7 +3,9 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { productArchitecture, type LedgerSource } from "../core/index.js";
 import {
   loadMonobankFixtureSet,
+  type MonobankClientInfo,
   type MonobankFixtureSet,
+  type MonobankStatementItem,
 } from "../monobank/index.js";
 
 export const localApiServerFramework = "fastify";
@@ -63,6 +65,24 @@ export interface LocalApiFixtureSummary {
   errorStates: number;
 }
 
+export interface LocalApiFixtureClientInfo {
+  source: "fixture";
+  profile: string;
+  clientInfo: MonobankClientInfo;
+}
+
+export interface LocalApiFixtureStatementsAccount {
+  accountId: string;
+  items: readonly MonobankStatementItem[];
+}
+
+export interface LocalApiFixtureStatements {
+  source: "fixture";
+  profile: string;
+  totalItems: number;
+  accounts: readonly LocalApiFixtureStatementsAccount[];
+}
+
 const healthResponseSchema = {
   type: "object",
   required: ["status", "localOnly", "framework", "apiPrefix", "architecture"],
@@ -110,6 +130,46 @@ const fixtureSummaryResponseSchema = {
   },
 } as const;
 
+const fixtureClientInfoResponseSchema = {
+  type: "object",
+  required: ["source", "profile", "clientInfo"],
+  properties: {
+    source: { const: "fixture" },
+    profile: { type: "string" },
+    clientInfo: {
+      type: "object",
+      additionalProperties: true,
+    },
+  },
+} as const;
+
+const fixtureStatementsResponseSchema = {
+  type: "object",
+  required: ["source", "profile", "totalItems", "accounts"],
+  properties: {
+    source: { const: "fixture" },
+    profile: { type: "string" },
+    totalItems: { type: "number" },
+    accounts: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["accountId", "items"],
+        properties: {
+          accountId: { type: "string" },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
 function summarizeFixtureSet(
   fixtureSet: MonobankFixtureSet,
   profile: string,
@@ -127,6 +187,38 @@ function summarizeFixtureSet(
     ),
     webhookEvents: Object.keys(fixtureSet.webhookEvents ?? {}).length,
     errorStates: Object.keys(fixtureSet.errors ?? {}).length,
+  };
+}
+
+function fixtureClientInfoResponse(
+  fixtureSet: MonobankFixtureSet,
+  profile: string,
+): LocalApiFixtureClientInfo {
+  return {
+    source: "fixture",
+    profile,
+    clientInfo: fixtureSet.clientInfo,
+  };
+}
+
+function fixtureStatementsResponse(
+  fixtureSet: MonobankFixtureSet,
+  profile: string,
+): LocalApiFixtureStatements {
+  const accounts = Object.entries(fixtureSet.statements).map(
+    ([accountId, items]) => ({
+      accountId,
+      items,
+    }),
+  );
+
+  return {
+    source: "fixture",
+    profile,
+    totalItems: accounts.reduce((count, account) => {
+      return count + account.items.length;
+    }, 0),
+    accounts,
   };
 }
 
@@ -165,6 +257,44 @@ function registerLocalApiRoutes(
       const fixtureSet = await loadMonobankFixtureSet();
 
       return summarizeFixtureSet(fixtureSet, options.profile ?? "default");
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/fixtures/client-info`,
+    {
+      schema: {
+        response: {
+          200: fixtureClientInfoResponseSchema,
+        },
+      },
+    },
+    async (): Promise<LocalApiFixtureClientInfo> => {
+      const fixtureSet = await loadMonobankFixtureSet();
+
+      return fixtureClientInfoResponse(
+        fixtureSet,
+        options.profile ?? "default",
+      );
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/fixtures/statements`,
+    {
+      schema: {
+        response: {
+          200: fixtureStatementsResponseSchema,
+        },
+      },
+    },
+    async (): Promise<LocalApiFixtureStatements> => {
+      const fixtureSet = await loadMonobankFixtureSet();
+
+      return fixtureStatementsResponse(
+        fixtureSet,
+        options.profile ?? "default",
+      );
     },
   );
 }

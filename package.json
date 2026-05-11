@@ -52,7 +52,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",
-    "dev": "npm run build && node dist/cli.js serve --source fixture --port 3000",
+    "dev": "npm run build && node dist/cli.js serve --source fixture",
     "format": "prettier --check .",
     "lint": "npm run typecheck",
     "prepublishOnly": "npm run typecheck && npm test",
