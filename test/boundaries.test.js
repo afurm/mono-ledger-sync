@@ -59,6 +59,31 @@ test("serves local API health through Fastify", async () => {
   }
 });
 
+test("serves a local fixture overview page", async () => {
+  const server = createLocalApiServer({
+    profile: "demo",
+    source: "fixture",
+  });
+
+  try {
+    const response = await server.inject({
+      method: "GET",
+      url: "/",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /^<!doctype html>/);
+    assert.match(response.body, /mono-ledger-sync/);
+    assert.match(response.body, /Profile demo/);
+    assert.match(response.body, /fixture-account-uah-main/);
+    assert.match(response.body, /Salary payment/);
+    assert.match(response.body, /\/api\/fixtures\/client-info/);
+    assert.match(response.body, /\/api\/fixtures\/statements/);
+  } finally {
+    await server.close();
+  }
+});
+
 test("serves bundled fixture summary through the local API", async () => {
   const server = createLocalApiServer({
     profile: "demo",
