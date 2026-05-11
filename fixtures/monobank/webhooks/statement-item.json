@@ -1,0 +1,24 @@
+{
+  "type": "StatementItem",
+  "data": {
+    "account": "fixture-account-uah-main",
+    "statementItem": {
+      "id": "fixture-webhook-stmt-2026-04-11-coffee",
+      "time": 1775895300,
+      "description": "Coffee shop",
+      "mcc": 5814,
+      "originalMcc": 5814,
+      "amount": -12500,
+      "operationAmount": -12500,
+      "currencyCode": 980,
+      "commissionRate": 0,
+      "cashbackAmount": 125,
+      "balance": 9054850,
+      "hold": false,
+      "receiptId": "fixture-receipt-coffee-2026-04-11",
+      "counterEdrpou": "00000000",
+      "counterIban": "UA00SANITIZEDLOCALIBAN0000",
+      "counterName": "Fixture Coffee LLC"
+    }
+  }
+}

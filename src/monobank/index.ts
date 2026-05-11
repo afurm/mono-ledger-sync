@@ -6,14 +6,35 @@ export interface MonobankAccount {
   balance: number;
   creditLimit: number;
   type: string;
+  maskedPan?: readonly string[];
   iban?: string;
+}
+
+export interface MonobankJar {
+  id: string;
+  sendId?: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  balance: number;
+  goal: number;
+}
+
+export interface MonobankManagedClient {
+  clientId: string;
+  tin?: number;
+  name: string;
+  accounts: readonly MonobankAccount[];
 }
 
 export interface MonobankClientInfo {
   clientId: string;
   name: string;
   webHookUrl?: string;
+  permissions?: string;
   accounts: readonly MonobankAccount[];
+  jars?: readonly MonobankJar[];
+  managedClients?: readonly MonobankManagedClient[];
 }
 
 export interface MonobankStatementItem {
@@ -29,9 +50,12 @@ export interface MonobankStatementItem {
   cashbackAmount: number;
   balance: number;
   hold: boolean;
+  comment?: string;
   receiptId?: string;
+  invoiceId?: string;
   counterEdrpou?: string;
   counterIban?: string;
+  counterName?: string;
 }
 
 export interface MonobankCurrencyRate {
@@ -56,4 +80,50 @@ export interface MonobankAdapter {
   ): Promise<readonly MonobankStatementItem[]>;
   getCurrency(): Promise<readonly MonobankCurrencyRate[]>;
   setWebhook(url: string): Promise<void>;
+}
+
+export interface MonobankStatementItemWebhookEvent {
+  type: "StatementItem";
+  data: {
+    account: string;
+    statementItem: MonobankStatementItem;
+  };
+}
+
+export type MonobankPersonalWebhookEvent = MonobankStatementItemWebhookEvent;
+
+export interface MonobankErrorResponse {
+  statusCode: number;
+  code: string;
+  message: string;
+  retryAfterSeconds?: number;
+}
+
+export interface MonobankFixtureSet {
+  clientInfo: MonobankClientInfo;
+  currencyRates: readonly MonobankCurrencyRate[];
+  statements: Readonly<Record<string, readonly MonobankStatementItem[]>>;
+}
+
+export function createFixtureMonobankAdapter(
+  fixtures: MonobankFixtureSet,
+): MonobankAdapter {
+  return {
+    async getClientInfo() {
+      return fixtures.clientInfo;
+    },
+    async getStatement(window) {
+      const statements = fixtures.statements[window.accountId] ?? [];
+
+      return statements.filter(
+        (item) => item.time >= window.from && item.time <= window.to,
+      );
+    },
+    async getCurrency() {
+      return fixtures.currencyRates;
+    },
+    async setWebhook() {
+      return undefined;
+    },
+  };
 }

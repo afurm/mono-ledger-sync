@@ -1,0 +1,40 @@
+{
+  "clientId": "fixture-client-primary",
+  "name": "Fixture Personal User",
+  "webHookUrl": "https://localhost.example/mono-ledger-sync/webhook",
+  "permissions": "psfj",
+  "accounts": [
+    {
+      "id": "fixture-account-uah-main",
+      "sendId": "fixture-send-uah-main",
+      "currencyCode": 980,
+      "cashbackType": "UAH",
+      "balance": 2345600,
+      "creditLimit": 500000,
+      "type": "black",
+      "maskedPan": ["000000******0000"]
+    },
+    {
+      "id": "fixture-account-eur-savings",
+      "sendId": "fixture-send-eur-savings",
+      "currencyCode": 978,
+      "cashbackType": "None",
+      "balance": 125000,
+      "creditLimit": 0,
+      "type": "white",
+      "maskedPan": ["000000******1111"]
+    }
+  ],
+  "jars": [
+    {
+      "id": "fixture-jar-emergency-fund",
+      "sendId": "fixture-send-emergency-fund",
+      "title": "Emergency fund",
+      "description": "Synthetic local savings jar",
+      "currencyCode": 980,
+      "balance": 1500000,
+      "goal": 6000000
+    }
+  ],
+  "managedClients": []
+}

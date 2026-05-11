@@ -1,0 +1,31 @@
+[
+  {
+    "id": "fixture-stmt-2026-04-03-eur-income",
+    "time": 1775203200,
+    "description": "EUR balance adjustment",
+    "mcc": 4829,
+    "originalMcc": 4829,
+    "amount": 20000,
+    "operationAmount": 20000,
+    "currencyCode": 978,
+    "commissionRate": 0,
+    "cashbackAmount": 0,
+    "balance": 145000,
+    "hold": false
+  },
+  {
+    "id": "fixture-stmt-2026-04-10-eur-card-payment",
+    "time": 1775808000,
+    "description": "Travel booking",
+    "mcc": 4722,
+    "originalMcc": 4722,
+    "amount": -20000,
+    "operationAmount": -20000,
+    "currencyCode": 978,
+    "commissionRate": 0,
+    "cashbackAmount": 0,
+    "balance": 125000,
+    "hold": false,
+    "receiptId": "fixture-receipt-travel-2026-04-10"
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "statusCode": 429,
+  "code": "rate_limit",
+  "message": "Personal API endpoint was called too frequently",
+  "retryAfterSeconds": 60
+}

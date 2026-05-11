@@ -1,0 +1,5 @@
+{
+  "statusCode": 403,
+  "code": "forbidden",
+  "message": "Personal API access is denied for the sanitized fixture credential"
+}
