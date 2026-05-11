@@ -58,3 +58,32 @@ test("serves local API health through Fastify", async () => {
     await server.close();
   }
 });
+
+test("serves bundled fixture summary through the local API", async () => {
+  const server = createLocalApiServer({
+    profile: "demo",
+    source: "fixture",
+  });
+
+  try {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/fixtures/summary",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      source: "fixture",
+      profile: "demo",
+      accounts: 2,
+      jars: 1,
+      currencyRates: 3,
+      statementAccounts: 3,
+      statementItems: 7,
+      webhookEvents: 1,
+      errorStates: 3,
+    });
+  } finally {
+    await server.close();
+  }
+});
