@@ -64,8 +64,9 @@ npm run format
 ```
 
 `npm run dev` starts the local Fastify app server against sanitized fixture data
-on `http://127.0.0.1:3000`. The current foundation build exposes
-`/api/health`, `/api/fixtures/summary`, `/api/fixtures/client-info`, and
+on `http://127.0.0.1:3000`. The current foundation build exposes a local
+fixture overview page at `/`, plus JSON endpoints at `/api/health`,
+`/api/fixtures/summary`, `/api/fixtures/client-info`, and
 `/api/fixtures/statements`; the Vite web UI is planned but not implemented yet.
 Use `npm run dev -- --port 3001` if port 3000 is already in use.
 
