@@ -1,12 +1,23 @@
 # mono-ledger-sync
 
-Local-first Monobank ledger sync toolkit.
+[![npm version](https://img.shields.io/npm/v/mono-ledger-sync.svg)](https://www.npmjs.com/package/mono-ledger-sync)
+[![CI](https://github.com/afurm/mono-ledger-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/afurm/mono-ledger-sync/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`mono-ledger-sync` is an early TypeScript CLI/package for syncing personal Monobank data into a local ledger that the user owns. The project is intentionally local-first: tokens and financial data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw payloads separately from normalized ledger entries.
+Local-first TypeScript CLI for syncing Monobank transactions into a private personal finance ledger.
+
+`mono-ledger-sync` is an early TypeScript CLI/package for building a local-first Monobank ledger workflow. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
 
 ## Status
 
 This first public package is a minimal foundation release. It includes package metadata, a strict TypeScript build, a small CLI/API scaffold, docs, and CI. Live Monobank synchronization, SQLite storage, exports, and the local web UI are planned but not implemented in this release.
+
+## Goals
+
+- Sync personal Monobank transactions into a durable local ledger.
+- Keep banking tokens and personal finance data off hosted project servers.
+- Support fixture-first development for tests, demos, and offline workflows.
+- Provide a small TypeScript API and CLI that can grow into SQLite storage, exports, and reports.
 
 ## Install
 
