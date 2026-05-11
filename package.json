@@ -1,7 +1,7 @@
 {
   "name": "mono-ledger-sync",
-  "version": "0.1.0",
-  "description": "Local-first Monobank ledger sync toolkit.",
+  "version": "0.1.1",
+  "description": "Local-first TypeScript CLI for syncing Monobank transactions into a private personal finance ledger.",
   "type": "module",
   "bin": {
     "mono-ledger-sync": "dist/cli.js"
@@ -31,10 +31,20 @@
   },
   "keywords": [
     "monobank",
+    "monobank-api",
     "ledger",
     "personal-finance",
+    "finance",
+    "finance-tracker",
     "local-first",
-    "cli"
+    "privacy",
+    "banking",
+    "banking-api",
+    "typescript",
+    "cli",
+    "sqlite",
+    "open-source",
+    "ukraine"
   ],
   "author": "Andrii Furmanets",
   "license": "MIT",
