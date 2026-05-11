@@ -4,20 +4,20 @@
 [![CI](https://github.com/afurm/mono-ledger-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/afurm/mono-ledger-sync/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Local-first TypeScript CLI for syncing Monobank transactions into a private personal finance ledger.
+Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.
 
-`mono-ledger-sync` is an early TypeScript CLI/package for building a local-first Monobank ledger workflow. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
+`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app opened by the installed command, backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
 
 ## Status
 
-This first public package is a minimal foundation release. It includes package metadata, a strict TypeScript build, a small CLI/API scaffold, docs, and CI. Live Monobank synchronization, SQLite storage, exports, and the local web UI are planned but not implemented in this release.
+This first public package is a foundation release. It includes package metadata, a strict TypeScript build, a small CLI launcher, local API boundaries, docs, and CI. Live Monobank synchronization, SQLite storage, exports, and the Vite local web UI are planned but not implemented in this release.
 
 ## Goals
 
 - Sync personal Monobank transactions into a durable local ledger.
 - Keep banking tokens and personal finance data off hosted project servers.
 - Support fixture-first development for tests, demos, and offline workflows.
-- Provide a small TypeScript API and CLI that can grow into SQLite storage, exports, and reports.
+- Provide a small TypeScript API, local server boundary, and CLI launcher that can grow into SQLite storage, exports, reports, and a Vite web UI.
 
 ## Install
 

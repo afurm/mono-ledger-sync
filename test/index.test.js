@@ -16,9 +16,9 @@ test("creates a fixture-backed local sync plan by default", () => {
     source: "fixture",
     localOnly: true,
     nextSteps: [
-      "initialize a local profile",
+      "start the local web app",
       "connect fixture or Monobank data source",
-      "sync statements into a local ledger",
+      "sync statements into a local SQLite ledger",
       "review and export local financial data",
     ],
   });
