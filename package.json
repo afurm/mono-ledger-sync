@@ -1,0 +1,60 @@
+{
+  "name": "mono-ledger-sync",
+  "version": "0.1.0",
+  "description": "Local-first Monobank ledger sync toolkit.",
+  "type": "module",
+  "bin": {
+    "mono-ledger-sync": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist coverage",
+    "format": "prettier --check .",
+    "lint": "npm run typecheck",
+    "prepublishOnly": "npm run typecheck && npm test",
+    "test": "npm run build && node --test test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "monobank",
+    "ledger",
+    "personal-finance",
+    "local-first",
+    "cli"
+  ],
+  "author": "Andrii Furmanets",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/afurm/mono-ledger-sync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/afurm/mono-ledger-sync/issues"
+  },
+  "homepage": "https://github.com/afurm/mono-ledger-sync#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
+  }
+}
