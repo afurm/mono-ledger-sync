@@ -62,6 +62,8 @@ npm test
 npm run format
 ```
 
+Release automation is documented in [docs/release.md](docs/release.md).
+
 ## License
 
 MIT
