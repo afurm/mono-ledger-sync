@@ -4,7 +4,15 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createFixtureMonobankAdapter } from "../dist/monobank/index.js";
+import {
+  MonobankValidationError,
+  assertMonobankClientInfo,
+  assertMonobankCurrencyRates,
+  assertMonobankErrorResponse,
+  assertMonobankPersonalWebhookEvent,
+  assertMonobankStatementItems,
+  createFixtureMonobankAdapter,
+} from "../dist/monobank/index.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -65,6 +73,31 @@ test("fixture files cover the personal Monobank API shapes", async () => {
   const rateLimit = await readFixture("errors/rate-limit.json");
   const serverError = await readFixture("errors/server-error.json");
 
+  assertMonobankClientInfo(clientInfo, "fixtures/client-info.json");
+  assertMonobankCurrencyRates(currencyRates, "fixtures/currency-rates.json");
+  assertMonobankStatementItems(
+    uahStatement,
+    "fixtures/statements/uah-main-2026-04.json",
+  );
+  assertMonobankStatementItems(
+    eurStatement,
+    "fixtures/statements/eur-savings-2026-04.json",
+  );
+  assertMonobankStatementItems(
+    emptyStatement,
+    "fixtures/statements/empty.json",
+  );
+  assertMonobankPersonalWebhookEvent(
+    webhookEvent,
+    "fixtures/webhooks/statement-item.json",
+  );
+  assertMonobankErrorResponse(
+    invalidToken,
+    "fixtures/errors/invalid-token.json",
+  );
+  assertMonobankErrorResponse(rateLimit, "fixtures/errors/rate-limit.json");
+  assertMonobankErrorResponse(serverError, "fixtures/errors/server-error.json");
+
   assert.equal(clientInfo.clientId, "fixture-client-primary");
   assert.equal(clientInfo.accounts.length, 2);
   assert.ok(
@@ -95,6 +128,41 @@ test("fixture files cover the personal Monobank API shapes", async () => {
   assert.equal(rateLimit.retryAfterSeconds, 60);
   assert.equal(serverError.statusCode, 500);
   assert.equal(serverError.code, "server_error");
+});
+
+test("fixture validation reports the failing field path", () => {
+  assert.throws(
+    () =>
+      assertMonobankStatementItems(
+        [
+          {
+            id: "fixture-invalid-statement",
+            time: 1775031300,
+            description: "Invalid local fixture",
+            mcc: 4829,
+            originalMcc: 4829,
+            amount: -1000,
+            operationAmount: -1000,
+            currencyCode: 980,
+            commissionRate: 0,
+            cashbackAmount: 0,
+            balance: 100000,
+          },
+        ],
+        "fixtures/statements/invalid.json",
+      ),
+    (error) => {
+      assert.ok(error instanceof MonobankValidationError);
+      assert.equal(
+        error.message,
+        "fixtures/statements/invalid.json[0].hold must be a boolean",
+      );
+      assert.equal(error.path, "fixtures/statements/invalid.json[0].hold");
+      assert.equal(error.expected, "a boolean");
+
+      return true;
+    },
+  );
 });
 
 test("fixture adapter serves offline client, currency, and statement data", async () => {
