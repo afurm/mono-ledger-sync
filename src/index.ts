@@ -11,7 +11,13 @@ export {
 } from "./core/index.js";
 export {
   type AccountBalance,
+  type LedgerAccount,
   type LedgerEntry,
+  type LedgerEntryPage,
+  type LedgerEntryQuery,
+  type LedgerSummary,
+  type LedgerWriteStats,
+  type StoredWebhookEvent,
   type SyncCursor,
   type SyncRun,
 } from "./storage/index.js";
@@ -19,13 +25,16 @@ export {
   bundledMonobankFixturesDir,
   createBundledFixtureMonobankAdapter,
   createFixtureMonobankAdapter,
+  createMonobankHttpAdapter,
   loadMonobankFixtureSet,
+  MonobankApiError,
   type MonobankAccount,
   type MonobankAdapter,
   type MonobankClientInfo,
   type MonobankCurrencyRate,
   type MonobankErrorResponse,
   type MonobankFixtureSet,
+  type MonobankHttpAdapterOptions,
   type MonobankFixtureLoaderOptions,
   type MonobankJar,
   type MonobankManagedClient,
@@ -34,9 +43,32 @@ export {
   type MonobankStatementItemWebhookEvent,
 } from "./monobank/index.js";
 export {
+  createSqliteLedgerDb,
+  sqliteStorageEngine,
+  type SqliteDatabaseInfo,
+  type SqliteLedgerDb,
+  type SqliteLedgerDbOptions,
+  type SqliteMigration,
+} from "./sqlite/index.js";
+export {
+  maskIdentifier,
+  redactSensitiveText,
+  type RedactSensitiveTextOptions,
+} from "./privacy/index.js";
+export {
+  categorizeStatementItem,
+  createLedgerEntryFromStatementItem,
+  syncLedgerWithMonobank,
+  type LedgerCategoryMatch,
+  type SyncLedgerAccountResult,
+  type SyncLedgerOptions,
+  type SyncLedgerResult,
+} from "./sync/index.js";
+export {
   createLocalApiServer,
   localApiRoutePrefix,
   localApiServerFramework,
+  resolveLocalLedgerDatabasePath,
   type LocalApiServer,
   type LocalApiServerOptions,
 } from "./server/index.js";
@@ -46,4 +78,14 @@ export {
   themeTokens,
   uiFramework,
 } from "./ui/index.js";
-export { type ExportFormat, type ExportRequest } from "./exports/index.js";
+export {
+  createLedgerExport,
+  exportPresetDefinitions,
+  exportPresetNames,
+  isExportFormat,
+  isExportPreset,
+  type ExportFormat,
+  type ExportPreset,
+  type ExportRequest,
+  type LedgerExport,
+} from "./exports/index.js";

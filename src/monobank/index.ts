@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { redactSensitiveText } from "../privacy/index.js";
+
 export interface MonobankAccount {
   id: string;
   sendId?: string;
@@ -115,6 +117,17 @@ export interface MonobankFixtureLoaderOptions {
   fixturesDir?: string;
 }
 
+export interface MonobankHttpAdapterOptions {
+  token: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+  maxRetries?: number;
+  userAgent?: string;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
 export const bundledMonobankFixturesDir = fileURLToPath(
   new URL("../../fixtures/monobank", import.meta.url),
 );
@@ -126,6 +139,18 @@ export class MonobankValidationError extends Error {
   ) {
     super(`${path} must be ${expected}`);
     this.name = "MonobankValidationError";
+  }
+}
+
+export class MonobankApiError extends Error {
+  constructor(
+    readonly response: MonobankErrorResponse,
+    readonly endpoint: string,
+  ) {
+    super(
+      `${endpoint} failed with ${response.statusCode}: ${response.message}`,
+    );
+    this.name = "MonobankApiError";
   }
 }
 
@@ -484,4 +509,212 @@ export async function createBundledFixtureMonobankAdapter(
   options: MonobankFixtureLoaderOptions = {},
 ): Promise<MonobankAdapter> {
   return createFixtureMonobankAdapter(await loadMonobankFixtureSet(options));
+}
+
+function normalizeMonobankBaseUrl(baseUrl: string | undefined): string {
+  return (baseUrl ?? "https://api.monobank.ua").replace(/\/+$/, "");
+}
+
+async function parseErrorResponse(
+  response: Response,
+  endpoint: string,
+  token: string,
+): Promise<MonobankApiError> {
+  const retryAfterHeader = response.headers.get("retry-after");
+  const retryAfterSeconds = retryAfterHeader
+    ? Number.parseInt(retryAfterHeader, 10)
+    : undefined;
+  let parsed: unknown;
+
+  try {
+    parsed = await response.json();
+  } catch {
+    parsed = undefined;
+  }
+
+  const fallbackMessage = response.statusText || "Monobank API request failed";
+  const envelope: MonobankErrorResponse = {
+    statusCode: response.status,
+    code: response.status === 429 ? "rate_limited" : "monobank_api_error",
+    message: redactSensitiveText(fallbackMessage, { secrets: [token] }),
+  };
+
+  if (retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds)) {
+    envelope.retryAfterSeconds = retryAfterSeconds;
+  }
+
+  if (isRecord(parsed)) {
+    if (typeof parsed.errorDescription === "string") {
+      envelope.message = redactSensitiveText(parsed.errorDescription, {
+        secrets: [token],
+      });
+    } else if (typeof parsed.message === "string") {
+      envelope.message = redactSensitiveText(parsed.message, {
+        secrets: [token],
+      });
+    }
+
+    if (typeof parsed.code === "string") {
+      envelope.code = parsed.code;
+    } else if (typeof parsed.error === "string") {
+      envelope.code = parsed.error;
+    }
+  }
+
+  return new MonobankApiError(envelope, endpoint);
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function retryDelayMs(attempt: number): number {
+  return Math.min(250 * 2 ** attempt, 2_000);
+}
+
+function rateLimitKey(endpoint: string): "personal" | "bank" {
+  return endpoint.startsWith("/personal/") ? "personal" : "bank";
+}
+
+export function createMonobankHttpAdapter(
+  options: MonobankHttpAdapterOptions,
+): MonobankAdapter {
+  const token = options.token.trim();
+  const baseUrl = normalizeMonobankBaseUrl(options.baseUrl);
+  const fetchImpl = options.fetch ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const maxRetries = options.maxRetries ?? 2;
+  const userAgent = options.userAgent ?? "mono-ledger-sync";
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? defaultSleep;
+  const nextRequestAt = new Map<string, number>();
+
+  if (!token) {
+    throw new MonobankValidationError("token", "a non-empty string");
+  }
+
+  async function waitForRateLimit(endpoint: string): Promise<void> {
+    const key = rateLimitKey(endpoint);
+    const scheduledAt = nextRequestAt.get(key) ?? 0;
+    const waitMs = scheduledAt - now();
+
+    if (waitMs > 0) {
+      await sleep(waitMs);
+    }
+
+    if (key === "personal") {
+      nextRequestAt.set(key, now() + 60_000);
+    }
+  }
+
+  async function request(endpoint: string, init: RequestInit = {}) {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      await waitForRateLimit(endpoint);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, timeoutMs);
+
+      try {
+        const response = await fetchImpl(`${baseUrl}${endpoint}`, {
+          ...init,
+          signal: init.signal ?? controller.signal,
+          headers: {
+            "X-Token": token,
+            accept: "application/json",
+            "user-agent": userAgent,
+            ...init.headers,
+          },
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          const apiError = await parseErrorResponse(response, endpoint, token);
+
+          if (
+            attempt < maxRetries &&
+            (response.status === 429 || response.status >= 500)
+          ) {
+            await sleep(
+              apiError.response.retryAfterSeconds
+                ? apiError.response.retryAfterSeconds * 1_000
+                : retryDelayMs(attempt),
+            );
+            continue;
+          }
+
+          throw apiError;
+        }
+
+        return response;
+      } catch (error) {
+        clearTimeout(timeout);
+        lastError = error;
+
+        if (error instanceof MonobankApiError || attempt >= maxRetries) {
+          throw error;
+        }
+
+        await sleep(retryDelayMs(attempt));
+      }
+    }
+
+    throw lastError;
+  }
+
+  async function requestJson(endpoint: string, init: RequestInit = {}) {
+    const response = await request(endpoint, init);
+
+    if (response.status === 204) {
+      return undefined;
+    }
+
+    return response.json();
+  }
+
+  return {
+    async getClientInfo() {
+      const body = await requestJson("/personal/client-info");
+
+      assertMonobankClientInfo(body, "monobank:/personal/client-info");
+
+      return body;
+    },
+    async getStatement(window) {
+      const account = encodeURIComponent(window.accountId);
+      const from = encodeURIComponent(String(window.from));
+      const to = encodeURIComponent(String(window.to));
+      const body = await requestJson(
+        `/personal/statement/${account}/${from}/${to}`,
+      );
+
+      assertMonobankStatementItems(body, "monobank:/personal/statement");
+
+      return body;
+    },
+    async getCurrency() {
+      const body = await requestJson("/bank/currency");
+
+      assertMonobankCurrencyRates(body, "monobank:/bank/currency");
+
+      return body;
+    },
+    async setWebhook(url) {
+      await request("/personal/webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          webHookUrl: url,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    },
+  };
 }

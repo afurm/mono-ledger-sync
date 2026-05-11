@@ -12,15 +12,59 @@ export interface AccountBalance {
   creditLimit?: number;
 }
 
+export interface LedgerAccount {
+  id: string;
+  type: string;
+  currencyCode: number;
+  balance: number;
+  creditLimit: number;
+  maskedPan?: readonly string[];
+  updatedAt: string;
+}
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
   time: number;
   description: string;
   amount: number;
+  operationAmount?: number;
   currencyCode: number;
   categoryId?: string;
+  categoryName?: string;
+  merchantName?: string;
+  hold?: boolean;
+  balance?: number;
   rawStatementItemId: string;
+}
+
+export interface LedgerEntryQuery {
+  profile: string;
+  accountId?: string;
+  categoryId?: string;
+  search?: string;
+  from?: number;
+  to?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface LedgerEntryPage {
+  entries: readonly LedgerEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface LedgerSummary {
+  profile: string;
+  accounts: number;
+  ledgerEntries: number;
+  income: number;
+  expenses: number;
+  net: number;
+  currencies: readonly number[];
+  lastSyncedAt?: string;
 }
 
 export interface SyncCursor {
@@ -43,6 +87,22 @@ export interface SyncRun {
   itemsInserted: number;
   itemsUpdated: number;
   itemsSkipped: number;
+}
+
+export interface LedgerWriteStats {
+  inserted: number;
+  updated: number;
+  skipped: number;
+}
+
+export interface StoredWebhookEvent {
+  id: string;
+  profile: string;
+  accountId: string;
+  type: string;
+  statementItemId?: string;
+  receivedAt: string;
+  processedAt?: string;
 }
 
 export interface LedgerDbTransaction {

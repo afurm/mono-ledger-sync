@@ -10,7 +10,9 @@ Local-first TypeScript app for syncing Monobank transactions into a private pers
 
 ## Status
 
-This first public package is a foundation release. It includes package metadata, a strict TypeScript build, a small CLI launcher, local API boundaries, docs, and CI. Live Monobank synchronization, SQLite storage, exports, and the Vite local web UI are planned but not implemented in this release.
+This package now includes a fixture-first local ledger loop: a Fastify local app, SQLite-backed storage, fixture sync, a typed Monobank HTTP adapter, ledger queries, webhook hint recording, CSV/JSON exports, and a compact browser UI. Fixture mode is the default so the app works without network access or banking credentials.
+
+Live Monobank sync is available through the same adapter boundary when `MONOBANK_TOKEN` is present. The first production hardening pass should still focus on secure token storage, richer category rules, and packaged Vite UI assets.
 
 ## Goals
 
@@ -28,11 +30,37 @@ npm install -g mono-ledger-sync
 ## Usage
 
 ```sh
+mono-ledger-sync
 mono-ledger-sync init --source fixture
+mono-ledger-sync sync --source fixture
+mono-ledger-sync sync run --source fixture --dry-run
+mono-ledger-sync sync run --source fixture --account fixture-account-uah-main --from 1775001600 --to 1777593599 --slice 1000000
+mono-ledger-sync export --format csv
+mono-ledger-sync export --format jsonl --account fixture-account-uah-main
+mono-ledger-sync export --preset accountant-handoff
+mono-ledger-sync data path
+mono-ledger-sync db backup
+mono-ledger-sync db export
+mono-ledger-sync db restore --from ~/.mono-ledger-sync/exports/default-2026-05-11T10-00-00Z.sqlite --yes
+mono-ledger-sync db inspect
+mono-ledger-sync db compact
+mono-ledger-sync data delete --yes
+mono-ledger-sync auth status --source fixture
+mono-ledger-sync auth test --source fixture
+mono-ledger-sync doctor
+mono-ledger-sync serve --source fixture
 mono-ledger-sync version
 ```
 
-The current `init` command prints the local sync plan that later commands will execute against.
+Running `mono-ledger-sync` without a command starts the local browser app. `sync run` writes Monobank-shaped data into the local SQLite ledger, `export` prints CSV, JSON, JSONL, or journal-style CSV from the active local database, `data path` shows where local files live, `db backup` creates a timestamped SQLite backup, `db export` creates a portable SQLite copy without secrets, `db restore --from <path> --yes` restores a local database copy, `db inspect` checks migrations and SQLite integrity, `db compact` runs SQLite vacuum, `data delete --yes` removes the local profile database files, `auth status` and `auth test` validate the selected source without revealing tokens, and `doctor` checks the local setup without printing secrets.
+
+Export presets are available for `accountant-handoff`, `monthly-personal-finance`, `bookkeeping`, `budget-analysis`, and `raw-transaction-archive`. Export file contents are deterministic for the same database state and filters so users can diff or version their own local data.
+
+For live personal Monobank sync, keep the token in the environment for the current shell session:
+
+```sh
+MONOBANK_TOKEN=... mono-ledger-sync sync --source monobank
+```
 
 ## Library API
 
@@ -49,9 +77,15 @@ const plan = createSyncPlan({
 
 - No hosted token relay.
 - No default cloud storage.
+- No cloud account is required for fixture-backed setup, local browsing, local backups, or local exports.
 - Personal API tokens should be stored in OS secure storage once live sync is implemented.
+- Use personal Monobank API tokens only for your own data on your own machine; do not use this project as a hosted or shared service for other people's banking data.
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
+
+## Disclaimer
+
+This project is a local data ownership tool, not financial, tax, accounting, or legal advice. Verify exported data before making financial decisions or sending records to an accountant.
 
 ## Development
 
@@ -60,17 +94,19 @@ npm install
 npm run dev
 npm run typecheck
 npm test
+npm run coverage
 npm run format
 ```
 
 `npm run dev` starts the local Fastify app server against sanitized fixture data
-on `http://127.0.0.1:3000`. The current foundation build exposes a local
-fixture overview page at `/`, plus JSON endpoints at `/api/health`,
-`/api/fixtures/summary`, `/api/fixtures/client-info`, and
-`/api/fixtures/statements`; the Vite web UI is planned but not implemented yet.
+on `http://127.0.0.1:3000`. The app exposes the browser UI at `/`, health and
+configuration endpoints, fixture endpoints, ledger summary/account/transaction
+endpoints, sync run endpoints, webhook hint ingestion, and CSV/JSON/JSONL exports.
 Use `npm run dev -- --port 3001` if port 3000 is already in use.
 
 Release automation is documented in [docs/release.md](docs/release.md).
+Common local workflows are documented in
+[examples/sample-workflows](examples/sample-workflows).
 
 ## License
 
