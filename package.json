@@ -1,7 +1,7 @@
 {
   "name": "mono-ledger-sync",
   "version": "0.1.1",
-  "description": "Local-first TypeScript CLI for syncing Monobank transactions into a private personal finance ledger.",
+  "description": "Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.",
   "type": "module",
   "bin": {
     "mono-ledger-sync": "dist/cli.js"
@@ -12,6 +12,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./exports": {
+      "types": "./dist/exports/index.d.ts",
+      "import": "./dist/exports/index.js"
+    },
+    "./monobank": {
+      "types": "./dist/monobank/index.d.ts",
+      "import": "./dist/monobank/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite/index.d.ts",
+      "import": "./dist/sqlite/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage/index.d.ts",
+      "import": "./dist/storage/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js"
     }
   },
   "files": [
@@ -66,5 +94,8 @@
     "@types/node": "^20.19.25",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "fastify": "^5.8.5"
   }
 }
