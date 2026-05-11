@@ -10,6 +10,8 @@ Status: Accepted
 
 The main product experience should feel like a local personal finance app, not a developer-only command line tool. Users should be able to install it, run it locally, and land in a browser-based UI for setup, sync, review, reporting, and exports.
 
+The product is not an MCP server, agent tool, or integration layer. It should be built and evaluated as a real end-user finance product with a local app experience.
+
 The Monobank personal API is enough for the first product slice: account discovery, statement pulls, currency rates, and personal webhook registration. Provider, corporate, and acquiring APIs have different authentication and trust requirements, so they should not shape the MVP.
 
 ## Decision
@@ -38,6 +40,7 @@ Deferred scope:
 - Multi-user team workflows.
 - Required cloud sync.
 - Public plugin systems.
+- MCP server, agent-tool, or ChatGPT app surfaces.
 - Native desktop or mobile apps.
 
 ## Consequences
