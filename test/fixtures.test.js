@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -11,7 +12,10 @@ import {
   assertMonobankErrorResponse,
   assertMonobankPersonalWebhookEvent,
   assertMonobankStatementItems,
+  bundledMonobankFixturesDir,
+  createBundledFixtureMonobankAdapter,
   createFixtureMonobankAdapter,
+  loadMonobankFixtureSet,
 } from "../dist/monobank/index.js";
 
 const repoRoot = path.resolve(
@@ -163,6 +167,87 @@ test("fixture validation reports the failing field path", () => {
       return true;
     },
   );
+});
+
+test("loads bundled fixtures into a validated fixture set", async () => {
+  const fixtures = await loadMonobankFixtureSet();
+
+  assert.equal(fixtures.clientInfo.clientId, "fixture-client-primary");
+  assert.equal(fixtures.currencyRates.length, 3);
+  assert.equal(fixtures.statements["fixture-account-uah-main"].length, 5);
+  assert.deepEqual(fixtures.statements["fixture-account-empty"], []);
+  assert.equal(fixtures.webhookEvents.statementItem.type, "StatementItem");
+  assert.equal(fixtures.errors.rateLimit.statusCode, 429);
+});
+
+test("creates a bundled fixture adapter without caller file reads", async () => {
+  const adapter = await createBundledFixtureMonobankAdapter();
+  const clientInfo = await adapter.getClientInfo();
+  const statement = await adapter.getStatement({
+    accountId: "fixture-account-uah-main",
+    from: 1775001600,
+    to: 1777593599,
+  });
+
+  assert.equal(clientInfo.accounts.length, 2);
+  assert.ok(
+    statement.some((item) => item.id === "fixture-stmt-2026-04-01-salary"),
+  );
+});
+
+test("fixture loader reports invalid bundled fields", async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-fixtures-"));
+  const tempFixturesDir = path.join(tempRoot, "monobank");
+
+  try {
+    await cp(bundledMonobankFixturesDir, tempFixturesDir, {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(tempFixturesDir, "statements", "uah-main-2026-04.json"),
+      JSON.stringify(
+        [
+          {
+            id: "fixture-invalid-statement",
+            time: 1775031300,
+            description: "Invalid local fixture",
+            mcc: 4829,
+            originalMcc: 4829,
+            amount: -1000,
+            operationAmount: -1000,
+            currencyCode: 980,
+            commissionRate: 0,
+            cashbackAmount: 0,
+            balance: 100000,
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    await assert.rejects(
+      () => loadMonobankFixtureSet({ fixturesDir: tempFixturesDir }),
+      (error) => {
+        assert.ok(error instanceof MonobankValidationError);
+        assert.equal(
+          error.message,
+          "fixtures/statements/uah-main-2026-04.json[0].hold must be a boolean",
+        );
+        assert.equal(
+          error.path,
+          "fixtures/statements/uah-main-2026-04.json[0].hold",
+        );
+
+        return true;
+      },
+    );
+  } finally {
+    await rm(tempRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
 });
 
 test("fixture adapter serves offline client, currency, and statement data", async () => {

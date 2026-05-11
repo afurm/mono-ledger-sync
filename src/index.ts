@@ -16,13 +16,17 @@ export {
   type SyncRun,
 } from "./storage/index.js";
 export {
+  bundledMonobankFixturesDir,
+  createBundledFixtureMonobankAdapter,
   createFixtureMonobankAdapter,
+  loadMonobankFixtureSet,
   type MonobankAccount,
   type MonobankAdapter,
   type MonobankClientInfo,
   type MonobankCurrencyRate,
   type MonobankErrorResponse,
   type MonobankFixtureSet,
+  type MonobankFixtureLoaderOptions,
   type MonobankJar,
   type MonobankManagedClient,
   type MonobankPersonalWebhookEvent,
