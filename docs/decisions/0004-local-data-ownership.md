@@ -10,7 +10,7 @@ Users choosing this project should be able to keep banking tokens, transaction h
 
 ## Decision
 
-The local machine is the source of truth for MVP data.
+The local machine is the source of truth for product data.
 
 The project will not operate a hosted token relay or hosted financial data store. Tokens should be stored in OS secure storage by default once live sync is implemented. Local databases, generated exports, and backups should remain user-controlled files.
 

@@ -6,7 +6,7 @@ Status: Accepted
 
 ## Context
 
-The local web UI is the primary MVP product surface. It needs to feel like a focused personal finance workspace: fast to scan, useful with dense financial data, and clearly local-first. The reference direction uses a white workspace, dark ink text, restrained slate borders, Monobank-green primary actions, soft green selected states, and compact tables/cards.
+The local web UI is the primary product surface. It needs to feel like a focused personal finance workspace: fast to scan, useful with dense financial data, and clearly local-first. The reference direction uses a white workspace, dark ink text, restrained slate borders, Monobank-green primary actions, soft green selected states, and compact tables/cards.
 
 ## Decision
 

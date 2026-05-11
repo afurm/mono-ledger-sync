@@ -18,7 +18,7 @@ When a personal webhook event arrives, the local receiver should acknowledge it 
 
 Webhook ingestion must be idempotent. Duplicate, delayed, or incomplete webhook events must not create duplicate ledger entries or advance sync cursors as if a statement pull succeeded.
 
-Acquiring webhook signature validation belongs to a future acquiring adapter. It should not be applied to the personal MVP unless Monobank documents a compatible personal webhook signature model.
+Acquiring webhook signature validation belongs to a future acquiring adapter. It should not be applied to the personal product surface unless Monobank documents a compatible personal webhook signature model.
 
 ## Consequences
 

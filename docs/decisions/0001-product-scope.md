@@ -12,15 +12,15 @@ The main product experience should feel like a local personal finance app, not a
 
 The product is not an MCP server, agent tool, or integration layer. It should be built and evaluated as a real end-user finance product with a local app experience.
 
-The Monobank personal API is enough for the first product slice: account discovery, statement pulls, currency rates, and personal webhook registration. Provider, corporate, and acquiring APIs have different authentication and trust requirements, so they should not shape the MVP.
+The Monobank personal API is enough for the first production release: account discovery, statement pulls, currency rates, and personal webhook registration. Provider, corporate, and acquiring APIs have different authentication and trust requirements, so they should not shape the initial product scope.
 
 ## Decision
 
-The MVP is a Vite-powered local web app for a user's own Monobank account. The installed command should start the local app server, open the browser UI, and keep all token and ledger data on the user's machine.
+The product is a Vite-powered local web app for a user's own Monobank account. The installed command should start the local app server, open the browser UI, and keep all token and ledger data on the user's machine.
 
 The CLI remains part of the package, but it is a launcher and automation surface, not the primary product surface. CLI commands should support setup, diagnostics, scripted sync, exports, and development workflows while sharing the same core services as the web UI.
 
-MVP scope:
+Initial production scope:
 
 - Fixture-backed setup that works without a token or network access.
 - Vite web UI that runs locally after install or during local development.

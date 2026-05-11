@@ -10,7 +10,7 @@ The project needs durable local storage that can be inspected, backed up, migrat
 
 ## Decision
 
-SQLite is the canonical MVP storage engine.
+SQLite is the canonical production storage engine.
 
 The storage layer will expose a `LedgerDb` boundary instead of letting the Vite web app, local app server, CLI, adapter, or export code write directly to SQLite. The database model will keep raw Monobank-shaped payloads separate from normalized ledger records.
 
@@ -20,4 +20,4 @@ Tokens should not be stored in SQLite by default. They should live in OS secure 
 
 ## Consequences
 
-SQLite keeps the MVP portable and local-first. Users can back up a single database file, inspect it with standard tools, and work offline. The tradeoff is that concurrent write behavior must stay simple and explicit, especially when the local web app and CLI commands can run at the same time.
+SQLite keeps the product portable and local-first. Users can back up a single database file, inspect it with standard tools, and work offline. The tradeoff is that concurrent write behavior must stay simple and explicit, especially when the local web app and CLI commands can run at the same time.
