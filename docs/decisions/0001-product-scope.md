@@ -24,6 +24,7 @@ Initial production scope:
 
 - Fixture-backed setup that works without a token or network access.
 - Vite web UI that runs locally after install or during local development.
+- Fastify local API server that powers the UI without becoming a public API product.
 - shadcn/ui component system with the white, ink, slate, and Monobank-green app theme defined in [0006 UI system and theme](0006-ui-system-and-theme.md).
 - App pages for onboarding, dashboard, transactions, categories, budgets, recurring payments, reports, exports, and settings.
 - Personal Monobank account discovery.
