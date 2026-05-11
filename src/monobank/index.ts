@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 export interface MonobankAccount {
   id: string;
   sendId?: string;
@@ -103,7 +107,17 @@ export interface MonobankFixtureSet {
   clientInfo: MonobankClientInfo;
   currencyRates: readonly MonobankCurrencyRate[];
   statements: Readonly<Record<string, readonly MonobankStatementItem[]>>;
+  webhookEvents?: Readonly<Record<string, MonobankPersonalWebhookEvent>>;
+  errors?: Readonly<Record<string, MonobankErrorResponse>>;
 }
+
+export interface MonobankFixtureLoaderOptions {
+  fixturesDir?: string;
+}
+
+export const bundledMonobankFixturesDir = fileURLToPath(
+  new URL("../../fixtures/monobank", import.meta.url),
+);
 
 export class MonobankValidationError extends Error {
   constructor(
@@ -348,6 +362,101 @@ export function assertMonobankErrorResponse(
   assertOptionalNumber(value.retryAfterSeconds, `${path}.retryAfterSeconds`);
 }
 
+async function readFixtureJson(
+  fixturesDir: string,
+  relativePath: string,
+): Promise<unknown> {
+  const filePath = path.join(fixturesDir, ...relativePath.split("/"));
+  const content = await readFile(filePath, "utf8");
+
+  return JSON.parse(content);
+}
+
+export async function loadMonobankFixtureSet(
+  options: MonobankFixtureLoaderOptions = {},
+): Promise<MonobankFixtureSet> {
+  const fixturesDir = options.fixturesDir ?? bundledMonobankFixturesDir;
+  const clientInfo = await readFixtureJson(fixturesDir, "client-info.json");
+  const currencyRates = await readFixtureJson(
+    fixturesDir,
+    "currency-rates.json",
+  );
+  const uahMainStatement = await readFixtureJson(
+    fixturesDir,
+    "statements/uah-main-2026-04.json",
+  );
+  const eurSavingsStatement = await readFixtureJson(
+    fixturesDir,
+    "statements/eur-savings-2026-04.json",
+  );
+  const emptyStatement = await readFixtureJson(
+    fixturesDir,
+    "statements/empty.json",
+  );
+  const statementItemWebhook = await readFixtureJson(
+    fixturesDir,
+    "webhooks/statement-item.json",
+  );
+  const invalidTokenError = await readFixtureJson(
+    fixturesDir,
+    "errors/invalid-token.json",
+  );
+  const rateLimitError = await readFixtureJson(
+    fixturesDir,
+    "errors/rate-limit.json",
+  );
+  const serverError = await readFixtureJson(
+    fixturesDir,
+    "errors/server-error.json",
+  );
+
+  assertMonobankClientInfo(clientInfo, "fixtures/client-info.json");
+  assertMonobankCurrencyRates(currencyRates, "fixtures/currency-rates.json");
+  assertMonobankStatementItems(
+    uahMainStatement,
+    "fixtures/statements/uah-main-2026-04.json",
+  );
+  assertMonobankStatementItems(
+    eurSavingsStatement,
+    "fixtures/statements/eur-savings-2026-04.json",
+  );
+  assertMonobankStatementItems(
+    emptyStatement,
+    "fixtures/statements/empty.json",
+  );
+  assertMonobankPersonalWebhookEvent(
+    statementItemWebhook,
+    "fixtures/webhooks/statement-item.json",
+  );
+  assertMonobankErrorResponse(
+    invalidTokenError,
+    "fixtures/errors/invalid-token.json",
+  );
+  assertMonobankErrorResponse(
+    rateLimitError,
+    "fixtures/errors/rate-limit.json",
+  );
+  assertMonobankErrorResponse(serverError, "fixtures/errors/server-error.json");
+
+  return {
+    clientInfo,
+    currencyRates,
+    statements: {
+      "fixture-account-uah-main": uahMainStatement,
+      "fixture-account-eur-savings": eurSavingsStatement,
+      "fixture-account-empty": emptyStatement,
+    },
+    webhookEvents: {
+      statementItem: statementItemWebhook,
+    },
+    errors: {
+      invalidToken: invalidTokenError,
+      rateLimit: rateLimitError,
+      serverError,
+    },
+  };
+}
+
 export function createFixtureMonobankAdapter(
   fixtures: MonobankFixtureSet,
 ): MonobankAdapter {
@@ -369,4 +478,10 @@ export function createFixtureMonobankAdapter(
       return undefined;
     },
   };
+}
+
+export async function createBundledFixtureMonobankAdapter(
+  options: MonobankFixtureLoaderOptions = {},
+): Promise<MonobankAdapter> {
+  return createFixtureMonobankAdapter(await loadMonobankFixtureSet(options));
 }
