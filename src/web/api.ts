@@ -62,6 +62,20 @@ export interface LedgerEntryPage {
   offset: number;
 }
 
+export interface LedgerTransactionFilters {
+  accountId?: string;
+  categoryId?: string;
+  merchantName?: string;
+  status?: "hold" | "posted";
+  amountMin?: number;
+  amountMax?: number;
+  search?: string;
+  from?: number;
+  to?: number;
+  limit?: number;
+  offset?: number;
+}
+
 export interface SyncRun {
   id: string;
   profile: string;
@@ -113,6 +127,30 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function transactionQueryString(filters: LedgerTransactionFilters): string {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined || value === "") {
+      continue;
+    }
+
+    params.set(key, String(value));
+  }
+
+  return params.toString();
+}
+
+export async function loadLedgerTransactions(
+  filters: LedgerTransactionFilters = {},
+): Promise<LedgerEntryPage> {
+  const queryString = transactionQueryString(filters);
+
+  return requestJson<LedgerEntryPage>(
+    `/api/ledger/transactions${queryString ? `?${queryString}` : ""}`,
+  );
+}
+
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
   const [health, config, summary, accounts, transactions, syncRuns] =
     await Promise.all([
@@ -120,7 +158,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<LocalApiAppConfig>("/api/app/config"),
       requestJson<LedgerSummary>("/api/ledger/summary"),
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
-      requestJson<LedgerEntryPage>("/api/ledger/transactions?limit=8"),
+      loadLedgerTransactions({ limit: 8 }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
     ]);
 

@@ -446,6 +446,29 @@ function buildLedgerEntryWhereClause(query: LedgerEntryQuery): {
     params.categoryId = query.categoryId;
   }
 
+  if (query.merchantName?.trim()) {
+    clauses.push("merchant_name LIKE @merchantName");
+    params.merchantName = `%${query.merchantName.trim()}%`;
+  }
+
+  if (query.status === "hold") {
+    clauses.push("hold = 1");
+  }
+
+  if (query.status === "posted") {
+    clauses.push("hold = 0");
+  }
+
+  if (query.amountMin !== undefined) {
+    clauses.push("amount >= @amountMin");
+    params.amountMin = query.amountMin;
+  }
+
+  if (query.amountMax !== undefined) {
+    clauses.push("amount <= @amountMax");
+    params.amountMax = query.amountMax;
+  }
+
   if (query.from !== undefined) {
     clauses.push("time >= @from");
     params.from = query.from;
