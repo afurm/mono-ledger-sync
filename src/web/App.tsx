@@ -96,6 +96,7 @@ import {
   type LedgerTransactionSortDirection,
   type LedgerTransactionSortField,
   type LocalAppSnapshot,
+  type SyncRun,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   runFixtureSync,
@@ -527,6 +528,192 @@ function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
   return lastSyncedAt
     ? `Updated ${formatDateTime(lastSyncedAt)}`
     : "Waiting for first sync";
+}
+
+function formatSyncRunDuration(run: SyncRun): string {
+  if (!run.finishedAt) {
+    return run.status === "running" ? "Running" : "Not finished";
+  }
+
+  const startedAt = Date.parse(run.startedAt);
+  const finishedAt = Date.parse(run.finishedAt);
+
+  if (
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(finishedAt) ||
+    finishedAt < startedAt
+  ) {
+    return "Unknown";
+  }
+
+  const totalSeconds = Math.round((finishedAt - startedAt) / 1000);
+
+  if (totalSeconds < 1) {
+    return "<1 sec";
+  }
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds} sec`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function SyncRunStats({ run }: { run: SyncRun }) {
+  const stats = [
+    { label: "Seen", value: run.itemsSeen },
+    { label: "Inserted", value: run.itemsInserted },
+    { label: "Updated", value: run.itemsUpdated },
+    { label: "Skipped", value: run.itemsSkipped },
+  ];
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-4">
+      {stats.map((stat) => (
+        <div className="rounded-lg border bg-muted/30 p-2" key={stat.label}>
+          <p className="text-xs text-muted-foreground">{stat.label}</p>
+          <p className="text-sm font-semibold">{stat.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecentSyncRunsCard({
+  runs,
+  onRouteChange,
+  limit = 3,
+}: {
+  runs: readonly SyncRun[];
+  onRouteChange: (routeId: RouteId) => void;
+  limit?: number;
+}) {
+  const visibleRuns = runs.slice(0, limit);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Recent sync jobs</CardTitle>
+        <CardDescription>
+          Latest local sync activity with transaction counts and duration.
+        </CardDescription>
+        <CardAction>
+          <Button
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() => onRouteChange("logs")}
+          >
+            <FileClockIcon data-icon="inline-start" />
+            Logs
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {visibleRuns.length === 0 ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>No sync runs recorded</AlertTitle>
+            <AlertDescription>
+              Run fixture sync from the top bar to create the first local run.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          visibleRuns.map((run) => (
+            <div
+              className="flex flex-col gap-3 rounded-lg border p-3"
+              key={run.id}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{run.id}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTime(run.startedAt)} /{" "}
+                    {formatSyncRunDuration(run)}
+                  </p>
+                </div>
+                <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+              </div>
+              <SyncRunStats run={run} />
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
+  if (runs.length === 0) {
+    return (
+      <Alert>
+        <AlertCircleIcon />
+        <AlertTitle>No sync runs recorded</AlertTitle>
+        <AlertDescription>
+          Run fixture sync from the top bar to create the first local run.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Run</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Started</TableHead>
+            <TableHead>Duration</TableHead>
+            <TableHead>Transactions</TableHead>
+            <TableHead>Source</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {runs.slice(0, 10).map((run) => (
+            <TableRow key={run.id}>
+              <TableCell>
+                <div className="max-w-52">
+                  <p className="truncate font-mono text-xs">{run.id}</p>
+                  <p className="text-xs text-muted-foreground">{run.profile}</p>
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                {formatDateTime(run.startedAt)}
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                {formatSyncRunDuration(run)}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge variant="outline">{run.itemsSeen} seen</Badge>
+                  <Badge variant="outline">{run.itemsInserted} inserted</Badge>
+                  <Badge variant="outline">{run.itemsUpdated} updated</Badge>
+                  <Badge variant="outline">{run.itemsSkipped} skipped</Badge>
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge variant="secondary">{run.source}</Badge>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
 }
 
 function AppSidebar({
@@ -1093,9 +1280,11 @@ function TransactionTable({
 function OverviewRoute({
   snapshot,
   loading,
+  onRouteChange,
 }: {
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
+  onRouteChange: (routeId: RouteId) => void;
 }) {
   if (loading && !snapshot) {
     return <LoadingDashboard />;
@@ -1213,36 +1402,10 @@ function OverviewRoute({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Sync state</CardTitle>
-            <CardDescription>
-              Current source, last successful sync, and fixture coverage.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted-foreground">Source</span>
-              <Badge variant="secondary">{snapshot.config.source}</Badge>
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted-foreground">Last synced</span>
-              <span className="text-sm font-medium">
-                {formatDateTime(snapshot.summary.lastSyncedAt)}
-              </span>
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted-foreground">
-                Fixture rows
-              </span>
-              <span className="text-sm font-medium">
-                {snapshot.fixtures?.statementItems ?? 0}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        <RecentSyncRunsCard
+          runs={snapshot.syncRuns}
+          onRouteChange={onRouteChange}
+        />
       </div>
     </div>
   );
@@ -1840,7 +2003,13 @@ function TransactionsRoute({
   );
 }
 
-function SyncRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+function SyncRoute({
+  snapshot,
+  onRouteChange,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  onRouteChange: (routeId: RouteId) => void;
+}) {
   return (
     <Tabs defaultValue="runs">
       <TabsList>
@@ -1855,40 +2024,20 @@ function SyncRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             <CardDescription>
               Local execution history from the SQLite sync_runs table.
             </CardDescription>
+            <CardAction>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onRouteChange("logs")}
+              >
+                <FileClockIcon data-icon="inline-start" />
+                Logs
+              </Button>
+            </CardAction>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {(snapshot?.syncRuns.length ?? 0) === 0 ? (
-              <Alert>
-                <AlertCircleIcon />
-                <AlertTitle>No sync runs recorded</AlertTitle>
-                <AlertDescription>
-                  Run fixture sync from the top bar to create the first local
-                  run.
-                </AlertDescription>
-              </Alert>
-            ) : (
-              snapshot?.syncRuns.slice(0, 6).map((run) => (
-                <div
-                  className="flex items-center justify-between gap-4 rounded-lg border p-3"
-                  key={run.id}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{run.id}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDateTime(run.startedAt)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-muted-foreground">
-                      {run.itemsSeen} seen
-                    </span>
-                    <Badge variant={statusVariant(run.status)}>
-                      {run.status}
-                    </Badge>
-                  </div>
-                </div>
-              ))
-            )}
+          <CardContent>
+            <SyncRunsTable runs={snapshot?.syncRuns ?? []} />
           </CardContent>
         </Card>
       </TabsContent>
@@ -2081,18 +2230,26 @@ function RouteContent({
   activeRoute,
   snapshot,
   loading,
+  onRouteChange,
 }: {
   activeRoute: RouteId;
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
+  onRouteChange: (routeId: RouteId) => void;
 }) {
   switch (activeRoute) {
     case "overview":
-      return <OverviewRoute loading={loading} snapshot={snapshot} />;
+      return (
+        <OverviewRoute
+          loading={loading}
+          snapshot={snapshot}
+          onRouteChange={onRouteChange}
+        />
+      );
     case "transactions":
       return <TransactionsRoute snapshot={snapshot} />;
     case "sync":
-      return <SyncRoute snapshot={snapshot} />;
+      return <SyncRoute snapshot={snapshot} onRouteChange={onRouteChange} />;
     case "accounts":
       return <AccountsRoute snapshot={snapshot} />;
     case "exports":
@@ -2253,6 +2410,7 @@ export default function App() {
             <RouteContent
               activeRoute={activeRoute}
               loading={loading}
+              onRouteChange={onRouteChange}
               snapshot={snapshot}
             />
 
