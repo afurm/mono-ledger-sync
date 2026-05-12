@@ -102,6 +102,16 @@ export interface SyncRun {
   itemsSkipped: number;
 }
 
+export interface WebhookEvent {
+  id: string;
+  profile: string;
+  accountId: string;
+  type: string;
+  statementItemId?: string;
+  receivedAt: string;
+  processedAt?: string;
+}
+
 export interface LocalApiFixtureSummary {
   source: "fixture";
   profile: string;
@@ -121,6 +131,7 @@ export interface LocalAppSnapshot {
   accounts: readonly LedgerAccount[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
+  webhookEvents: readonly WebhookEvent[];
   fixtures?: LocalApiFixtureSummary;
 }
 
@@ -165,15 +176,23 @@ export async function loadLedgerTransactions(
 }
 
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
-  const [health, config, summary, accounts, transactions, syncRuns] =
-    await Promise.all([
-      requestJson<LocalApiHealth>("/api/health"),
-      requestJson<LocalApiAppConfig>("/api/app/config"),
-      requestJson<LedgerSummary>("/api/ledger/summary"),
-      requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
-      loadLedgerTransactions({ limit: 8 }),
-      requestJson<readonly SyncRun[]>("/api/sync/runs"),
-    ]);
+  const [
+    health,
+    config,
+    summary,
+    accounts,
+    transactions,
+    syncRuns,
+    webhookEvents,
+  ] = await Promise.all([
+    requestJson<LocalApiHealth>("/api/health"),
+    requestJson<LocalApiAppConfig>("/api/app/config"),
+    requestJson<LedgerSummary>("/api/ledger/summary"),
+    requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
+    loadLedgerTransactions({ limit: 8 }),
+    requestJson<readonly SyncRun[]>("/api/sync/runs"),
+    requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
+  ]);
 
   const fixtures =
     config.source === "fixture"
@@ -187,6 +206,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     accounts,
     transactions,
     syncRuns,
+    webhookEvents,
     ...(fixtures ? { fixtures } : {}),
   };
 }

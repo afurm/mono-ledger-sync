@@ -87,6 +87,10 @@ export interface SqliteLedgerDb extends LedgerDb {
   listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage>;
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
+  listWebhookEvents(
+    profile?: string,
+    limit?: number,
+  ): Promise<readonly StoredWebhookEvent[]>;
   recordWebhookEvent(
     event: MonobankPersonalWebhookEvent,
     receivedAt?: string,
@@ -142,6 +146,16 @@ interface SqliteSyncRunRow {
   items_inserted: number;
   items_updated: number;
   items_skipped: number;
+}
+
+interface SqliteWebhookEventRow {
+  id: string;
+  profile: string;
+  account_id: string;
+  type: string;
+  statement_item_id: string | null;
+  received_at: string;
+  processed_at: string | null;
 }
 
 interface SqliteSummaryRow {
@@ -427,6 +441,26 @@ function mapSyncRunRow(row: SqliteSyncRunRow): SyncRun {
   }
 
   return run;
+}
+
+function mapWebhookEventRow(row: SqliteWebhookEventRow): StoredWebhookEvent {
+  const event: StoredWebhookEvent = {
+    id: row.id,
+    profile: row.profile,
+    accountId: row.account_id,
+    type: row.type,
+    receivedAt: row.received_at,
+  };
+
+  if (row.statement_item_id !== null) {
+    event.statementItemId = row.statement_item_id;
+  }
+
+  if (row.processed_at !== null) {
+    event.processedAt = row.processed_at;
+  }
+
+  return event;
 }
 
 function ensureParentDirectory(filePath: string): void {
@@ -1002,6 +1036,27 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile, normalizeLimit(limit)) as SqliteSyncRunRow[];
 
     return rows.map(mapSyncRunRow);
+  }
+
+  async listWebhookEvents(
+    profile = this.profile,
+    limit = 20,
+  ): Promise<readonly StoredWebhookEvent[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id, profile, account_id, type, statement_item_id,
+            received_at, processed_at
+          FROM webhook_events
+          WHERE profile = ?
+          ORDER BY received_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(profile, normalizeLimit(limit)) as SqliteWebhookEventRow[];
+
+    return rows.map(mapWebhookEventRow);
   }
 
   async recordWebhookEvent(

@@ -473,7 +473,12 @@ test("local API validates query strings and webhook payloads", async () => {
           },
         }),
       });
+      const webhookEventsResponse = await server.inject({
+        method: "GET",
+        url: "/api/webhooks/events",
+      });
       const webhookBody = webhookResponse.json();
+      const webhookEventsBody = webhookEventsResponse.json();
 
       assert.equal(invalidLimitResponse.statusCode, 400);
       assert.match(invalidLimitResponse.body, /limit/);
@@ -502,6 +507,14 @@ test("local API validates query strings and webhook payloads", async () => {
         webhookBody.event.statementItemId,
         "fixture-webhook-validation-test",
       );
+      assert.equal(webhookEventsResponse.statusCode, 200);
+      assert.equal(webhookEventsBody.length, 1);
+      assert.equal(
+        webhookEventsBody[0].statementItemId,
+        "fixture-webhook-validation-test",
+      );
+      assert.equal(webhookEventsBody[0].accountId, "fixture-account-uah-main");
+      assert.equal(webhookEventsBody[0].type, "StatementItem");
       assert.equal(invalidWebhookResponse.statusCode, 400);
       assert.match(invalidWebhookResponse.body, /hold/);
     } finally {

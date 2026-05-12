@@ -118,6 +118,7 @@ import {
   type LedgerTransactionSortField,
   type LocalAppSnapshot,
   type SyncRun,
+  type WebhookEvent,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   runFixtureSync,
@@ -1038,6 +1039,130 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
               </span>
             </div>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function webhookDeliveryKey(event: WebhookEvent): string {
+  return `${event.accountId}:${event.statementItemId ?? event.id}`;
+}
+
+function webhookDeliveryStatus(event: WebhookEvent): string {
+  return event.processedAt ? "reconciled" : "pull required";
+}
+
+function webhookEventLabel(event: WebhookEvent): string {
+  return event.type === "StatementItem" ? "Statement item" : event.type;
+}
+
+function webhookDeliveryDestination(event: WebhookEvent): string {
+  return event.statementItemId ? "Statement pull queue" : "Local webhook inbox";
+}
+
+function webhookDeliveryAttemptCounts(
+  events: readonly WebhookEvent[],
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const event of events) {
+    const key = webhookDeliveryKey(event);
+
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function RecentWebhookDeliveriesCard({
+  events,
+  onRouteChange,
+  limit = 3,
+}: {
+  events: readonly WebhookEvent[];
+  onRouteChange: (routeId: RouteId) => void;
+  limit?: number;
+}) {
+  const visibleEvents = events.slice(0, limit);
+  const attemptCounts = webhookDeliveryAttemptCounts(events);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Latest webhook deliveries</CardTitle>
+        <CardDescription>
+          Local delivery hints waiting for statement pull reconciliation.
+        </CardDescription>
+        <CardAction>
+          <Button
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() => onRouteChange("sync")}
+          >
+            <FileClockIcon data-icon="inline-start" />
+            Webhooks
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {visibleEvents.length === 0 ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>No webhook deliveries recorded</AlertTitle>
+            <AlertDescription>
+              Monobank webhook events will appear here as local pull-required
+              hints.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          visibleEvents.map((event) => {
+            const attempts = attemptCounts.get(webhookDeliveryKey(event)) ?? 1;
+
+            return (
+              <div
+                className="flex flex-col gap-3 rounded-lg border p-3"
+                key={event.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {webhookEventLabel(event)}
+                    </p>
+                    <p className="truncate font-mono text-xs text-muted-foreground">
+                      {event.statementItemId ?? event.id}
+                    </p>
+                  </div>
+                  <Badge variant={event.processedAt ? "default" : "secondary"}>
+                    {webhookDeliveryStatus(event)}
+                  </Badge>
+                </div>
+                <div className="grid gap-2 text-xs sm:grid-cols-2">
+                  <div>
+                    <p className="text-muted-foreground">Source account</p>
+                    <p className="truncate font-medium">{event.accountId}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Local destination</p>
+                    <p className="font-medium">
+                      {webhookDeliveryDestination(event)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Attempts</p>
+                    <p className="font-medium">{attempts}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Received</p>
+                    <p className="font-medium">
+                      {formatDateTime(event.receivedAt)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })
         )}
       </CardContent>
     </Card>
@@ -2270,10 +2395,16 @@ function OverviewRoute({
           </CardContent>
         </Card>
 
-        <RecentSyncRunsCard
-          runs={snapshot.syncRuns}
-          onRouteChange={onRouteChange}
-        />
+        <div className="flex flex-col gap-4">
+          <RecentWebhookDeliveriesCard
+            events={snapshot.webhookEvents}
+            onRouteChange={onRouteChange}
+          />
+          <RecentSyncRunsCard
+            runs={snapshot.syncRuns}
+            onRouteChange={onRouteChange}
+          />
+        </div>
       </div>
     </div>
   );

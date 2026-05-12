@@ -420,6 +420,11 @@ const webhookEventResponseSchema = {
   },
 } as const;
 
+const webhookEventsResponseSchema = {
+  type: "array",
+  items: webhookEventResponseSchema,
+} as const;
+
 const webhookAcceptedResponseSchema = {
   type: "object",
   required: ["accepted", "pullRequired", "event"],
@@ -1539,6 +1544,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.db.listSyncRuns(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/webhooks/events`,
+    {
+      schema: {
+        response: {
+          200: webhookEventsResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly StoredWebhookEvent[]> => {
+      const services = await getServices();
+
+      return services.db.listWebhookEvents(services.profile, 20);
     },
   );
 
