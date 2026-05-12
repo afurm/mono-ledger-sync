@@ -887,7 +887,7 @@ function SyncHealthSegment({
   return (
     <div
       className={className}
-      style={{ height: `${Math.max(8, (value / max) * 100)}%` }}
+      style={{ height: `${Math.max(6, (value / max) * 100)}%` }}
     />
   );
 }
@@ -899,6 +899,12 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
     summary.totals.partial +
     summary.totals.failed +
     summary.totals.skipped;
+  const chartMax = Math.max(5, Math.ceil(summary.maxBucketTotal * 1.25));
+  const firstBucketLabel = summary.buckets[0]?.label ?? "";
+  const middleBucketLabel =
+    summary.buckets[Math.floor(summary.buckets.length / 2)]?.label ?? "";
+  const lastBucketLabel =
+    summary.buckets[summary.buckets.length - 1]?.label ?? "";
 
   return (
     <Card>
@@ -945,57 +951,73 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
           <div className="flex flex-col gap-3">
             <div
               aria-label="Last 30 days sync health"
-              className="flex h-32 items-end gap-1 rounded-lg border bg-muted/25 p-3"
+              className="rounded-lg border bg-muted/20 p-3"
               role="img"
             >
-              {summary.buckets.map((bucket, index) => {
-                const bucketTotal =
-                  bucket.success +
-                  bucket.partial +
-                  bucket.failed +
-                  bucket.skipped;
+              <div className="mb-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>Daily activity</span>
+                <span>Peak day: {summary.maxBucketTotal}</span>
+              </div>
+              <div
+                className="grid h-24 items-end gap-1.5"
+                style={{
+                  gridTemplateColumns: `repeat(${summary.buckets.length}, minmax(0, 1fr))`,
+                }}
+              >
+                {summary.buckets.map((bucket, index) => {
+                  const bucketTotal =
+                    bucket.success +
+                    bucket.partial +
+                    bucket.failed +
+                    bucket.skipped;
 
-                return (
-                  <div
-                    aria-label={`${bucket.label}: ${bucket.success} successful, ${bucket.partial} partial, ${bucket.failed} failed, ${bucket.skipped} skipped`}
-                    className="flex h-full min-w-0 flex-1 flex-col justify-end"
-                    key={bucket.key}
-                    title={`${bucket.label}: ${bucketTotal} total`}
-                  >
-                    <div className="flex h-full w-full flex-col justify-end overflow-hidden rounded-sm bg-background">
-                      {bucketTotal === 0 ? (
-                        <div className="h-1 bg-muted" />
-                      ) : (
-                        <>
-                          <SyncHealthSegment
-                            value={bucket.skipped}
-                            max={summary.maxBucketTotal}
-                            className="bg-slate-400"
-                          />
-                          <SyncHealthSegment
-                            value={bucket.failed}
-                            max={summary.maxBucketTotal}
-                            className="bg-destructive"
-                          />
-                          <SyncHealthSegment
-                            value={bucket.partial}
-                            max={summary.maxBucketTotal}
-                            className="bg-amber-500"
-                          />
-                          <SyncHealthSegment
-                            value={bucket.success}
-                            max={summary.maxBucketTotal}
-                            className="bg-emerald-600"
-                          />
-                        </>
-                      )}
+                  return (
+                    <div
+                      aria-label={`${bucket.label}: ${bucket.success} successful, ${bucket.partial} partial, ${bucket.failed} failed, ${bucket.skipped} skipped`}
+                      className="flex h-full min-w-0 flex-col items-center justify-end"
+                      key={bucket.key}
+                      title={`${bucket.label}: ${bucketTotal} total`}
+                    >
+                      <div className="flex h-full w-full max-w-4 flex-col justify-end overflow-hidden rounded-sm bg-background shadow-inner sm:max-w-5">
+                        {bucketTotal === 0 ? (
+                          <div className="h-1 rounded-sm bg-muted" />
+                        ) : (
+                          <>
+                            <SyncHealthSegment
+                              value={bucket.skipped}
+                              max={chartMax}
+                              className="bg-slate-400"
+                            />
+                            <SyncHealthSegment
+                              value={bucket.failed}
+                              max={chartMax}
+                              className="bg-destructive"
+                            />
+                            <SyncHealthSegment
+                              value={bucket.partial}
+                              max={chartMax}
+                              className="bg-amber-500"
+                            />
+                            <SyncHealthSegment
+                              value={bucket.success}
+                              max={chartMax}
+                              className="bg-emerald-600"
+                            />
+                          </>
+                        )}
+                      </div>
+                      <span className="sr-only">
+                        {index + 1} of {summary.buckets.length}
+                      </span>
                     </div>
-                    <span className="sr-only">
-                      {index + 1} of {summary.buckets.length}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+                <span>{firstBucketLabel}</span>
+                <span>{middleBucketLabel}</span>
+                <span>{lastBucketLabel}</span>
+              </div>
             </div>
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1">
