@@ -26,6 +26,7 @@ import {
   ShieldCheckIcon,
   SunIcon,
   UserRoundIcon,
+  WifiOffIcon,
 } from "lucide-react";
 
 import {
@@ -906,6 +907,40 @@ function StaleDataBanner({
           onClick={() => onRouteChange("sync")}
         >
           Sync controls
+        </Button>
+      </AlertAction>
+    </Alert>
+  );
+}
+
+function OfflineBrowsingBanner({
+  error,
+  snapshot,
+  loading,
+  onRefresh,
+}: {
+  error: string | undefined;
+  snapshot: LocalAppSnapshot | undefined;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  if (!error || !snapshot) {
+    return null;
+  }
+
+  return (
+    <Alert className="border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-900/70 dark:bg-sky-950/25 dark:text-sky-100">
+      <WifiOffIcon />
+      <AlertTitle>Browsing last local snapshot</AlertTitle>
+      <AlertDescription className="text-sky-900/85 dark:text-sky-100/85">
+        The local API did not respond: {error}. Existing ledger data for{" "}
+        {snapshot.config.profile} is still visible from the last successful
+        load.
+      </AlertDescription>
+      <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
+        <Button size="sm" type="button" disabled={loading} onClick={onRefresh}>
+          <RefreshCwIcon data-icon="inline-start" />
+          {loading ? "Refreshing" : "Retry API"}
         </Button>
       </AlertAction>
     </Alert>
@@ -2928,13 +2963,20 @@ export default function App() {
           </header>
 
           <main className="flex flex-1 flex-col gap-4 p-4 md:p-6">
-            {loadState.status === "error" && (
+            {loadState.status === "error" && !snapshot && (
               <Alert variant="destructive">
                 <AlertCircleIcon />
                 <AlertTitle>Local API unavailable</AlertTitle>
                 <AlertDescription>{loadState.error}</AlertDescription>
               </Alert>
             )}
+
+            <OfflineBrowsingBanner
+              error={loadState.status === "error" ? loadState.error : undefined}
+              snapshot={snapshot}
+              loading={loading}
+              onRefresh={refresh}
+            />
 
             <StaleDataBanner
               snapshot={snapshot}
