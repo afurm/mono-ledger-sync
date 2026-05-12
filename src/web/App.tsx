@@ -285,9 +285,7 @@ function readTransactionFiltersFromHash(): TransactionFilterFormState {
   });
 }
 
-function writeTransactionFiltersToHash(
-  filters: TransactionFilterFormState,
-): void {
+function buildTransactionFiltersHash(filters: TransactionFilterFormState) {
   const params = new URLSearchParams();
 
   for (const [key, value] of Object.entries(filters)) {
@@ -307,10 +305,16 @@ function writeTransactionFiltersToHash(
   }
 
   const query = params.toString();
+  return `#transactions${query ? `?${query}` : ""}`;
+}
+
+function writeTransactionFiltersToHash(
+  filters: TransactionFilterFormState,
+): void {
   window.history.replaceState(
     null,
     "",
-    `${window.location.pathname}${window.location.search}#transactions${query ? `?${query}` : ""}`,
+    `${window.location.pathname}${window.location.search}${buildTransactionFiltersHash(filters)}`,
   );
 }
 
@@ -492,6 +496,10 @@ function routeLabel(routeId: RouteId): string {
   return routes.find((route) => route.id === routeId)?.label ?? "Overview";
 }
 
+function routeFromHash(): RouteId {
+  return getInitialRoute();
+}
+
 function statusVariant(
   status: string,
 ): "default" | "secondary" | "destructive" {
@@ -628,10 +636,14 @@ function MetricCard({
   title,
   value,
   description,
+  drillDownHref,
+  drillDownLabel,
 }: {
   title: string;
   value: string;
   description: string;
+  drillDownHref: string;
+  drillDownLabel: string;
 }) {
   return (
     <Card>
@@ -639,8 +651,14 @@ function MetricCard({
         <CardDescription>{title}</CardDescription>
         <CardTitle className="text-2xl">{value}</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">{description}</p>
+        <Button asChild className="w-fit" size="sm" variant="outline">
+          <a href={drillDownHref}>
+            {drillDownLabel}
+            <ChevronRightIcon data-icon="inline-end" />
+          </a>
+        </Button>
       </CardContent>
     </Card>
   );
@@ -1000,6 +1018,18 @@ function OverviewRoute({
     return null;
   }
 
+  const transactionsHref = buildTransactionFiltersHash(
+    defaultTransactionFilters(),
+  );
+  const incomeHref = buildTransactionFiltersHash({
+    ...defaultTransactionFilters(),
+    amountMin: "0.01",
+  });
+  const expensesHref = buildTransactionFiltersHash({
+    ...defaultTransactionFilters(),
+    amountMax: "-0.01",
+  });
+
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-4">
@@ -1007,21 +1037,29 @@ function OverviewRoute({
           title="Accounts"
           value={String(snapshot.summary.accounts)}
           description={`${snapshot.accounts.length} local account records`}
+          drillDownHref="#accounts"
+          drillDownLabel="View accounts"
         />
         <MetricCard
           title="Transactions"
           value={String(snapshot.summary.ledgerEntries)}
           description={`${snapshot.transactions.total} rows available to review`}
+          drillDownHref={transactionsHref}
+          drillDownLabel="Review rows"
         />
         <MetricCard
           title="Income"
           value={formatMinorAmount(snapshot.summary.income)}
           description="Synced into the local ledger"
+          drillDownHref={incomeHref}
+          drillDownLabel="Review income"
         />
         <MetricCard
           title="Expenses"
           value={formatMinorAmount(snapshot.summary.expenses)}
           description="Categorized from fixture rules"
+          drillDownHref={expensesHref}
+          drillDownLabel="Review expenses"
         />
       </div>
 
@@ -1870,6 +1908,16 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const syncRouteFromHash = () => setActiveRoute(routeFromHash());
+
+    window.addEventListener("hashchange", syncRouteFromHash);
+
+    return () => {
+      window.removeEventListener("hashchange", syncRouteFromHash);
+    };
+  }, []);
 
   const onRouteChange = useCallback((routeId: RouteId) => {
     window.location.hash = routeId;
