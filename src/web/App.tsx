@@ -18,10 +18,14 @@ import {
   EyeIcon,
   FilterXIcon,
   FileClockIcon,
+  LaptopIcon,
   MenuIcon,
+  MoonIcon,
   RefreshCwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  SunIcon,
+  UserRoundIcon,
 } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,6 +40,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -114,6 +129,8 @@ type LoadState =
   | { status: "ready"; data: LocalAppSnapshot; error?: undefined }
   | { status: "error"; data?: LocalAppSnapshot; error: string };
 
+type ThemeMode = "system" | "light" | "dark";
+
 type TransactionFilterFormState = {
   search: string;
   accountId: string;
@@ -149,6 +166,7 @@ interface TransactionFilterPreset {
 
 const TRANSACTION_PAGE_SIZE = 25;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
+const THEME_STORAGE_KEY = "mono-ledger-sync-theme";
 const transactionSortFields = [
   "time",
   "merchant",
@@ -510,6 +528,59 @@ function routeFromHash(): RouteId {
   return getInitialRoute();
 }
 
+function isThemeMode(value: string | null): value is ThemeMode {
+  return value === "system" || value === "light" || value === "dark";
+}
+
+function readInitialThemeMode(): ThemeMode {
+  if (typeof window === "undefined") {
+    return "system";
+  }
+
+  try {
+    const storedThemeMode = window.localStorage.getItem(THEME_STORAGE_KEY);
+
+    return isThemeMode(storedThemeMode) ? storedThemeMode : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function resolveThemeMode(themeMode: ThemeMode): "light" | "dark" {
+  if (themeMode !== "system" || typeof window === "undefined") {
+    return themeMode === "dark" ? "dark" : "light";
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function applyThemeMode(themeMode: ThemeMode): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const resolvedThemeMode = resolveThemeMode(themeMode);
+
+  document.documentElement.classList.toggle(
+    "dark",
+    resolvedThemeMode === "dark",
+  );
+  document.documentElement.style.colorScheme = resolvedThemeMode;
+}
+
+function themeModeLabel(themeMode: ThemeMode): string {
+  switch (themeMode) {
+    case "dark":
+      return "Dark";
+    case "light":
+      return "Light";
+    case "system":
+      return "System";
+  }
+}
+
 function statusVariant(
   status: string,
 ): "default" | "secondary" | "destructive" {
@@ -713,6 +784,138 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+function LocalOnlyIndicator({
+  snapshot,
+  loading,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  loading: boolean;
+}) {
+  const label = snapshot
+    ? snapshot.config.localOnly
+      ? "Local only"
+      : "External connection"
+    : loading
+      ? "Checking local"
+      : "Local unavailable";
+  const detail = snapshot
+    ? `${snapshot.health.status} API / ${snapshot.config.source} source`
+    : "Waiting for the local Fastify API";
+  const variant = snapshot?.config.localOnly
+    ? "secondary"
+    : snapshot
+      ? "destructive"
+      : "outline";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge className="hidden md:inline-flex" variant={variant}>
+          <ShieldCheckIcon data-icon="inline-start" />
+          {label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{detail}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+  const profile = snapshot?.config.profile ?? "Loading";
+  const source = snapshot?.config.source ?? "fixture";
+  const databasePath = snapshot?.config.databasePath ?? "Waiting for local API";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          className="hidden max-w-48 justify-start lg:inline-flex"
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <UserRoundIcon data-icon="inline-start" />
+          <span className="truncate">{profile}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>Local profile</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={profile}>
+          <DropdownMenuRadioItem value={profile}>
+            {profile}
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem disabled>
+            <DatabaseIcon data-icon="inline-start" />
+            {source} source
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <FileClockIcon data-icon="inline-start" />
+            <span className="truncate">{databasePath}</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ThemeModeControl({
+  themeMode,
+  onThemeModeChange,
+}: {
+  themeMode: ThemeMode;
+  onThemeModeChange: (themeMode: ThemeMode) => void;
+}) {
+  const ThemeIcon =
+    themeMode === "dark"
+      ? MoonIcon
+      : themeMode === "light"
+        ? SunIcon
+        : LaptopIcon;
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" type="button" variant="outline">
+              <ThemeIcon data-icon="inline-start" />
+              <span className="sr-only">Theme mode</span>
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Theme: {themeModeLabel(themeMode)}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={themeMode}
+          onValueChange={(value) => {
+            if (isThemeMode(value)) {
+              onThemeModeChange(value);
+            }
+          }}
+        >
+          <DropdownMenuRadioItem value="system">
+            <LaptopIcon data-icon="inline-start" />
+            System
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="light">
+            <SunIcon data-icon="inline-start" />
+            Light
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark">
+            <MoonIcon data-icon="inline-start" />
+            Dark
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -2499,6 +2702,7 @@ export default function App() {
   const [activeRoute, setActiveRoute] = useState<RouteId>(getInitialRoute);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [syncing, setSyncing] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readInitialThemeMode);
 
   const refresh = useCallback(async () => {
     setLoadState((current) => ({
@@ -2521,6 +2725,27 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    applyThemeMode(themeMode);
+
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch {}
+
+    if (themeMode !== "system") {
+      return;
+    }
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncSystemTheme = () => applyThemeMode("system");
+
+    media.addEventListener("change", syncSystemTheme);
+
+    return () => {
+      media.removeEventListener("change", syncSystemTheme);
+    };
+  }, [themeMode]);
 
   useEffect(() => {
     const syncRouteFromHash = () => setActiveRoute(routeFromHash());
@@ -2577,6 +2802,12 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <LocalOnlyIndicator snapshot={snapshot} loading={loading} />
+              <ProfileMenu snapshot={snapshot} />
+              <ThemeModeControl
+                themeMode={themeMode}
+                onThemeModeChange={setThemeMode}
+              />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="icon" variant="outline" onClick={refresh}>
