@@ -116,6 +116,7 @@ type TransactionPageState =
   | { status: "error"; data?: LedgerEntryPage; error: string };
 
 const TRANSACTION_PAGE_SIZE = 25;
+const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
 
 function defaultTransactionFilters(): TransactionFilterFormState {
   return {
@@ -151,7 +152,7 @@ function readTransactionFiltersFromHash(): TransactionFilterFormState {
   const status = params.get("status");
   const page = Number.parseInt(params.get("page") ?? "", 10);
 
-  return {
+  return normalizeTransactionFilters({
     search: params.get("search") ?? "",
     accountId: params.get("accountId") ?? "",
     categoryId: params.get("categoryId") ?? "",
@@ -162,7 +163,7 @@ function readTransactionFiltersFromHash(): TransactionFilterFormState {
     amountMin: params.get("amountMin") ?? "",
     amountMax: params.get("amountMax") ?? "",
     page: Number.isFinite(page) && page > 0 ? page : 1,
-  };
+  });
 }
 
 function writeTransactionFiltersToHash(
@@ -198,13 +199,42 @@ function dateInputToEpoch(value: string, endOfDay = false): number | undefined {
 }
 
 function amountInputToMinor(value: string): number | undefined {
-  if (!value.trim()) {
+  const trimmed = value.trim();
+
+  if (!trimmed || !AMOUNT_FILTER_PATTERN.test(trimmed)) {
     return undefined;
   }
 
-  const amount = Number.parseFloat(value);
+  const amount = Number(trimmed);
+  const minorAmount = Math.round(amount * 100);
 
-  return Number.isFinite(amount) ? Math.round(amount * 100) : undefined;
+  return Number.isSafeInteger(minorAmount) ? minorAmount : undefined;
+}
+
+function getAmountInputError(label: string, value: string): string | undefined {
+  const trimmed = value.trim();
+
+  if (!trimmed || AMOUNT_FILTER_PATTERN.test(trimmed)) {
+    return undefined;
+  }
+
+  return `${label} must use digits, an optional minus sign, and up to 2 decimals.`;
+}
+
+function normalizeAmountInput(value: string): string {
+  return amountInputToMinor(value) === undefined ? "" : value.trim();
+}
+
+function normalizeTransactionFilters(
+  filters: TransactionFilterFormState,
+): TransactionFilterFormState {
+  return {
+    ...filters,
+    search: filters.search.trim(),
+    merchantName: filters.merchantName.trim(),
+    amountMin: normalizeAmountInput(filters.amountMin),
+    amountMax: normalizeAmountInput(filters.amountMax),
+  };
 }
 
 function filtersToApiQuery(
@@ -259,6 +289,22 @@ function filtersToApiQuery(
 }
 
 function hasActiveTransactionFilters(
+  filters: TransactionFilterFormState,
+): boolean {
+  return (
+    filters.search.trim() !== "" ||
+    filters.accountId !== "" ||
+    filters.categoryId !== "" ||
+    filters.merchantName.trim() !== "" ||
+    filters.status !== "all" ||
+    filters.dateFrom !== "" ||
+    filters.dateTo !== "" ||
+    amountInputToMinor(filters.amountMin) !== undefined ||
+    amountInputToMinor(filters.amountMax) !== undefined
+  );
+}
+
+function hasTransactionFilterInput(
   filters: TransactionFilterFormState,
 ): boolean {
   return (
@@ -710,9 +756,14 @@ function TransactionsRoute({
       );
     }
 
-    if (filters.amountMin || filters.amountMax) {
+    const hasAmountMin = amountInputToMinor(filters.amountMin) !== undefined;
+    const hasAmountMax = amountInputToMinor(filters.amountMax) !== undefined;
+
+    if (hasAmountMin || hasAmountMax) {
       labels.push(
-        `Amount: ${filters.amountMin || "min"} to ${filters.amountMax || "max"}`,
+        `Amount: ${hasAmountMin ? filters.amountMin : "min"} to ${
+          hasAmountMax ? filters.amountMax : "max"
+        }`,
       );
     }
 
@@ -722,7 +773,17 @@ function TransactionsRoute({
   const transactions = pageState.data;
   const loading = pageState.status === "loading";
   const hasFilters = hasActiveTransactionFilters(filters);
-  const hasDraftFilters = hasActiveTransactionFilters(draftFilters);
+  const hasDraftInput = hasTransactionFilterInput(draftFilters);
+  const amountMinError = getAmountInputError(
+    "Min amount",
+    draftFilters.amountMin,
+  );
+  const amountMaxError = getAmountInputError(
+    "Max amount",
+    draftFilters.amountMax,
+  );
+  const hasAmountInputErrors =
+    amountMinError !== undefined || amountMaxError !== undefined;
   const totalPages = Math.max(
     1,
     Math.ceil((transactions?.total ?? 0) / TRANSACTION_PAGE_SIZE),
@@ -739,10 +800,14 @@ function TransactionsRoute({
   function applyFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
 
-    const nextFilters = {
+    if (hasAmountInputErrors) {
+      return;
+    }
+
+    const nextFilters = normalizeTransactionFilters({
       ...draftFilters,
       page: 1,
-    };
+    });
 
     setFilters(nextFilters);
     setDraftFilters(nextFilters);
@@ -943,6 +1008,10 @@ function TransactionsRoute({
               <Input
                 inputMode="decimal"
                 placeholder="-1000.00"
+                aria-describedby={
+                  amountMinError ? "transaction-amount-min-error" : undefined
+                }
+                aria-invalid={amountMinError ? true : undefined}
                 value={draftFilters.amountMin}
                 onChange={(event) =>
                   setDraftFilters((current) => ({
@@ -951,6 +1020,14 @@ function TransactionsRoute({
                   }))
                 }
               />
+              {amountMinError && (
+                <span
+                  id="transaction-amount-min-error"
+                  className="text-xs text-destructive"
+                >
+                  {amountMinError}
+                </span>
+              )}
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">
@@ -959,6 +1036,10 @@ function TransactionsRoute({
               <Input
                 inputMode="decimal"
                 placeholder="5000.00"
+                aria-describedby={
+                  amountMaxError ? "transaction-amount-max-error" : undefined
+                }
+                aria-invalid={amountMaxError ? true : undefined}
                 value={draftFilters.amountMax}
                 onChange={(event) =>
                   setDraftFilters((current) => ({
@@ -967,16 +1048,26 @@ function TransactionsRoute({
                   }))
                 }
               />
+              {amountMaxError && (
+                <span
+                  id="transaction-amount-max-error"
+                  className="text-xs text-destructive"
+                >
+                  {amountMaxError}
+                </span>
+              )}
             </label>
           </div>
 
           <div className="flex items-end gap-2 lg:col-span-2">
-            <Button type="submit">Apply filters</Button>
+            <Button type="submit" disabled={hasAmountInputErrors}>
+              Apply filters
+            </Button>
             <Button
               type="button"
               variant="outline"
               onClick={resetFilters}
-              disabled={!hasFilters && !hasDraftFilters}
+              disabled={!hasFilters && !hasDraftInput}
             >
               <FilterXIcon data-icon="inline-start" />
               Reset
