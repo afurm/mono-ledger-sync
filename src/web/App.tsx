@@ -17,6 +17,7 @@ import {
   DownloadIcon,
   EyeIcon,
   FilterXIcon,
+  FileClockIcon,
   MenuIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -529,6 +530,12 @@ function AppSidebar({
   onRouteChange: (routeId: RouteId) => void;
   snapshot: LocalAppSnapshot | undefined;
 }) {
+  const healthStatus = snapshot?.health.status ?? "checking";
+  const appVersion = snapshot?.health.version
+    ? `v${snapshot.health.version}`
+    : "pending";
+  const databasePath = snapshot?.config.databasePath ?? "Waiting for local API";
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -581,17 +588,47 @@ function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <div className="flex flex-col gap-2 rounded-lg border bg-sidebar-accent/55 p-3 text-xs">
+        <div className="flex flex-col gap-3 rounded-lg border bg-sidebar-accent/55 p-3 text-xs group-data-[collapsible=icon]:hidden">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium">Local only</span>
-            <Badge variant="secondary">
-              {snapshot?.health.status ?? "checking"}
+            <span className="font-medium">Local status</span>
+            <Badge variant={healthStatus === "ok" ? "default" : "secondary"}>
+              {healthStatus}
             </Badge>
           </div>
-          <p className="line-clamp-2 text-sidebar-foreground/70">
-            {snapshot?.config.databasePath ?? "Waiting for local API"}
-          </p>
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sidebar-foreground/70">Version</span>
+              <span className="font-medium">{appVersion}</span>
+            </div>
+            <div className="grid gap-1">
+              <span className="text-sidebar-foreground/70">Database</span>
+              <p className="line-clamp-2 break-all text-sidebar-foreground/80">
+                {databasePath}
+              </p>
+            </div>
+          </div>
+          <Button
+            className="w-full justify-start"
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() => onRouteChange("logs")}
+          >
+            <FileClockIcon data-icon="inline-start" />
+            Diagnostics
+          </Button>
         </div>
+        <SidebarMenu className="hidden group-data-[collapsible=icon]:flex">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Diagnostics"
+              onClick={() => onRouteChange("logs")}
+            >
+              <FileClockIcon />
+              <span>Diagnostics</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );
