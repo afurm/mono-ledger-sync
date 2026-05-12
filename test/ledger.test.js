@@ -335,6 +335,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/transactions?amountMin=0",
       });
+      const sortedAmountResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?sortBy=amount&sortDirection=asc",
+      });
+      const sortedMerchantResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?sortBy=merchant&sortDirection=asc",
+      });
       const exportResponse = await server.inject({
         method: "GET",
         url: "/api/exports/ledger?format=jsonl&categoryId=groceries",
@@ -359,6 +367,24 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(holdResponse.json().entries[0].hold, true);
       assert.equal(amountResponse.statusCode, 200);
       assert.equal(amountResponse.json().total, 2);
+      assert.equal(sortedAmountResponse.statusCode, 200);
+      assert.deepEqual(
+        sortedAmountResponse.json().entries.map((entry) => entry.amount),
+        sortedAmountResponse
+          .json()
+          .entries.map((entry) => entry.amount)
+          .sort((left, right) => left - right),
+      );
+      assert.equal(sortedMerchantResponse.statusCode, 200);
+      assert.deepEqual(
+        sortedMerchantResponse
+          .json()
+          .entries.map((entry) => entry.merchantName ?? entry.description),
+        sortedMerchantResponse
+          .json()
+          .entries.map((entry) => entry.merchantName ?? entry.description)
+          .sort((left, right) => left.localeCompare(right)),
+      );
       assert.equal(exportResponse.statusCode, 200);
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
       assert.equal(syncRunsResponse.statusCode, 200);
@@ -406,6 +432,14 @@ test("local API validates query strings and webhook payloads", async () => {
         method: "GET",
         url: "/api/ledger/transactions?status=unknown",
       });
+      const invalidSortByResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?sortBy=raw_payload",
+      });
+      const invalidSortDirectionResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?sortDirection=sideways",
+      });
       const unsupportedFormatResponse = await server.inject({
         method: "GET",
         url: "/api/exports/ledger?format=sqlite",
@@ -445,6 +479,10 @@ test("local API validates query strings and webhook payloads", async () => {
       assert.match(invalidLimitResponse.body, /limit/);
       assert.equal(invalidStatusResponse.statusCode, 400);
       assert.match(invalidStatusResponse.body, /status/);
+      assert.equal(invalidSortByResponse.statusCode, 400);
+      assert.match(invalidSortByResponse.body, /sortBy/);
+      assert.equal(invalidSortDirectionResponse.statusCode, 400);
+      assert.match(invalidSortDirectionResponse.body, /sortDirection/);
       assert.equal(unsupportedFormatResponse.statusCode, 400);
       assert.deepEqual(unsupportedFormatResponse.json(), {
         error: "unsupported_export_format",

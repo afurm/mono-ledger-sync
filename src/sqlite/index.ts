@@ -20,6 +20,7 @@ import type {
   LedgerEntry,
   LedgerEntryPage,
   LedgerEntryQuery,
+  LedgerEntrySortField,
   LedgerSummary,
   LedgerWriteStats,
   StoredWebhookEvent,
@@ -31,6 +32,15 @@ const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3") as typeof BetterSqlite3;
 
 export const sqliteStorageEngine = "sqlite";
+
+const ledgerEntrySortColumns: Record<LedgerEntrySortField, string> = {
+  time: "time",
+  merchant: "LOWER(COALESCE(merchant_name, description, ''))",
+  amount: "amount",
+  account: "account_id",
+  category: "LOWER(COALESCE(category_name, category_id, ''))",
+  status: "hold",
+};
 
 export interface SqliteLedgerDbOptions {
   filePath: string;
@@ -492,6 +502,18 @@ function buildLedgerEntryWhereClause(query: LedgerEntryQuery): {
   };
 }
 
+function buildLedgerEntryOrderByClause(query: LedgerEntryQuery): string {
+  const sortBy = query.sortBy ?? "time";
+  const sortDirection = query.sortDirection === "asc" ? "ASC" : "DESC";
+  const sortColumn = ledgerEntrySortColumns[sortBy];
+
+  if (sortBy === "time") {
+    return `${sortColumn} ${sortDirection}, id ${sortDirection}`;
+  }
+
+  return `${sortColumn} ${sortDirection}, time DESC, id DESC`;
+}
+
 class BetterSqliteLedgerDb implements SqliteLedgerDb {
   readonly filePath: string;
   readonly profile: string;
@@ -889,6 +911,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
     const where = buildLedgerEntryWhereClause(query);
+    const orderBy = buildLedgerEntryOrderByClause(query);
     const totalRow = this.#database
       .prepare(
         `SELECT COUNT(*) AS total FROM ledger_entries WHERE ${where.sql}`,
@@ -903,7 +926,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             raw_statement_item_id, hold, balance
           FROM ledger_entries
           WHERE ${where.sql}
-          ORDER BY time DESC, id DESC
+          ORDER BY ${orderBy}
           LIMIT @limit OFFSET @offset
         `,
       )

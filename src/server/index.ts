@@ -27,9 +27,15 @@ import {
 } from "../monobank/index.js";
 import { createSqliteLedgerDb, type SqliteLedgerDb } from "../sqlite/index.js";
 import { syncLedgerWithMonobank } from "../sync/index.js";
+import {
+  ledgerEntrySortDirections,
+  ledgerEntrySortFields,
+} from "../storage/index.js";
 import type {
   LedgerAccount,
   LedgerEntryPage,
+  LedgerEntrySortDirection,
+  LedgerEntrySortField,
   LedgerSummary,
   StoredWebhookEvent,
   SyncRun,
@@ -480,6 +486,8 @@ const ledgerEntriesQuerySchema = {
     to: { type: "integer", minimum: 0 },
     limit: { type: "integer", minimum: 1 },
     offset: { type: "integer", minimum: 0 },
+    sortBy: { type: "string", enum: [...ledgerEntrySortFields] },
+    sortDirection: { type: "string", enum: [...ledgerEntrySortDirections] },
   },
 } as const;
 
@@ -666,6 +674,18 @@ function readStringQuery(value: unknown): string | undefined {
   }
 
   return value;
+}
+
+function isLedgerEntrySortField(
+  value: string | undefined,
+): value is LedgerEntrySortField {
+  return ledgerEntrySortFields.includes(value as LedgerEntrySortField);
+}
+
+function isLedgerEntrySortDirection(
+  value: string | undefined,
+): value is LedgerEntrySortDirection {
+  return ledgerEntrySortDirections.includes(value as LedgerEntrySortDirection);
 }
 
 function renderLocalFixtureOverview(
@@ -1412,6 +1432,8 @@ function registerLocalApiRoutes(
       const to = readNumberQuery(query.to);
       const limit = readNumberQuery(query.limit);
       const offset = readNumberQuery(query.offset);
+      const sortBy = readStringQuery(query.sortBy);
+      const sortDirection = readStringQuery(query.sortDirection);
 
       if (accountId) {
         Object.assign(entryQuery, { accountId });
@@ -1455,6 +1477,14 @@ function registerLocalApiRoutes(
 
       if (offset !== undefined) {
         Object.assign(entryQuery, { offset });
+      }
+
+      if (isLedgerEntrySortField(sortBy)) {
+        Object.assign(entryQuery, { sortBy });
+      }
+
+      if (isLedgerEntrySortDirection(sortDirection)) {
+        Object.assign(entryQuery, { sortDirection });
       }
 
       return services.db.listLedgerEntries(entryQuery);
