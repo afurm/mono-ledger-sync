@@ -83,6 +83,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
   type LedgerEntry,
@@ -123,6 +124,19 @@ type TransactionPageState =
   | { status: "ready"; data: LedgerEntryPage; error?: undefined }
   | { status: "error"; data?: LedgerEntryPage; error: string };
 
+type TransactionFilterPresetId =
+  | "monthly-review"
+  | "uncategorized"
+  | "large-expenses"
+  | "subscriptions"
+  | "income";
+
+interface TransactionFilterPreset {
+  id: TransactionFilterPresetId;
+  label: string;
+  buildFilters: () => TransactionFilterFormState;
+}
+
 const TRANSACTION_PAGE_SIZE = 25;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
 const transactionSortFields = [
@@ -160,6 +174,65 @@ function defaultTransactionFilters(): TransactionFilterFormState {
     sortDirection: "desc",
   };
 }
+
+function dateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function monthlyReviewFilters(): TransactionFilterFormState {
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  return {
+    ...defaultTransactionFilters(),
+    dateFrom: dateInputValue(firstDayOfMonth),
+    dateTo: dateInputValue(now),
+  };
+}
+
+const transactionFilterPresets = [
+  {
+    id: "monthly-review",
+    label: "Monthly review",
+    buildFilters: monthlyReviewFilters,
+  },
+  {
+    id: "uncategorized",
+    label: "Uncategorized",
+    buildFilters: () => ({
+      ...defaultTransactionFilters(),
+      categoryId: "uncategorized",
+    }),
+  },
+  {
+    id: "large-expenses",
+    label: "Large expenses",
+    buildFilters: () => ({
+      ...defaultTransactionFilters(),
+      amountMax: "-1000.00",
+    }),
+  },
+  {
+    id: "subscriptions",
+    label: "Subscriptions",
+    buildFilters: () => ({
+      ...defaultTransactionFilters(),
+      categoryId: "subscriptions",
+    }),
+  },
+  {
+    id: "income",
+    label: "Income",
+    buildFilters: () => ({
+      ...defaultTransactionFilters(),
+      amountMin: "0.01",
+    }),
+  },
+] as const satisfies readonly TransactionFilterPreset[];
 
 function getInitialRoute(): RouteId {
   const hashRoute = window.location.hash.replace("#", "");
@@ -289,6 +362,34 @@ function normalizeTransactionFilters(
     amountMin: normalizeAmountInput(filters.amountMin),
     amountMax: normalizeAmountInput(filters.amountMax),
   };
+}
+
+function matchesTransactionPreset(
+  filters: TransactionFilterFormState,
+  preset: TransactionFilterPreset,
+): boolean {
+  const presetFilters = preset.buildFilters();
+  const normalizedFilters = normalizeTransactionFilters(filters);
+
+  return (
+    normalizedFilters.search === presetFilters.search &&
+    normalizedFilters.accountId === presetFilters.accountId &&
+    normalizedFilters.categoryId === presetFilters.categoryId &&
+    normalizedFilters.merchantName === presetFilters.merchantName &&
+    normalizedFilters.status === presetFilters.status &&
+    normalizedFilters.dateFrom === presetFilters.dateFrom &&
+    normalizedFilters.dateTo === presetFilters.dateTo &&
+    normalizedFilters.amountMin === presetFilters.amountMin &&
+    normalizedFilters.amountMax === presetFilters.amountMax
+  );
+}
+
+function activeTransactionPreset(
+  filters: TransactionFilterFormState,
+): TransactionFilterPreset | undefined {
+  return transactionFilterPresets.find((preset) =>
+    matchesTransactionPreset(filters, preset),
+  );
 }
 
 function filtersToApiQuery(
@@ -1051,6 +1152,11 @@ function TransactionsRoute({
     snapshot?.transactions.entries,
   ]);
 
+  const selectedPreset = useMemo(
+    () => activeTransactionPreset(filters),
+    [filters],
+  );
+
   const activeFilters = useMemo(() => {
     const labels: string[] = [];
     const account = snapshot?.accounts.find(
@@ -1059,6 +1165,10 @@ function TransactionsRoute({
     const category = categoryOptions.find(
       (item) => item.id === filters.categoryId,
     );
+
+    if (selectedPreset) {
+      labels.push(`Preset: ${selectedPreset.label}`);
+    }
 
     if (filters.search.trim()) {
       labels.push(`Search: ${filters.search.trim()}`);
@@ -1098,7 +1208,7 @@ function TransactionsRoute({
     }
 
     return labels;
-  }, [categoryOptions, filters, snapshot?.accounts]);
+  }, [categoryOptions, filters, selectedPreset, snapshot?.accounts]);
 
   const transactions = pageState.data;
   const loading = pageState.status === "loading";
@@ -1152,6 +1262,14 @@ function TransactionsRoute({
     writeTransactionFiltersToHash(nextFilters);
   }
 
+  function applyPreset(preset: TransactionFilterPreset): void {
+    const nextFilters = preset.buildFilters();
+
+    setFilters(nextFilters);
+    setDraftFilters(nextFilters);
+    writeTransactionFiltersToHash(nextFilters);
+  }
+
   function setPage(page: number): void {
     const nextFilters = {
       ...filters,
@@ -1193,6 +1311,39 @@ function TransactionsRoute({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            Saved presets
+          </span>
+          <ToggleGroup
+            type="single"
+            value={selectedPreset?.id ?? ""}
+            variant="outline"
+            size="sm"
+            className="w-full flex-wrap justify-start"
+            aria-label="Transaction filter presets"
+            onValueChange={(presetId) => {
+              const preset = transactionFilterPresets.find(
+                (item) => item.id === presetId,
+              );
+
+              if (preset) {
+                applyPreset(preset);
+              }
+            }}
+          >
+            {transactionFilterPresets.map((preset) => (
+              <ToggleGroupItem
+                key={preset.id}
+                value={preset.id}
+                aria-label={`Apply ${preset.label} filters`}
+              >
+                {preset.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+
         <form className="grid gap-3 lg:grid-cols-4" onSubmit={applyFilters}>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
