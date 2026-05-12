@@ -90,6 +90,8 @@ on `http://127.0.0.1:3000`. The app exposes the browser UI at `/`, health and
 configuration endpoints, fixture endpoints, ledger summary/account/transaction
 endpoints, sync run endpoints, webhook hint ingestion, and CSV/JSON/JSONL exports.
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
+Use `npm run web:dev` when working on the Vite UI; it starts the same local API
+server and proxies browser requests through `http://127.0.0.1:5173`.
 
 Release automation is documented in [docs/release.md](docs/release.md).
 Common local workflows are documented in
