@@ -514,6 +514,12 @@ function statusVariant(
   return "secondary";
 }
 
+function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
+  return lastSyncedAt
+    ? `Updated ${formatDateTime(lastSyncedAt)}`
+    : "Waiting for first sync";
+}
+
 function AppSidebar({
   activeRoute,
   onRouteChange,
@@ -636,12 +642,14 @@ function MetricCard({
   title,
   value,
   description,
+  freshness,
   drillDownHref,
   drillDownLabel,
 }: {
   title: string;
   value: string;
   description: string;
+  freshness: string;
   drillDownHref: string;
   drillDownLabel: string;
 }) {
@@ -653,6 +661,9 @@ function MetricCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">{description}</p>
+        <Badge className="w-fit" variant="secondary">
+          {freshness}
+        </Badge>
         <Button asChild className="w-fit" size="sm" variant="outline">
           <a href={drillDownHref}>
             {drillDownLabel}
@@ -1029,6 +1040,7 @@ function OverviewRoute({
     ...defaultTransactionFilters(),
     amountMax: "-0.01",
   });
+  const freshness = dataFreshnessLabel(snapshot.summary.lastSyncedAt);
 
   return (
     <div className="flex flex-col gap-4">
@@ -1037,6 +1049,7 @@ function OverviewRoute({
           title="Accounts"
           value={String(snapshot.summary.accounts)}
           description={`${snapshot.accounts.length} local account records`}
+          freshness={freshness}
           drillDownHref="#accounts"
           drillDownLabel="View accounts"
         />
@@ -1044,6 +1057,7 @@ function OverviewRoute({
           title="Transactions"
           value={String(snapshot.summary.ledgerEntries)}
           description={`${snapshot.transactions.total} rows available to review`}
+          freshness={freshness}
           drillDownHref={transactionsHref}
           drillDownLabel="Review rows"
         />
@@ -1051,6 +1065,7 @@ function OverviewRoute({
           title="Income"
           value={formatMinorAmount(snapshot.summary.income)}
           description="Synced into the local ledger"
+          freshness={freshness}
           drillDownHref={incomeHref}
           drillDownLabel="Review income"
         />
@@ -1058,6 +1073,7 @@ function OverviewRoute({
           title="Expenses"
           value={formatMinorAmount(snapshot.summary.expenses)}
           description="Categorized from fixture rules"
+          freshness={freshness}
           drillDownHref={expensesHref}
           drillDownLabel="Review expenses"
         />
