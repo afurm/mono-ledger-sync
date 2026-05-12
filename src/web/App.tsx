@@ -15,6 +15,7 @@ import {
   CheckCircle2Icon,
   DatabaseIcon,
   DownloadIcon,
+  EyeIcon,
   FilterXIcon,
   MenuIcon,
   RefreshCwIcon,
@@ -614,11 +615,151 @@ function SortableTableHead({
   );
 }
 
+function TransactionDetailField({
+  label,
+  value,
+  valueClassName = "text-foreground",
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="grid gap-1">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className={`break-words text-sm ${valueClassName}`}>{value}</dd>
+    </div>
+  );
+}
+
+function optionalAmount(value: number | undefined, currencyCode: number) {
+  return value === undefined
+    ? "Not provided"
+    : formatMinorAmount(value, currencyCode);
+}
+
+function TransactionDetailDrawer({
+  entry,
+  open,
+  onOpenChange,
+}: {
+  entry: LedgerEntry | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const title = entry?.merchantName ?? entry?.description ?? "Transaction";
+  const status = entry?.hold ? "Hold" : "Posted";
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetHeader className="pr-12">
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>
+            {entry
+              ? `${formatDateTime(entry.time)} · ${formatMinorAmount(
+                  entry.amount,
+                  entry.currencyCode,
+                )}`
+              : "Transaction details"}
+          </SheetDescription>
+        </SheetHeader>
+
+        {entry && (
+          <div className="flex flex-col gap-5 px-4 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="grid gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Amount
+                </span>
+                <span className="text-2xl font-semibold text-foreground">
+                  {formatMinorAmount(entry.amount, entry.currencyCode)}
+                </span>
+              </div>
+              <Badge variant={entry.hold ? "secondary" : "outline"}>
+                {status}
+              </Badge>
+            </div>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium text-foreground">
+                Normalized fields
+              </h3>
+              <dl className="grid gap-3">
+                <TransactionDetailField
+                  label="Date"
+                  value={formatDateTime(entry.time)}
+                />
+                <TransactionDetailField
+                  label="Merchant"
+                  value={entry.merchantName ?? "Not provided"}
+                />
+                <TransactionDetailField
+                  label="Description"
+                  value={entry.description}
+                />
+                <TransactionDetailField
+                  label="Account"
+                  value={entry.accountId}
+                />
+                <TransactionDetailField
+                  label="Category"
+                  value={
+                    entry.categoryName ?? entry.categoryId ?? "Uncategorized"
+                  }
+                />
+                <TransactionDetailField
+                  label="Currency"
+                  value={String(entry.currencyCode)}
+                />
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium text-foreground">
+                Ledger metadata
+              </h3>
+              <dl className="grid gap-3">
+                <TransactionDetailField
+                  label="Ledger entry ID"
+                  value={entry.id}
+                  valueClassName="font-mono text-xs text-foreground"
+                />
+                <TransactionDetailField
+                  label="Raw statement item ID"
+                  value={entry.rawStatementItemId}
+                  valueClassName="font-mono text-xs text-foreground"
+                />
+                <TransactionDetailField
+                  label="Operation amount"
+                  value={optionalAmount(
+                    entry.operationAmount,
+                    entry.currencyCode,
+                  )}
+                />
+                <TransactionDetailField
+                  label="Balance after transaction"
+                  value={optionalAmount(entry.balance, entry.currencyCode)}
+                />
+              </dl>
+            </section>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function TransactionTable({
   entries,
   sortBy,
   sortDirection,
   onSortChange,
+  onViewDetails,
   emptyTitle = "No local transactions yet",
   emptyDescription = "Run fixture sync to populate the local SQLite ledger before reviewing transactions.",
 }: {
@@ -626,6 +767,7 @@ function TransactionTable({
   sortBy?: LedgerTransactionSortField;
   sortDirection?: LedgerTransactionSortDirection;
   onSortChange?: (field: LedgerTransactionSortField) => void;
+  onViewDetails?: (entry: LedgerEntry) => void;
   emptyTitle?: string;
   emptyDescription?: string;
 }) {
@@ -690,6 +832,9 @@ function TransactionTable({
             className="text-right"
             align="right"
           />
+          {onViewDetails && (
+            <TableHead className="w-12 text-right">Details</TableHead>
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -715,6 +860,23 @@ function TransactionTable({
             <TableCell className="text-right font-medium">
               {formatMinorAmount(entry.amount, entry.currencyCode)}
             </TableCell>
+            {onViewDetails && (
+              <TableCell className="text-right">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="ml-auto"
+                  onClick={() => onViewDetails(entry)}
+                  aria-label={`View details for ${
+                    entry.merchantName ?? entry.description
+                  }`}
+                >
+                  <EyeIcon />
+                  <span className="sr-only">View details</span>
+                </Button>
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>
@@ -823,6 +985,9 @@ function TransactionsRoute({
   const [pageState, setPageState] = useState<TransactionPageState>({
     status: "loading",
   });
+  const [selectedTransaction, setSelectedTransaction] = useState<
+    LedgerEntry | undefined
+  >();
 
   useEffect(() => {
     let cancelled = false;
@@ -1288,6 +1453,7 @@ function TransactionsRoute({
             sortBy={filters.sortBy}
             sortDirection={filters.sortDirection}
             onSortChange={setSort}
+            onViewDetails={setSelectedTransaction}
             emptyTitle={
               hasFilters
                 ? "No matching transactions"
@@ -1300,6 +1466,16 @@ function TransactionsRoute({
             }
           />
         )}
+
+        <TransactionDetailDrawer
+          entry={selectedTransaction}
+          open={selectedTransaction !== undefined}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedTransaction(undefined);
+            }
+          }}
+        />
 
         <Separator />
 
