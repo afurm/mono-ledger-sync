@@ -14,7 +14,11 @@ import {
   type ExportFormat,
   type ExportPreset,
 } from "../exports/index.js";
-import { productArchitecture, type LedgerSource } from "../core/index.js";
+import {
+  productArchitecture,
+  version,
+  type LedgerSource,
+} from "../core/index.js";
 import {
   assertMonobankPersonalWebhookEvent,
   createBundledFixtureMonobankAdapter,
@@ -89,6 +93,7 @@ export interface LocalApiTestResponse {
 export interface LocalApiHealth {
   status: "ok";
   localOnly: true;
+  version: typeof version;
   framework: typeof localApiServerFramework;
   apiPrefix: typeof localApiRoutePrefix;
   architecture: typeof productArchitecture;
@@ -143,10 +148,18 @@ interface LocalAppServices {
 
 const healthResponseSchema = {
   type: "object",
-  required: ["status", "localOnly", "framework", "apiPrefix", "architecture"],
+  required: [
+    "status",
+    "localOnly",
+    "version",
+    "framework",
+    "apiPrefix",
+    "architecture",
+  ],
   properties: {
     status: { const: "ok" },
     localOnly: { const: true },
+    version: { const: version },
     framework: { const: localApiServerFramework },
     apiPrefix: { const: localApiRoutePrefix },
     architecture: {
@@ -1345,6 +1358,7 @@ function registerLocalApiRoutes(
     async (): Promise<LocalApiHealth> => ({
       status: "ok",
       localOnly: true,
+      version,
       framework: localApiServerFramework,
       apiPrefix: localApiRoutePrefix,
       architecture: productArchitecture,

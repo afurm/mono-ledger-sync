@@ -1,6 +1,7 @@
 export interface LocalApiHealth {
   status: "ok";
   localOnly: true;
+  version: string;
   framework: string;
   apiPrefix: string;
   architecture: {

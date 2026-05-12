@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { productArchitecture } from "mono-ledger-sync/core";
+import { productArchitecture, version } from "mono-ledger-sync/core";
 import {
   createLocalApiServer,
   localApiRoutePrefix,
@@ -49,6 +49,7 @@ test("serves local API health through Fastify", async () => {
     assert.deepEqual(response.json(), {
       status: "ok",
       localOnly: true,
+      version,
       framework: "fastify",
       apiPrefix: "/api",
       architecture: productArchitecture,
