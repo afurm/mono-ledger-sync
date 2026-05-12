@@ -730,6 +730,37 @@ function LoadingDashboard() {
   );
 }
 
+function OverviewStatusItem({
+  label,
+  value,
+  detail,
+  badge,
+  badgeVariant = "secondary",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  badge?: string | undefined;
+  badgeVariant?: "default" | "secondary" | "destructive" | "outline";
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-lg font-semibold">{value}</span>
+        {badge && (
+          <Badge className="shrink-0" variant={badgeVariant}>
+            {badge}
+          </Badge>
+        )}
+      </div>
+      <p className="line-clamp-2 break-all text-sm text-muted-foreground">
+        {detail}
+      </p>
+    </div>
+  );
+}
+
 function SortableTableHead({
   field,
   label,
@@ -1078,6 +1109,8 @@ function OverviewRoute({
     amountMax: "-0.01",
   });
   const freshness = dataFreshnessLabel(snapshot.summary.lastSyncedAt);
+  const webhookHints = snapshot.fixtures?.webhookEvents ?? 0;
+  const databaseHealth = snapshot.health.status;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1115,6 +1148,49 @@ function OverviewRoute({
           drillDownLabel="Review expenses"
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace status</CardTitle>
+          <CardDescription>
+            Local ledger state from the current app snapshot.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <OverviewStatusItem
+            label="Connected accounts"
+            value={String(snapshot.summary.accounts)}
+            detail={`${snapshot.accounts.length} account records loaded locally`}
+            badge={snapshot.config.source}
+          />
+          <OverviewStatusItem
+            label="Synced transactions"
+            value={String(snapshot.summary.ledgerEntries)}
+            detail={`${snapshot.transactions.total} rows available for review`}
+            badge="ledger"
+          />
+          <OverviewStatusItem
+            label="Last sync"
+            value={formatDateTime(snapshot.summary.lastSyncedAt)}
+            detail={freshness}
+            badge={snapshot.syncRuns[0]?.status ?? "none"}
+            badgeVariant={statusVariant(snapshot.syncRuns[0]?.status ?? "")}
+          />
+          <OverviewStatusItem
+            label="Webhook hints"
+            value={String(webhookHints)}
+            detail="Stored as pull-required hints before reconciliation"
+            badge={webhookHints > 0 ? "pending" : "clear"}
+          />
+          <OverviewStatusItem
+            label="Database health"
+            value={databaseHealth}
+            detail={snapshot.config.databasePath}
+            badge={snapshot.config.localOnly ? "local" : undefined}
+            badgeVariant={statusVariant(databaseHealth)}
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
         <Card>
