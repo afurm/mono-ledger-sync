@@ -907,7 +907,7 @@ function MetricCard({
   );
 }
 
-function LoadingDashboard() {
+function MetricLoadingGrid() {
   return (
     <div className="grid gap-4 md:grid-cols-4">
       {Array.from({ length: 4 }).map((_, index) => (
@@ -923,6 +923,207 @@ function LoadingDashboard() {
       ))}
     </div>
   );
+}
+
+function TableLoadingSkeleton({
+  columns,
+  rows,
+}: {
+  columns: number;
+  rows: number;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {Array.from({ length: columns }).map((_, index) => (
+              <TableHead key={index}>
+                <Skeleton className="h-4 w-20" />
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: rows }).map((_, rowIndex) => (
+            <TableRow key={rowIndex}>
+              {Array.from({ length: columns }).map((_, columnIndex) => (
+                <TableCell key={columnIndex}>
+                  <Skeleton className="h-5 w-full" />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function OverviewLoadingSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Overview loading"
+      className="flex flex-col gap-4"
+    >
+      <MetricLoadingGrid />
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div className="flex flex-col gap-2" key={index}>
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-6 w-28" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-4 w-72 max-w-full" />
+          </CardHeader>
+          <CardContent>
+            <TableLoadingSkeleton columns={6} rows={6} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="h-4 w-64 max-w-full" />
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton className="h-24 w-full" key={index} />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function TransactionsLoadingSkeleton() {
+  return (
+    <Card aria-busy="true" aria-label="Transactions loading">
+      <CardHeader>
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-4 w-72 max-w-full" />
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <Skeleton className="h-9 w-full" key={index} />
+          ))}
+        </div>
+        <TableLoadingSkeleton columns={7} rows={8} />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Skeleton className="h-4 w-36" />
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-24" />
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-8 w-20" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SyncLoadingSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Sync and webhooks loading"
+      className="flex flex-col gap-2"
+    >
+      <div className="flex gap-2">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <Skeleton className="h-9 w-24" key={index} />
+        ))}
+      </div>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </CardHeader>
+        <CardContent>
+          <TableLoadingSkeleton columns={6} rows={6} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AccountsLoadingSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Accounts loading"
+      className="flex flex-col gap-4"
+    >
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div className="flex flex-col gap-2" key={index}>
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-6 w-28" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <Skeleton className="h-44 w-full" key={index} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlaceholderLoadingSkeleton({ routeId }: { routeId: RouteId }) {
+  return (
+    <Card aria-busy="true" aria-label={`${routeLabel(routeId)} loading`}>
+      <CardHeader>
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <Skeleton className="h-16 w-full" />
+        <div className="grid gap-3 md:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton className="h-24 w-full" key={index} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RouteLoadingSkeleton({ routeId }: { routeId: RouteId }) {
+  switch (routeId) {
+    case "overview":
+      return <OverviewLoadingSkeleton />;
+    case "transactions":
+      return <TransactionsLoadingSkeleton />;
+    case "sync":
+      return <SyncLoadingSkeleton />;
+    case "accounts":
+      return <AccountsLoadingSkeleton />;
+    default:
+      return <PlaceholderLoadingSkeleton routeId={routeId} />;
+  }
 }
 
 function OverviewStatusItem({
@@ -1287,7 +1488,7 @@ function OverviewRoute({
   onRouteChange: (routeId: RouteId) => void;
 }) {
   if (loading && !snapshot) {
-    return <LoadingDashboard />;
+    return <OverviewLoadingSkeleton />;
   }
 
   if (!snapshot) {
@@ -2237,6 +2438,10 @@ function RouteContent({
   loading: boolean;
   onRouteChange: (routeId: RouteId) => void;
 }) {
+  if (loading && !snapshot) {
+    return <RouteLoadingSkeleton routeId={activeRoute} />;
+  }
+
   switch (activeRoute) {
     case "overview":
       return (
