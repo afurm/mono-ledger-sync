@@ -520,12 +520,24 @@ function getNextSortDirection(
   return current.sortDirection === "asc" ? "desc" : "asc";
 }
 
-function routeLabel(routeId: RouteId): string {
-  return routes.find((route) => route.id === routeId)?.label ?? "Overview";
+function routeMetadata(routeId: RouteId) {
+  return routes.find((route) => route.id === routeId) ?? routes[0];
 }
 
 function routeFromHash(): RouteId {
   return getInitialRoute();
+}
+
+function routeContextLine(
+  routeId: RouteId,
+  snapshot: LocalAppSnapshot | undefined,
+): string {
+  const metadata = routeMetadata(routeId);
+  const localContext = snapshot
+    ? `${snapshot.config.profile} profile / ${snapshot.config.source} source`
+    : "Waiting for local API";
+
+  return `${metadata.description} ${localContext}.`;
 }
 
 function isThemeMode(value: string | null): value is ThemeMode {
@@ -1296,8 +1308,10 @@ function AccountsLoadingSkeleton() {
 }
 
 function PlaceholderLoadingSkeleton({ routeId }: { routeId: RouteId }) {
+  const metadata = routeMetadata(routeId);
+
   return (
-    <Card aria-busy="true" aria-label={`${routeLabel(routeId)} loading`}>
+    <Card aria-busy="true" aria-label={`${metadata.title} loading`}>
       <CardHeader>
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-4 w-80 max-w-full" />
@@ -2602,18 +2616,14 @@ function AccountsRoute({
   );
 }
 
-function PlaceholderRoute({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
+function PlaceholderRoute({ routeId }: { routeId: RouteId }) {
+  const metadata = routeMetadata(routeId);
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardTitle>{metadata.title}</CardTitle>
+        <CardDescription>{metadata.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <Alert>
@@ -2661,40 +2671,11 @@ function RouteContent({
     case "accounts":
       return <AccountsRoute snapshot={snapshot} />;
     case "exports":
-      return (
-        <PlaceholderRoute
-          title="Exports"
-          description="CSV, JSON, JSONL, and SQLite snapshot flows with local privacy notes."
-        />
-      );
     case "rules":
-      return (
-        <PlaceholderRoute
-          title="Rules & Mappings"
-          description="Categorization rules, merchant cleanup, and duplicate review queues."
-        />
-      );
     case "logs":
-      return (
-        <PlaceholderRoute
-          title="Logs"
-          description="Redacted sync, webhook, export, and diagnostics activity."
-        />
-      );
     case "settings":
-      return (
-        <PlaceholderRoute
-          title="Settings"
-          description="Profile, token status, data path, privacy, backups, and deletion."
-        />
-      );
     case "help":
-      return (
-        <PlaceholderRoute
-          title="Help"
-          description="Local setup, token setup, backup, export recipes, and troubleshooting."
-        />
-      );
+      return <PlaceholderRoute routeId={activeRoute} />;
   }
 }
 
@@ -2774,7 +2755,11 @@ export default function App() {
 
   const snapshot = loadState.data;
   const loading = loadState.status === "loading";
-  const title = useMemo(() => routeLabel(activeRoute), [activeRoute]);
+  const route = useMemo(() => routeMetadata(activeRoute), [activeRoute]);
+  const routeContext = useMemo(
+    () => routeContextLine(activeRoute, snapshot),
+    [activeRoute, snapshot],
+  );
 
   return (
     <TooltipProvider>
@@ -2785,19 +2770,24 @@ export default function App() {
           snapshot={snapshot}
         />
         <SidebarInset>
-          <header className="sticky top-0 z-10 flex min-h-16 items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur md:px-6">
+          <header className="sticky top-0 z-10 flex min-h-[4.5rem] items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur md:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger className="hidden md:inline-flex" />
               <MobileNav
                 activeRoute={activeRoute}
                 onRouteChange={onRouteChange}
               />
-              <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold">{title}</h1>
-                <p className="truncate text-sm text-muted-foreground">
-                  {snapshot
-                    ? `${snapshot.config.profile} profile · ${snapshot.config.source} source`
-                    : "Waiting for local API"}
+              <div className="min-w-0 py-2">
+                <div className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
+                  <span>Workspace</span>
+                  <ChevronRightIcon className="size-3" aria-hidden="true" />
+                  <span className="truncate">{route.label}</span>
+                </div>
+                <h1 className="truncate text-lg font-semibold">
+                  {route.title}
+                </h1>
+                <p className="hidden truncate text-sm text-muted-foreground sm:block">
+                  {routeContext}
                 </p>
               </div>
             </div>
