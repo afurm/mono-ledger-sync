@@ -29,8 +29,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -87,6 +89,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
+  type LedgerAccount,
   type LedgerEntry,
   type LedgerEntryPage,
   type LedgerTransactionFilters,
@@ -97,7 +100,12 @@ import {
   loadLedgerTransactions,
   runFixtureSync,
 } from "./api";
-import { formatDate, formatDateTime, formatMinorAmount } from "./format";
+import {
+  currencyLabel,
+  formatDate,
+  formatDateTime,
+  formatMinorAmount,
+} from "./format";
 import { type RouteId, isRouteId, routes, secondaryRoutes } from "./navigation";
 
 type LoadState =
@@ -1922,6 +1930,125 @@ function SyncRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   );
 }
 
+function AccountDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate font-medium">{value}</span>
+    </div>
+  );
+}
+
+function AccountCard({ account }: { account: LedgerAccount }) {
+  const maskedIdentifiers =
+    account.maskedPan && account.maskedPan.length > 0
+      ? account.maskedPan.join(" · ")
+      : "No masked identifiers";
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{account.id}</CardDescription>
+        <CardTitle>
+          {formatMinorAmount(account.balance, account.currencyCode)}
+        </CardTitle>
+        <CardAction>
+          <Badge variant="outline">{currencyLabel(account.currencyCode)}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <AccountDetailRow label="Type" value={account.type} />
+        <AccountDetailRow
+          label="Credit limit"
+          value={formatMinorAmount(account.creditLimit, account.currencyCode)}
+        />
+        <Separator />
+        <div className="grid gap-1">
+          <span className="text-muted-foreground">Masked identifiers</span>
+          <p className="break-all font-medium">{maskedIdentifiers}</p>
+        </div>
+      </CardContent>
+      <CardFooter className="text-xs text-muted-foreground">
+        Updated {formatDateTime(account.updatedAt)}
+      </CardFooter>
+    </Card>
+  );
+}
+
+function AccountsRoute({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+}) {
+  if (!snapshot) {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-4 w-72" />
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton className="h-44 w-full" key={index} />
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const jarCount = snapshot.fixtures?.jars ?? 0;
+  const currencies = snapshot.summary.currencies.map(currencyLabel).join(", ");
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Accounts</CardTitle>
+          <CardDescription>
+            Local Monobank accounts synced into the profile-scoped ledger.
+          </CardDescription>
+          <CardAction>
+            <Badge variant="secondary">{snapshot.config.source}</Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-3">
+          <OverviewStatusItem
+            label="Local accounts"
+            value={String(snapshot.accounts.length)}
+            detail={`${snapshot.summary.accounts} accounts in ledger summary`}
+          />
+          <OverviewStatusItem
+            label="Fixture jars"
+            value={String(jarCount)}
+            detail="Jar coverage from bundled fixture client info"
+          />
+          <OverviewStatusItem
+            label="Currencies"
+            value={currencies || "None"}
+            detail="Currency set present in local ledger rows"
+          />
+        </CardContent>
+      </Card>
+
+      {snapshot.accounts.length === 0 ? (
+        <Alert>
+          <AlertCircleIcon />
+          <AlertTitle>No accounts synced</AlertTitle>
+          <AlertDescription>
+            Run fixture sync from the top bar to populate local account cards.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {snapshot.accounts.map((account) => (
+            <AccountCard account={account} key={account.id} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlaceholderRoute({
   title,
   description,
@@ -1967,12 +2094,7 @@ function RouteContent({
     case "sync":
       return <SyncRoute snapshot={snapshot} />;
     case "accounts":
-      return (
-        <PlaceholderRoute
-          title="Accounts"
-          description="Cards, jars, balances, masked identifiers, and statement cursors."
-        />
-      );
+      return <AccountsRoute snapshot={snapshot} />;
     case "exports":
       return (
         <PlaceholderRoute
