@@ -42,6 +42,10 @@ export interface LedgerEntryQuery {
   profile: string;
   accountId?: string;
   categoryId?: string;
+  merchantName?: string;
+  status?: "hold" | "posted";
+  amountMin?: number;
+  amountMax?: number;
   search?: string;
   from?: number;
   to?: number;

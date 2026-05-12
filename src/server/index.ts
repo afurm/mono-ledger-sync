@@ -471,6 +471,10 @@ const ledgerEntriesQuerySchema = {
   properties: {
     accountId: { type: "string" },
     categoryId: { type: "string" },
+    merchantName: { type: "string" },
+    status: { type: "string", enum: ["hold", "posted"] },
+    amountMin: { type: "integer" },
+    amountMax: { type: "integer" },
     search: { type: "string" },
     from: { type: "integer", minimum: 0 },
     to: { type: "integer", minimum: 0 },
@@ -1399,6 +1403,10 @@ function registerLocalApiRoutes(
       };
       const accountId = readStringQuery(query.accountId);
       const categoryId = readStringQuery(query.categoryId);
+      const merchantName = readStringQuery(query.merchantName);
+      const status = readStringQuery(query.status);
+      const amountMin = readNumberQuery(query.amountMin);
+      const amountMax = readNumberQuery(query.amountMax);
       const search = readStringQuery(query.search);
       const from = readNumberQuery(query.from);
       const to = readNumberQuery(query.to);
@@ -1411,6 +1419,22 @@ function registerLocalApiRoutes(
 
       if (categoryId) {
         Object.assign(entryQuery, { categoryId });
+      }
+
+      if (merchantName) {
+        Object.assign(entryQuery, { merchantName });
+      }
+
+      if (status === "hold" || status === "posted") {
+        Object.assign(entryQuery, { status });
+      }
+
+      if (amountMin !== undefined) {
+        Object.assign(entryQuery, { amountMin });
+      }
+
+      if (amountMax !== undefined) {
+        Object.assign(entryQuery, { amountMax });
       }
 
       if (search) {

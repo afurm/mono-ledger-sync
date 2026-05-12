@@ -323,6 +323,18 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/transactions?search=Silpo",
       });
+      const merchantResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?merchantName=Metro",
+      });
+      const holdResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?status=hold",
+      });
+      const amountResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?amountMin=0",
+      });
       const exportResponse = await server.inject({
         method: "GET",
         url: "/api/exports/ledger?format=jsonl&categoryId=groceries",
@@ -341,6 +353,12 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(summaryResponse.json().ledgerEntries, 7);
       assert.equal(transactionsResponse.statusCode, 200);
       assert.equal(transactionsResponse.json().total, 1);
+      assert.equal(merchantResponse.statusCode, 200);
+      assert.equal(merchantResponse.json().total, 1);
+      assert.equal(holdResponse.statusCode, 200);
+      assert.equal(holdResponse.json().entries[0].hold, true);
+      assert.equal(amountResponse.statusCode, 200);
+      assert.equal(amountResponse.json().total, 2);
       assert.equal(exportResponse.statusCode, 200);
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
       assert.equal(syncRunsResponse.statusCode, 200);
@@ -384,6 +402,10 @@ test("local API validates query strings and webhook payloads", async () => {
         method: "GET",
         url: "/api/ledger/transactions?limit=not-a-number",
       });
+      const invalidStatusResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?status=unknown",
+      });
       const unsupportedFormatResponse = await server.inject({
         method: "GET",
         url: "/api/exports/ledger?format=sqlite",
@@ -421,6 +443,8 @@ test("local API validates query strings and webhook payloads", async () => {
 
       assert.equal(invalidLimitResponse.statusCode, 400);
       assert.match(invalidLimitResponse.body, /limit/);
+      assert.equal(invalidStatusResponse.statusCode, 400);
+      assert.match(invalidStatusResponse.body, /status/);
       assert.equal(unsupportedFormatResponse.statusCode, 400);
       assert.deepEqual(unsupportedFormatResponse.json(), {
         error: "unsupported_export_format",

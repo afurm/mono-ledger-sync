@@ -1,11 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   AlertCircleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CheckCircle2Icon,
   DatabaseIcon,
   DownloadIcon,
+  FilterXIcon,
   MenuIcon,
   RefreshCwIcon,
+  SearchIcon,
   ShieldCheckIcon,
 } from "lucide-react";
 
@@ -19,6 +29,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -63,8 +82,11 @@ import {
 
 import {
   type LedgerEntry,
+  type LedgerEntryPage,
+  type LedgerTransactionFilters,
   type LocalAppSnapshot,
   loadLocalAppSnapshot,
+  loadLedgerTransactions,
   runFixtureSync,
 } from "./api";
 import { formatDate, formatDateTime, formatMinorAmount } from "./format";
@@ -75,10 +97,227 @@ type LoadState =
   | { status: "ready"; data: LocalAppSnapshot; error?: undefined }
   | { status: "error"; data?: LocalAppSnapshot; error: string };
 
+type TransactionFilterFormState = {
+  search: string;
+  accountId: string;
+  categoryId: string;
+  merchantName: string;
+  status: "all" | "hold" | "posted";
+  dateFrom: string;
+  dateTo: string;
+  amountMin: string;
+  amountMax: string;
+  page: number;
+};
+
+type TransactionPageState =
+  | { status: "loading"; data?: LedgerEntryPage; error?: undefined }
+  | { status: "ready"; data: LedgerEntryPage; error?: undefined }
+  | { status: "error"; data?: LedgerEntryPage; error: string };
+
+const TRANSACTION_PAGE_SIZE = 25;
+const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
+
+function defaultTransactionFilters(): TransactionFilterFormState {
+  return {
+    search: "",
+    accountId: "",
+    categoryId: "",
+    merchantName: "",
+    status: "all",
+    dateFrom: "",
+    dateTo: "",
+    amountMin: "",
+    amountMax: "",
+    page: 1,
+  };
+}
+
 function getInitialRoute(): RouteId {
   const hashRoute = window.location.hash.replace("#", "");
+  const [route] = hashRoute.split("?");
 
-  return isRouteId(hashRoute) ? hashRoute : "overview";
+  return route && isRouteId(route) ? route : "overview";
+}
+
+function readTransactionFiltersFromHash(): TransactionFilterFormState {
+  const filters = defaultTransactionFilters();
+  const [, queryString] = window.location.hash.replace("#", "").split("?");
+
+  if (!queryString) {
+    return filters;
+  }
+
+  const params = new URLSearchParams(queryString);
+  const status = params.get("status");
+  const page = Number.parseInt(params.get("page") ?? "", 10);
+
+  return normalizeTransactionFilters({
+    search: params.get("search") ?? "",
+    accountId: params.get("accountId") ?? "",
+    categoryId: params.get("categoryId") ?? "",
+    merchantName: params.get("merchantName") ?? "",
+    status: status === "hold" || status === "posted" ? status : "all",
+    dateFrom: params.get("dateFrom") ?? "",
+    dateTo: params.get("dateTo") ?? "",
+    amountMin: params.get("amountMin") ?? "",
+    amountMax: params.get("amountMax") ?? "",
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+  });
+}
+
+function writeTransactionFiltersToHash(
+  filters: TransactionFilterFormState,
+): void {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === "" || value === "all" || (key === "page" && value === 1)) {
+      continue;
+    }
+
+    params.set(key, String(value));
+  }
+
+  const query = params.toString();
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}#transactions${query ? `?${query}` : ""}`,
+  );
+}
+
+function dateInputToEpoch(value: string, endOfDay = false): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(`${value}T${endOfDay ? "23:59:59" : "00:00:00"}`);
+  const epoch = Math.floor(date.getTime() / 1000);
+
+  return Number.isFinite(epoch) ? epoch : undefined;
+}
+
+function amountInputToMinor(value: string): number | undefined {
+  const trimmed = value.trim();
+
+  if (!trimmed || !AMOUNT_FILTER_PATTERN.test(trimmed)) {
+    return undefined;
+  }
+
+  const amount = Number(trimmed);
+  const minorAmount = Math.round(amount * 100);
+
+  return Number.isSafeInteger(minorAmount) ? minorAmount : undefined;
+}
+
+function getAmountInputError(label: string, value: string): string | undefined {
+  const trimmed = value.trim();
+
+  if (!trimmed || AMOUNT_FILTER_PATTERN.test(trimmed)) {
+    return undefined;
+  }
+
+  return `${label} must use digits, an optional minus sign, and up to 2 decimals.`;
+}
+
+function normalizeAmountInput(value: string): string {
+  return amountInputToMinor(value) === undefined ? "" : value.trim();
+}
+
+function normalizeTransactionFilters(
+  filters: TransactionFilterFormState,
+): TransactionFilterFormState {
+  return {
+    ...filters,
+    search: filters.search.trim(),
+    merchantName: filters.merchantName.trim(),
+    amountMin: normalizeAmountInput(filters.amountMin),
+    amountMax: normalizeAmountInput(filters.amountMax),
+  };
+}
+
+function filtersToApiQuery(
+  filters: TransactionFilterFormState,
+): LedgerTransactionFilters {
+  const query: LedgerTransactionFilters = {
+    limit: TRANSACTION_PAGE_SIZE,
+    offset: (filters.page - 1) * TRANSACTION_PAGE_SIZE,
+  };
+  const from = dateInputToEpoch(filters.dateFrom);
+  const to = dateInputToEpoch(filters.dateTo, true);
+  const amountMin = amountInputToMinor(filters.amountMin);
+  const amountMax = amountInputToMinor(filters.amountMax);
+
+  if (filters.search.trim()) {
+    query.search = filters.search.trim();
+  }
+
+  if (filters.accountId) {
+    query.accountId = filters.accountId;
+  }
+
+  if (filters.categoryId) {
+    query.categoryId = filters.categoryId;
+  }
+
+  if (filters.merchantName.trim()) {
+    query.merchantName = filters.merchantName.trim();
+  }
+
+  if (filters.status !== "all") {
+    query.status = filters.status;
+  }
+
+  if (from !== undefined) {
+    query.from = from;
+  }
+
+  if (to !== undefined) {
+    query.to = to;
+  }
+
+  if (amountMin !== undefined) {
+    query.amountMin = amountMin;
+  }
+
+  if (amountMax !== undefined) {
+    query.amountMax = amountMax;
+  }
+
+  return query;
+}
+
+function hasActiveTransactionFilters(
+  filters: TransactionFilterFormState,
+): boolean {
+  return (
+    filters.search.trim() !== "" ||
+    filters.accountId !== "" ||
+    filters.categoryId !== "" ||
+    filters.merchantName.trim() !== "" ||
+    filters.status !== "all" ||
+    filters.dateFrom !== "" ||
+    filters.dateTo !== "" ||
+    amountInputToMinor(filters.amountMin) !== undefined ||
+    amountInputToMinor(filters.amountMax) !== undefined
+  );
+}
+
+function hasTransactionFilterInput(
+  filters: TransactionFilterFormState,
+): boolean {
+  return (
+    filters.search.trim() !== "" ||
+    filters.accountId !== "" ||
+    filters.categoryId !== "" ||
+    filters.merchantName.trim() !== "" ||
+    filters.status !== "all" ||
+    filters.dateFrom !== "" ||
+    filters.dateTo !== "" ||
+    filters.amountMin.trim() !== "" ||
+    filters.amountMax.trim() !== ""
+  );
 }
 
 function routeLabel(routeId: RouteId): string {
@@ -257,16 +496,21 @@ function LoadingDashboard() {
   );
 }
 
-function TransactionTable({ entries }: { entries: readonly LedgerEntry[] }) {
+function TransactionTable({
+  entries,
+  emptyTitle = "No local transactions yet",
+  emptyDescription = "Run fixture sync to populate the local SQLite ledger before reviewing transactions.",
+}: {
+  entries: readonly LedgerEntry[];
+  emptyTitle?: string;
+  emptyDescription?: string;
+}) {
   if (entries.length === 0) {
     return (
       <Alert>
         <AlertCircleIcon />
-        <AlertTitle>No local transactions yet</AlertTitle>
-        <AlertDescription>
-          Run fixture sync to populate the local SQLite ledger before reviewing
-          transactions.
-        </AlertDescription>
+        <AlertTitle>{emptyTitle}</AlertTitle>
+        <AlertDescription>{emptyDescription}</AlertDescription>
       </Alert>
     );
   }
@@ -279,6 +523,7 @@ function TransactionTable({ entries }: { entries: readonly LedgerEntry[] }) {
           <TableHead>Merchant</TableHead>
           <TableHead className="hidden sm:table-cell">Category</TableHead>
           <TableHead className="hidden lg:table-cell">Account</TableHead>
+          <TableHead className="hidden md:table-cell">Status</TableHead>
           <TableHead className="text-right">Amount</TableHead>
         </TableRow>
       </TableHeader>
@@ -296,6 +541,11 @@ function TransactionTable({ entries }: { entries: readonly LedgerEntry[] }) {
             </TableCell>
             <TableCell className="hidden max-w-44 truncate text-muted-foreground lg:table-cell">
               {entry.accountId}
+            </TableCell>
+            <TableCell className="hidden md:table-cell">
+              <Badge variant={entry.hold ? "secondary" : "outline"}>
+                {entry.hold ? "Hold" : "Posted"}
+              </Badge>
             </TableCell>
             <TableCell className="text-right font-medium">
               {formatMinorAmount(entry.amount, entry.currencyCode)}
@@ -400,6 +650,192 @@ function TransactionsRoute({
 }: {
   snapshot: LocalAppSnapshot | undefined;
 }) {
+  const [filters, setFilters] = useState<TransactionFilterFormState>(
+    readTransactionFiltersFromHash,
+  );
+  const [draftFilters, setDraftFilters] =
+    useState<TransactionFilterFormState>(filters);
+  const [pageState, setPageState] = useState<TransactionPageState>({
+    status: "loading",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setPageState((current) => ({
+      status: "loading",
+      ...(current.data ? { data: current.data } : {}),
+    }));
+
+    void loadLedgerTransactions(filtersToApiQuery(filters))
+      .then((data) => {
+        if (!cancelled) {
+          setPageState({ status: "ready", data });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPageState((current) => ({
+            status: "error",
+            ...(current.data ? { data: current.data } : {}),
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to load transactions",
+          }));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filters,
+    snapshot?.summary.lastSyncedAt,
+    snapshot?.summary.ledgerEntries,
+  ]);
+
+  const categoryOptions = useMemo(() => {
+    const categories = new Map<string, string>();
+
+    for (const entry of [
+      ...(snapshot?.transactions.entries ?? []),
+      ...(pageState.data?.entries ?? []),
+    ]) {
+      if (entry.categoryId) {
+        categories.set(
+          entry.categoryId,
+          entry.categoryName ?? entry.categoryId,
+        );
+      }
+    }
+
+    if (filters.categoryId && !categories.has(filters.categoryId)) {
+      categories.set(filters.categoryId, filters.categoryId);
+    }
+
+    return [...categories.entries()].map(([id, label]) => ({ id, label }));
+  }, [
+    filters.categoryId,
+    pageState.data?.entries,
+    snapshot?.transactions.entries,
+  ]);
+
+  const activeFilters = useMemo(() => {
+    const labels: string[] = [];
+    const account = snapshot?.accounts.find(
+      (item) => item.id === filters.accountId,
+    );
+    const category = categoryOptions.find(
+      (item) => item.id === filters.categoryId,
+    );
+
+    if (filters.search.trim()) {
+      labels.push(`Search: ${filters.search.trim()}`);
+    }
+
+    if (filters.accountId) {
+      labels.push(`Account: ${account?.id ?? filters.accountId}`);
+    }
+
+    if (filters.categoryId) {
+      labels.push(`Category: ${category?.label ?? filters.categoryId}`);
+    }
+
+    if (filters.merchantName.trim()) {
+      labels.push(`Merchant: ${filters.merchantName.trim()}`);
+    }
+
+    if (filters.status !== "all") {
+      labels.push(`Status: ${filters.status === "hold" ? "Hold" : "Posted"}`);
+    }
+
+    if (filters.dateFrom || filters.dateTo) {
+      labels.push(
+        `Date: ${filters.dateFrom || "start"} to ${filters.dateTo || "today"}`,
+      );
+    }
+
+    const hasAmountMin = amountInputToMinor(filters.amountMin) !== undefined;
+    const hasAmountMax = amountInputToMinor(filters.amountMax) !== undefined;
+
+    if (hasAmountMin || hasAmountMax) {
+      labels.push(
+        `Amount: ${hasAmountMin ? filters.amountMin : "min"} to ${
+          hasAmountMax ? filters.amountMax : "max"
+        }`,
+      );
+    }
+
+    return labels;
+  }, [categoryOptions, filters, snapshot?.accounts]);
+
+  const transactions = pageState.data;
+  const loading = pageState.status === "loading";
+  const hasFilters = hasActiveTransactionFilters(filters);
+  const hasDraftInput = hasTransactionFilterInput(draftFilters);
+  const amountMinError = getAmountInputError(
+    "Min amount",
+    draftFilters.amountMin,
+  );
+  const amountMaxError = getAmountInputError(
+    "Max amount",
+    draftFilters.amountMax,
+  );
+  const hasAmountInputErrors =
+    amountMinError !== undefined || amountMaxError !== undefined;
+  const totalPages = Math.max(
+    1,
+    Math.ceil((transactions?.total ?? 0) / TRANSACTION_PAGE_SIZE),
+  );
+  const firstVisible =
+    transactions && transactions.total > 0 ? transactions.offset + 1 : 0;
+  const lastVisible = transactions
+    ? Math.min(
+        transactions.offset + transactions.entries.length,
+        transactions.total,
+      )
+    : 0;
+
+  function applyFilters(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    if (hasAmountInputErrors) {
+      return;
+    }
+
+    const nextFilters = normalizeTransactionFilters({
+      ...draftFilters,
+      page: 1,
+    });
+
+    setFilters(nextFilters);
+    setDraftFilters(nextFilters);
+    writeTransactionFiltersToHash(nextFilters);
+  }
+
+  function resetFilters(): void {
+    const nextFilters = defaultTransactionFilters();
+
+    setFilters(nextFilters);
+    setDraftFilters(nextFilters);
+    writeTransactionFiltersToHash(nextFilters);
+  }
+
+  function setPage(page: number): void {
+    const nextFilters = {
+      ...filters,
+      page,
+    };
+
+    setFilters(nextFilters);
+    setDraftFilters((current) => ({
+      ...current,
+      page,
+    }));
+    writeTransactionFiltersToHash(nextFilters);
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -408,8 +844,309 @@ function TransactionsRoute({
           Dense review table with local filters and raw-safe transaction labels.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <TransactionTable entries={snapshot?.transactions.entries ?? []} />
+      <CardContent className="flex flex-col gap-4">
+        <form className="grid gap-3 lg:grid-cols-4" onSubmit={applyFilters}>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Search
+            </span>
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-8"
+                placeholder="Description, merchant, category"
+                type="search"
+                value={draftFilters.search}
+                onChange={(event) =>
+                  setDraftFilters((current) => ({
+                    ...current,
+                    search: event.target.value,
+                  }))
+                }
+              />
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Merchant
+            </span>
+            <Input
+              placeholder="Merchant name"
+              value={draftFilters.merchantName}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  merchantName: event.target.value,
+                }))
+              }
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Account
+            </span>
+            <Select
+              value={draftFilters.accountId || "all"}
+              onValueChange={(value) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  accountId: value === "all" ? "" : value,
+                }))
+              }
+            >
+              <SelectTrigger className="w-full" aria-label="Account filter">
+                <SelectValue placeholder="All accounts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All accounts</SelectItem>
+                  {(snapshot?.accounts ?? []).map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.id}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Category
+            </span>
+            <Select
+              value={draftFilters.categoryId || "all"}
+              onValueChange={(value) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  categoryId: value === "all" ? "" : value,
+                }))
+              }
+            >
+              <SelectTrigger className="w-full" aria-label="Category filter">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All categories</SelectItem>
+                  {categoryOptions.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Status
+            </span>
+            <Select
+              value={draftFilters.status}
+              onValueChange={(value) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  status:
+                    value === "hold" || value === "posted" ? value : "all",
+                }))
+              }
+            >
+              <SelectTrigger className="w-full" aria-label="Status filter">
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="posted">Posted</SelectItem>
+                  <SelectItem value="hold">Hold</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              From
+            </span>
+            <Input
+              type="date"
+              value={draftFilters.dateFrom}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  dateFrom: event.target.value,
+                }))
+              }
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              To
+            </span>
+            <Input
+              type="date"
+              value={draftFilters.dateTo}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  dateTo: event.target.value,
+                }))
+              }
+            />
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                Min amount
+              </span>
+              <Input
+                inputMode="decimal"
+                placeholder="-1000.00"
+                aria-describedby={
+                  amountMinError ? "transaction-amount-min-error" : undefined
+                }
+                aria-invalid={amountMinError ? true : undefined}
+                value={draftFilters.amountMin}
+                onChange={(event) =>
+                  setDraftFilters((current) => ({
+                    ...current,
+                    amountMin: event.target.value,
+                  }))
+                }
+              />
+              {amountMinError && (
+                <span
+                  id="transaction-amount-min-error"
+                  className="text-xs text-destructive"
+                >
+                  {amountMinError}
+                </span>
+              )}
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                Max amount
+              </span>
+              <Input
+                inputMode="decimal"
+                placeholder="5000.00"
+                aria-describedby={
+                  amountMaxError ? "transaction-amount-max-error" : undefined
+                }
+                aria-invalid={amountMaxError ? true : undefined}
+                value={draftFilters.amountMax}
+                onChange={(event) =>
+                  setDraftFilters((current) => ({
+                    ...current,
+                    amountMax: event.target.value,
+                  }))
+                }
+              />
+              {amountMaxError && (
+                <span
+                  id="transaction-amount-max-error"
+                  className="text-xs text-destructive"
+                >
+                  {amountMaxError}
+                </span>
+              )}
+            </label>
+          </div>
+
+          <div className="flex items-end gap-2 lg:col-span-2">
+            <Button type="submit" disabled={hasAmountInputErrors}>
+              Apply filters
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={resetFilters}
+              disabled={!hasFilters && !hasDraftInput}
+            >
+              <FilterXIcon data-icon="inline-start" />
+              Reset
+            </Button>
+          </div>
+        </form>
+
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {activeFilters.map((label) => (
+              <Badge key={label} variant="secondary">
+                {label}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {pageState.status === "error" && (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertTitle>Unable to load transactions</AlertTitle>
+            <AlertDescription>{pageState.error}</AlertDescription>
+          </Alert>
+        )}
+
+        {loading && !transactions ? (
+          <div className="grid gap-2">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton className="h-9 w-full" key={index} />
+            ))}
+          </div>
+        ) : (
+          <TransactionTable
+            entries={transactions?.entries ?? []}
+            emptyTitle={
+              hasFilters
+                ? "No matching transactions"
+                : "No local transactions yet"
+            }
+            emptyDescription={
+              hasFilters
+                ? "Adjust or reset the filters to review local ledger entries."
+                : "Run fixture sync to populate the local SQLite ledger before reviewing transactions."
+            }
+          />
+        )}
+
+        <Separator />
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {transactions && transactions.total > 0
+              ? `Showing ${firstVisible}-${lastVisible} of ${transactions.total}`
+              : "No rows to show"}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={filters.page <= 1 || loading}
+              onClick={() => setPage(filters.page - 1)}
+            >
+              <ChevronLeftIcon data-icon="inline-start" />
+              Previous
+            </Button>
+            <Badge variant="outline">
+              Page {filters.page} of {totalPages}
+            </Badge>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={filters.page >= totalPages || loading}
+              onClick={() => setPage(filters.page + 1)}
+            >
+              Next
+              <ChevronRightIcon data-icon="inline-end" />
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
