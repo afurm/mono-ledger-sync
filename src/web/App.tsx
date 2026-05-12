@@ -7,6 +7,9 @@ import {
 } from "react";
 import {
   AlertCircleIcon,
+  ArrowDownIcon,
+  ArrowUpDownIcon,
+  ArrowUpIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckCircle2Icon,
@@ -84,6 +87,8 @@ import {
   type LedgerEntry,
   type LedgerEntryPage,
   type LedgerTransactionFilters,
+  type LedgerTransactionSortDirection,
+  type LedgerTransactionSortField,
   type LocalAppSnapshot,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
@@ -108,6 +113,8 @@ type TransactionFilterFormState = {
   amountMin: string;
   amountMax: string;
   page: number;
+  sortBy: LedgerTransactionSortField;
+  sortDirection: LedgerTransactionSortDirection;
 };
 
 type TransactionPageState =
@@ -117,7 +124,25 @@ type TransactionPageState =
 
 const TRANSACTION_PAGE_SIZE = 25;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
-
+const transactionSortFields = [
+  "time",
+  "merchant",
+  "amount",
+  "account",
+  "category",
+  "status",
+] as const satisfies readonly LedgerTransactionSortField[];
+const defaultTransactionSortDirections: Record<
+  LedgerTransactionSortField,
+  LedgerTransactionSortDirection
+> = {
+  time: "desc",
+  merchant: "asc",
+  amount: "desc",
+  account: "asc",
+  category: "asc",
+  status: "desc",
+};
 function defaultTransactionFilters(): TransactionFilterFormState {
   return {
     search: "",
@@ -130,6 +155,8 @@ function defaultTransactionFilters(): TransactionFilterFormState {
     amountMin: "",
     amountMax: "",
     page: 1,
+    sortBy: "time",
+    sortDirection: "desc",
   };
 }
 
@@ -138,6 +165,18 @@ function getInitialRoute(): RouteId {
   const [route] = hashRoute.split("?");
 
   return route && isRouteId(route) ? route : "overview";
+}
+
+function isTransactionSortField(
+  value: string | null,
+): value is LedgerTransactionSortField {
+  return transactionSortFields.includes(value as LedgerTransactionSortField);
+}
+
+function isTransactionSortDirection(
+  value: string | null,
+): value is LedgerTransactionSortDirection {
+  return value === "asc" || value === "desc";
 }
 
 function readTransactionFiltersFromHash(): TransactionFilterFormState {
@@ -150,6 +189,8 @@ function readTransactionFiltersFromHash(): TransactionFilterFormState {
 
   const params = new URLSearchParams(queryString);
   const status = params.get("status");
+  const sortBy = params.get("sortBy");
+  const sortDirection = params.get("sortDirection");
   const page = Number.parseInt(params.get("page") ?? "", 10);
 
   return normalizeTransactionFilters({
@@ -163,6 +204,10 @@ function readTransactionFiltersFromHash(): TransactionFilterFormState {
     amountMin: params.get("amountMin") ?? "",
     amountMax: params.get("amountMax") ?? "",
     page: Number.isFinite(page) && page > 0 ? page : 1,
+    sortBy: isTransactionSortField(sortBy) ? sortBy : "time",
+    sortDirection: isTransactionSortDirection(sortDirection)
+      ? sortDirection
+      : "desc",
   });
 }
 
@@ -173,6 +218,14 @@ function writeTransactionFiltersToHash(
 
   for (const [key, value] of Object.entries(filters)) {
     if (value === "" || value === "all" || (key === "page" && value === 1)) {
+      continue;
+    }
+
+    if (key === "sortBy" && value === "time") {
+      continue;
+    }
+
+    if (key === "sortDirection" && value === "desc") {
       continue;
     }
 
@@ -243,6 +296,8 @@ function filtersToApiQuery(
   const query: LedgerTransactionFilters = {
     limit: TRANSACTION_PAGE_SIZE,
     offset: (filters.page - 1) * TRANSACTION_PAGE_SIZE,
+    sortBy: filters.sortBy,
+    sortDirection: filters.sortDirection,
   };
   const from = dateInputToEpoch(filters.dateFrom);
   const to = dateInputToEpoch(filters.dateTo, true);
@@ -318,6 +373,17 @@ function hasTransactionFilterInput(
     filters.amountMin.trim() !== "" ||
     filters.amountMax.trim() !== ""
   );
+}
+
+function getNextSortDirection(
+  current: TransactionFilterFormState,
+  sortBy: LedgerTransactionSortField,
+): LedgerTransactionSortDirection {
+  if (current.sortBy !== sortBy) {
+    return defaultTransactionSortDirections[sortBy];
+  }
+
+  return current.sortDirection === "asc" ? "desc" : "asc";
 }
 
 function routeLabel(routeId: RouteId): string {
@@ -496,12 +562,70 @@ function LoadingDashboard() {
   );
 }
 
+function SortableTableHead({
+  field,
+  label,
+  sortBy,
+  sortDirection,
+  className,
+  align = "left",
+  onSortChange,
+}: {
+  field: LedgerTransactionSortField;
+  label: string;
+  sortBy: LedgerTransactionSortField | undefined;
+  sortDirection: LedgerTransactionSortDirection | undefined;
+  className?: string;
+  align?: "left" | "right";
+  onSortChange: ((field: LedgerTransactionSortField) => void) | undefined;
+}) {
+  const isActive = sortBy === field;
+  const ariaSort = isActive
+    ? sortDirection === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+  const SortIcon = isActive
+    ? sortDirection === "asc"
+      ? ArrowUpIcon
+      : ArrowDownIcon
+    : ArrowUpDownIcon;
+
+  if (!onSortChange) {
+    return <TableHead className={className}>{label}</TableHead>;
+  }
+
+  return (
+    <TableHead className={className} aria-sort={ariaSort}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={`h-7 px-2 font-medium ${
+          align === "right" ? "ml-auto" : "-ml-2"
+        } ${isActive ? "text-foreground" : "text-muted-foreground"}`}
+        onClick={() => onSortChange(field)}
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        <SortIcon data-icon="inline-end" />
+      </Button>
+    </TableHead>
+  );
+}
+
 function TransactionTable({
   entries,
+  sortBy,
+  sortDirection,
+  onSortChange,
   emptyTitle = "No local transactions yet",
   emptyDescription = "Run fixture sync to populate the local SQLite ledger before reviewing transactions.",
 }: {
   entries: readonly LedgerEntry[];
+  sortBy?: LedgerTransactionSortField;
+  sortDirection?: LedgerTransactionSortDirection;
+  onSortChange?: (field: LedgerTransactionSortField) => void;
   emptyTitle?: string;
   emptyDescription?: string;
 }) {
@@ -519,12 +643,53 @@ function TransactionTable({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Date</TableHead>
-          <TableHead>Merchant</TableHead>
-          <TableHead className="hidden sm:table-cell">Category</TableHead>
-          <TableHead className="hidden lg:table-cell">Account</TableHead>
-          <TableHead className="hidden md:table-cell">Status</TableHead>
-          <TableHead className="text-right">Amount</TableHead>
+          <SortableTableHead
+            field="time"
+            label="Date"
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+          />
+          <SortableTableHead
+            field="merchant"
+            label="Merchant"
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+          />
+          <SortableTableHead
+            field="category"
+            label="Category"
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+            className="hidden sm:table-cell"
+          />
+          <SortableTableHead
+            field="account"
+            label="Account"
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+            className="hidden lg:table-cell"
+          />
+          <SortableTableHead
+            field="status"
+            label="Status"
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+            className="hidden md:table-cell"
+          />
+          <SortableTableHead
+            field="amount"
+            label="Amount"
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSortChange={onSortChange}
+            className="text-right"
+            align="right"
+          />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -836,6 +1001,24 @@ function TransactionsRoute({
     writeTransactionFiltersToHash(nextFilters);
   }
 
+  function setSort(sortBy: LedgerTransactionSortField): void {
+    const nextFilters = {
+      ...filters,
+      sortBy,
+      sortDirection: getNextSortDirection(filters, sortBy),
+      page: 1,
+    };
+
+    setFilters(nextFilters);
+    setDraftFilters((current) => ({
+      ...current,
+      sortBy: nextFilters.sortBy,
+      sortDirection: nextFilters.sortDirection,
+      page: 1,
+    }));
+    writeTransactionFiltersToHash(nextFilters);
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -1102,6 +1285,9 @@ function TransactionsRoute({
         ) : (
           <TransactionTable
             entries={transactions?.entries ?? []}
+            sortBy={filters.sortBy}
+            sortDirection={filters.sortDirection}
+            onSortChange={setSort}
             emptyTitle={
               hasFilters
                 ? "No matching transactions"

@@ -5,6 +5,22 @@ export type SyncRunStatus =
   | "partial"
   | "failed";
 
+export const ledgerEntrySortFields = [
+  "time",
+  "merchant",
+  "amount",
+  "account",
+  "category",
+  "status",
+] as const;
+
+export type LedgerEntrySortField = (typeof ledgerEntrySortFields)[number];
+
+export const ledgerEntrySortDirections = ["asc", "desc"] as const;
+
+export type LedgerEntrySortDirection =
+  (typeof ledgerEntrySortDirections)[number];
+
 export interface AccountBalance {
   accountId: string;
   currencyCode: number;
@@ -51,6 +67,8 @@ export interface LedgerEntryQuery {
   to?: number;
   limit?: number;
   offset?: number;
+  sortBy?: LedgerEntrySortField;
+  sortDirection?: LedgerEntrySortDirection;
 }
 
 export interface LedgerEntryPage {

@@ -62,6 +62,16 @@ export interface LedgerEntryPage {
   offset: number;
 }
 
+export type LedgerTransactionSortField =
+  | "time"
+  | "merchant"
+  | "amount"
+  | "account"
+  | "category"
+  | "status";
+
+export type LedgerTransactionSortDirection = "asc" | "desc";
+
 export interface LedgerTransactionFilters {
   accountId?: string;
   categoryId?: string;
@@ -74,6 +84,8 @@ export interface LedgerTransactionFilters {
   to?: number;
   limit?: number;
   offset?: number;
+  sortBy?: LedgerTransactionSortField;
+  sortDirection?: LedgerTransactionSortDirection;
 }
 
 export interface SyncRun {
