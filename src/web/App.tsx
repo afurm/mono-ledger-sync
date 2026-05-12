@@ -142,6 +142,26 @@ interface LedgerFreshnessWarning {
   description: string;
 }
 
+interface SyncHealthBucket {
+  key: string;
+  label: string;
+  success: number;
+  partial: number;
+  failed: number;
+  skipped: number;
+}
+
+interface SyncHealthSummary {
+  buckets: SyncHealthBucket[];
+  totals: {
+    success: number;
+    partial: number;
+    failed: number;
+    skipped: number;
+  };
+  maxBucketTotal: number;
+}
+
 type TransactionFilterFormState = {
   search: string;
   accountId: string;
@@ -181,6 +201,7 @@ const THEME_STORAGE_KEY = "mono-ledger-sync-theme";
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const STALE_SYNC_THRESHOLD_MS = DAY_MS;
+const SYNC_HEALTH_DAYS = 30;
 const transactionSortFields = [
   "time",
   "merchant",
@@ -627,6 +648,94 @@ function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
     : "Waiting for first sync";
 }
 
+function localDayKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function syncHealthBucketLabel(date: Date): string {
+  return new Intl.DateTimeFormat("en", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
+function getSyncHealthSummary(
+  runs: readonly SyncRun[],
+  now = Date.now(),
+): SyncHealthSummary {
+  const today = new Date(now);
+  const todayStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  const buckets: SyncHealthBucket[] = Array.from(
+    { length: SYNC_HEALTH_DAYS },
+    (_, index) => {
+      const date = new Date(
+        todayStart.getTime() - (SYNC_HEALTH_DAYS - index - 1) * DAY_MS,
+      );
+
+      return {
+        key: localDayKey(date),
+        label: syncHealthBucketLabel(date),
+        success: 0,
+        partial: 0,
+        failed: 0,
+        skipped: 0,
+      };
+    },
+  );
+  const bucketMap = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+  for (const run of runs) {
+    const startedAt = new Date(run.startedAt);
+
+    if (Number.isNaN(startedAt.getTime())) {
+      continue;
+    }
+
+    const bucket = bucketMap.get(localDayKey(startedAt));
+
+    if (!bucket) {
+      continue;
+    }
+
+    if (run.status === "success") {
+      bucket.success += 1;
+    } else if (run.status === "partial") {
+      bucket.partial += 1;
+    } else if (run.status === "failed") {
+      bucket.failed += 1;
+    }
+
+    bucket.skipped += run.itemsSkipped;
+  }
+
+  const totals = buckets.reduce(
+    (currentTotals, bucket) => ({
+      success: currentTotals.success + bucket.success,
+      partial: currentTotals.partial + bucket.partial,
+      failed: currentTotals.failed + bucket.failed,
+      skipped: currentTotals.skipped + bucket.skipped,
+    }),
+    { success: 0, partial: 0, failed: 0, skipped: 0 },
+  );
+  const maxBucketTotal = Math.max(
+    1,
+    ...buckets.map(
+      (bucket) =>
+        bucket.success + bucket.partial + bucket.failed + bucket.skipped,
+    ),
+  );
+
+  return { buckets, totals, maxBucketTotal };
+}
+
 function formatSyncAge(ageMs: number): string {
   const safeAgeMs = Math.max(0, ageMs);
 
@@ -741,6 +850,175 @@ function SyncRunStats({ run }: { run: SyncRun }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function SyncHealthMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-xl font-semibold">{value}</p>
+      <p className="text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+function SyncHealthSegment({
+  value,
+  max,
+  className,
+}: {
+  value: number;
+  max: number;
+  className: string;
+}) {
+  if (value === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className={className}
+      style={{ height: `${Math.max(8, (value / max) * 100)}%` }}
+    />
+  );
+}
+
+function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
+  const summary = getSyncHealthSummary(runs);
+  const totalActivity =
+    summary.totals.success +
+    summary.totals.partial +
+    summary.totals.failed +
+    summary.totals.skipped;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>30-day sync health</CardTitle>
+        <CardDescription>
+          Successful, partial, failed, and skipped activity from local sync
+          runs.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <SyncHealthMetric
+            label="Successful"
+            value={summary.totals.success}
+            detail="Completed sync runs"
+          />
+          <SyncHealthMetric
+            label="Partial"
+            value={summary.totals.partial}
+            detail="Runs with partial completion"
+          />
+          <SyncHealthMetric
+            label="Failed"
+            value={summary.totals.failed}
+            detail="Runs that need attention"
+          />
+          <SyncHealthMetric
+            label="Skipped"
+            value={summary.totals.skipped}
+            detail="Statement items skipped"
+          />
+        </div>
+
+        {totalActivity === 0 ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>No sync activity in the last 30 days</AlertTitle>
+            <AlertDescription>
+              Run sync from the top bar to start building local health history.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div
+              aria-label="Last 30 days sync health"
+              className="flex h-32 items-end gap-1 rounded-lg border bg-muted/25 p-3"
+              role="img"
+            >
+              {summary.buckets.map((bucket, index) => {
+                const bucketTotal =
+                  bucket.success +
+                  bucket.partial +
+                  bucket.failed +
+                  bucket.skipped;
+
+                return (
+                  <div
+                    aria-label={`${bucket.label}: ${bucket.success} successful, ${bucket.partial} partial, ${bucket.failed} failed, ${bucket.skipped} skipped`}
+                    className="flex h-full min-w-0 flex-1 flex-col justify-end"
+                    key={bucket.key}
+                    title={`${bucket.label}: ${bucketTotal} total`}
+                  >
+                    <div className="flex h-full w-full flex-col justify-end overflow-hidden rounded-sm bg-background">
+                      {bucketTotal === 0 ? (
+                        <div className="h-1 bg-muted" />
+                      ) : (
+                        <>
+                          <SyncHealthSegment
+                            value={bucket.skipped}
+                            max={summary.maxBucketTotal}
+                            className="bg-slate-400"
+                          />
+                          <SyncHealthSegment
+                            value={bucket.failed}
+                            max={summary.maxBucketTotal}
+                            className="bg-destructive"
+                          />
+                          <SyncHealthSegment
+                            value={bucket.partial}
+                            max={summary.maxBucketTotal}
+                            className="bg-amber-500"
+                          />
+                          <SyncHealthSegment
+                            value={bucket.success}
+                            max={summary.maxBucketTotal}
+                            className="bg-emerald-600"
+                          />
+                        </>
+                      )}
+                    </div>
+                    <span className="sr-only">
+                      {index + 1} of {summary.buckets.length}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <span className="size-2 rounded-sm bg-emerald-600" />
+                Successful
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="size-2 rounded-sm bg-amber-500" />
+                Partial
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="size-2 rounded-sm bg-destructive" />
+                Failed
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="size-2 rounded-sm bg-slate-400" />
+                Skipped
+              </span>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1911,6 +2189,8 @@ function OverviewRoute({
           drillDownLabel="Review expenses"
         />
       </div>
+
+      <SyncHealthChart runs={snapshot.syncRuns} />
 
       <Card>
         <CardHeader>
