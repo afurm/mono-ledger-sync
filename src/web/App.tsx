@@ -28,7 +28,12 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -131,6 +136,11 @@ type LoadState =
 
 type ThemeMode = "system" | "light" | "dark";
 
+interface LedgerFreshnessWarning {
+  title: string;
+  description: string;
+}
+
 type TransactionFilterFormState = {
   search: string;
   accountId: string;
@@ -167,6 +177,9 @@ interface TransactionFilterPreset {
 const TRANSACTION_PAGE_SIZE = 25;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
 const THEME_STORAGE_KEY = "mono-ledger-sync-theme";
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const STALE_SYNC_THRESHOLD_MS = DAY_MS;
 const transactionSortFields = [
   "time",
   "merchant",
@@ -613,6 +626,64 @@ function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
     : "Waiting for first sync";
 }
 
+function formatSyncAge(ageMs: number): string {
+  const safeAgeMs = Math.max(0, ageMs);
+
+  if (safeAgeMs < HOUR_MS) {
+    return "less than 1 hour ago";
+  }
+
+  if (safeAgeMs < DAY_MS) {
+    const hours = Math.floor(safeAgeMs / HOUR_MS);
+
+    return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  }
+
+  const days = Math.floor(safeAgeMs / DAY_MS);
+
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
+
+function getLedgerFreshnessWarning(
+  snapshot: LocalAppSnapshot | undefined,
+  now = Date.now(),
+): LedgerFreshnessWarning | undefined {
+  if (!snapshot) {
+    return undefined;
+  }
+
+  const lastSyncedAt = snapshot.summary.lastSyncedAt;
+
+  if (!lastSyncedAt) {
+    return {
+      title: "No completed sync yet",
+      description: `${snapshot.config.profile} has no successful sync timestamp. Run sync before reviewing reports or exporting local files.`,
+    };
+  }
+
+  const lastSyncedTime = Date.parse(lastSyncedAt);
+
+  if (!Number.isFinite(lastSyncedTime)) {
+    return {
+      title: "Sync timestamp needs attention",
+      description: `The local ledger has an unreadable sync timestamp for ${snapshot.config.profile}. Run sync to refresh the local status.`,
+    };
+  }
+
+  const ageMs = now - lastSyncedTime;
+
+  if (ageMs <= STALE_SYNC_THRESHOLD_MS) {
+    return undefined;
+  }
+
+  return {
+    title: "Local data may be stale",
+    description: `${snapshot.config.profile} last synced ${formatSyncAge(
+      ageMs,
+    )}. Run sync before reviewing reports or exporting local files.`,
+  };
+}
+
 function formatSyncRunDuration(run: SyncRun): string {
   if (!run.finishedAt) {
     return run.status === "running" ? "Running" : "Not finished";
@@ -796,6 +867,48 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+function StaleDataBanner({
+  snapshot,
+  syncing,
+  onRunSync,
+  onRouteChange,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  syncing: boolean;
+  onRunSync: () => void;
+  onRouteChange: (routeId: RouteId) => void;
+}) {
+  const warning = getLedgerFreshnessWarning(snapshot);
+
+  if (!warning) {
+    return null;
+  }
+
+  return (
+    <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100">
+      <AlertCircleIcon />
+      <AlertTitle>{warning.title}</AlertTitle>
+      <AlertDescription className="text-amber-900/85 dark:text-amber-100/85">
+        {warning.description}
+      </AlertDescription>
+      <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
+        <Button size="sm" type="button" disabled={syncing} onClick={onRunSync}>
+          <RefreshCwIcon data-icon="inline-start" />
+          {syncing ? "Syncing" : "Run Sync"}
+        </Button>
+        <Button
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => onRouteChange("sync")}
+        >
+          Sync controls
+        </Button>
+      </AlertAction>
+    </Alert>
   );
 }
 
@@ -2822,6 +2935,13 @@ export default function App() {
                 <AlertDescription>{loadState.error}</AlertDescription>
               </Alert>
             )}
+
+            <StaleDataBanner
+              snapshot={snapshot}
+              syncing={syncing}
+              onRunSync={runSync}
+              onRouteChange={onRouteChange}
+            />
 
             <Alert>
               <ShieldCheckIcon />
