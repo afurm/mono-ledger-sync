@@ -29,8 +29,10 @@ import type {
   LedgerAccount,
   LedgerEntryPage,
   LedgerSummary,
+  StoredWebhookEvent,
   SyncRun,
 } from "../storage/index.js";
+import type { SyncLedgerResult } from "../sync/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
@@ -273,6 +275,216 @@ const ledgerEntriesPageResponseSchema = {
   },
 } as const;
 
+const syncRunResponseSchema = {
+  type: "object",
+  required: [
+    "id",
+    "profile",
+    "source",
+    "status",
+    "startedAt",
+    "itemsSeen",
+    "itemsInserted",
+    "itemsUpdated",
+    "itemsSkipped",
+  ],
+  properties: {
+    id: { type: "string" },
+    profile: { type: "string" },
+    source: { enum: ["fixture", "monobank"] },
+    status: {
+      enum: ["queued", "running", "success", "partial", "failed"],
+    },
+    startedAt: { type: "string" },
+    finishedAt: { type: "string" },
+    itemsSeen: { type: "number" },
+    itemsInserted: { type: "number" },
+    itemsUpdated: { type: "number" },
+    itemsSkipped: { type: "number" },
+  },
+} as const;
+
+const syncWriteStatsResponseSchema = {
+  type: "object",
+  required: ["inserted", "updated", "skipped"],
+  properties: {
+    inserted: { type: "number" },
+    updated: { type: "number" },
+    skipped: { type: "number" },
+  },
+} as const;
+
+const syncRunResultResponseSchema = {
+  type: "object",
+  required: ["run", "accounts", "dryRun", "stats", "summary"],
+  properties: {
+    run: syncRunResponseSchema,
+    accounts: {
+      type: "array",
+      items: {
+        type: "object",
+        required: [
+          "accountId",
+          "from",
+          "to",
+          "windowsFetched",
+          "itemsSeen",
+          "writeStats",
+        ],
+        properties: {
+          accountId: { type: "string" },
+          from: { type: "number" },
+          to: { type: "number" },
+          windowsFetched: { type: "number" },
+          itemsSeen: { type: "number" },
+          writeStats: syncWriteStatsResponseSchema,
+        },
+      },
+    },
+    dryRun: { type: "boolean" },
+    stats: {
+      type: "object",
+      required: [
+        "apiCalls",
+        "windowsFetched",
+        "itemsSeen",
+        "itemsInserted",
+        "itemsUpdated",
+        "itemsSkipped",
+        "rateLimited",
+      ],
+      properties: {
+        apiCalls: { type: "number" },
+        windowsFetched: { type: "number" },
+        itemsSeen: { type: "number" },
+        itemsInserted: { type: "number" },
+        itemsUpdated: { type: "number" },
+        itemsSkipped: { type: "number" },
+        rateLimited: { type: "number" },
+      },
+    },
+    summary: ledgerSummaryResponseSchema,
+  },
+} as const;
+
+const syncRunsResponseSchema = {
+  type: "array",
+  items: syncRunResponseSchema,
+} as const;
+
+const localApiErrorResponseSchema = {
+  type: "object",
+  required: ["error", "message"],
+  properties: {
+    error: { type: "string" },
+    message: { type: "string" },
+  },
+} as const;
+
+const webhookEventResponseSchema = {
+  type: "object",
+  required: ["id", "profile", "accountId", "type", "receivedAt"],
+  properties: {
+    id: { type: "string" },
+    profile: { type: "string" },
+    accountId: { type: "string" },
+    type: { type: "string" },
+    statementItemId: { type: "string" },
+    receivedAt: { type: "string" },
+    processedAt: { type: "string" },
+  },
+} as const;
+
+const webhookAcceptedResponseSchema = {
+  type: "object",
+  required: ["accepted", "pullRequired", "event"],
+  properties: {
+    accepted: { const: true },
+    pullRequired: { const: true },
+    event: webhookEventResponseSchema,
+  },
+} as const;
+
+const monobankStatementItemBodySchema = {
+  type: "object",
+  required: [
+    "id",
+    "time",
+    "description",
+    "mcc",
+    "originalMcc",
+    "amount",
+    "operationAmount",
+    "currencyCode",
+    "commissionRate",
+    "cashbackAmount",
+    "balance",
+    "hold",
+  ],
+  additionalProperties: true,
+  properties: {
+    id: { type: "string" },
+    time: { type: "number" },
+    description: { type: "string" },
+    mcc: { type: "number" },
+    originalMcc: { type: "number" },
+    amount: { type: "number" },
+    operationAmount: { type: "number" },
+    currencyCode: { type: "number" },
+    commissionRate: { type: "number" },
+    cashbackAmount: { type: "number" },
+    balance: { type: "number" },
+    hold: { type: "boolean" },
+    comment: { type: "string" },
+    receiptId: { type: "string" },
+    invoiceId: { type: "string" },
+    counterEdrpou: { type: "string" },
+    counterIban: { type: "string" },
+    counterName: { type: "string" },
+  },
+} as const;
+
+const monobankWebhookBodySchema = {
+  type: "object",
+  required: ["type", "data"],
+  properties: {
+    type: { const: "StatementItem" },
+    data: {
+      type: "object",
+      required: ["account", "statementItem"],
+      properties: {
+        account: { type: "string" },
+        statementItem: monobankStatementItemBodySchema,
+      },
+    },
+  },
+} as const;
+
+const ledgerEntriesQuerySchema = {
+  type: "object",
+  properties: {
+    accountId: { type: "string" },
+    categoryId: { type: "string" },
+    search: { type: "string" },
+    from: { type: "integer", minimum: 0 },
+    to: { type: "integer", minimum: 0 },
+    limit: { type: "integer", minimum: 1 },
+    offset: { type: "integer", minimum: 0 },
+  },
+} as const;
+
+const ledgerExportQuerySchema = {
+  type: "object",
+  properties: {
+    format: { type: "string" },
+    preset: { type: "string" },
+    from: { type: "integer", minimum: 0 },
+    to: { type: "integer", minimum: 0 },
+    accountId: { type: "string" },
+    categoryId: { type: "string" },
+  },
+} as const;
+
 function summarizeFixtureSet(
   fixtureSet: MonobankFixtureSet,
   profile: string,
@@ -416,14 +628,16 @@ async function createServices(
   };
 }
 
-function readNumberQuery(
-  value: string | string[] | undefined,
-): number | undefined {
+function readNumberQuery(value: unknown): number | undefined {
   if (Array.isArray(value)) {
     return readNumberQuery(value[0]);
   }
 
-  if (value === undefined || value.trim() === "") {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value !== "string" || value.trim() === "") {
     return undefined;
   }
 
@@ -432,14 +646,12 @@ function readNumberQuery(
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function readStringQuery(
-  value: string | string[] | undefined,
-): string | undefined {
+function readStringQuery(value: unknown): string | undefined {
   if (Array.isArray(value)) {
-    return value[0];
+    return readStringQuery(value[0]);
   }
 
-  if (value === undefined || value.trim() === "") {
+  if (typeof value !== "string" || value.trim() === "") {
     return undefined;
   }
 
@@ -1099,6 +1311,7 @@ function registerLocalApiRoutes(
     `${localApiRoutePrefix}/ledger/transactions`,
     {
       schema: {
+        querystring: ledgerEntriesQuerySchema,
         response: {
           200: ledgerEntriesPageResponseSchema,
         },
@@ -1150,19 +1363,36 @@ function registerLocalApiRoutes(
     },
   );
 
-  app.post(`${localApiRoutePrefix}/sync/run`, async (): Promise<unknown> => {
-    const services = await getServices();
+  app.post(
+    `${localApiRoutePrefix}/sync/run`,
+    {
+      schema: {
+        response: {
+          200: syncRunResultResponseSchema,
+        },
+      },
+    },
+    async (): Promise<SyncLedgerResult> => {
+      const services = await getServices();
 
-    return syncLedgerWithMonobank({
-      profile: services.profile,
-      source: services.source,
-      adapter: services.adapter,
-      db: services.db,
-    });
-  });
+      return syncLedgerWithMonobank({
+        profile: services.profile,
+        source: services.source,
+        adapter: services.adapter,
+        db: services.db,
+      });
+    },
+  );
 
   app.get(
     `${localApiRoutePrefix}/sync/runs`,
+    {
+      schema: {
+        response: {
+          200: syncRunsResponseSchema,
+        },
+      },
+    },
     async (): Promise<readonly SyncRun[]> => {
       const services = await getServices();
 
@@ -1172,7 +1402,21 @@ function registerLocalApiRoutes(
 
   app.post(
     `${localApiRoutePrefix}/webhooks/monobank`,
-    async (request): Promise<unknown> => {
+    {
+      schema: {
+        body: monobankWebhookBodySchema,
+        response: {
+          200: webhookAcceptedResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+    ): Promise<{
+      accepted: true;
+      pullRequired: true;
+      event: StoredWebhookEvent;
+    }> => {
       const services = await getServices();
 
       assertMonobankPersonalWebhookEvent(request.body, "request.body");
@@ -1186,50 +1430,62 @@ function registerLocalApiRoutes(
     },
   );
 
-  app.get(`${localApiRoutePrefix}/exports/ledger`, async (request, reply) => {
-    const services = await getServices();
-    const query = request.query as Record<string, string | string[]>;
-    const format = readStringQuery(query.format);
-    const preset = readStringQuery(query.preset);
-    const from = readNumberQuery(query.from);
-    const to = readNumberQuery(query.to);
-    const accountId = readStringQuery(query.accountId);
-    const categoryId = readStringQuery(query.categoryId);
+  app.get(
+    `${localApiRoutePrefix}/exports/ledger`,
+    {
+      schema: {
+        querystring: ledgerExportQuerySchema,
+        response: {
+          200: { type: "string" },
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const format = readStringQuery(query.format);
+      const preset = readStringQuery(query.preset);
+      const from = readNumberQuery(query.from);
+      const to = readNumberQuery(query.to);
+      const accountId = readStringQuery(query.accountId);
+      const categoryId = readStringQuery(query.categoryId);
 
-    if (format && (!isExportFormat(format) || format === "sqlite")) {
-      reply.code(400);
-      return {
-        error: "unsupported_export_format",
-        message: "Supported export formats: csv, json, jsonl, journal-csv",
-      };
-    }
+      if (format && (!isExportFormat(format) || format === "sqlite")) {
+        reply.code(400);
+        return {
+          error: "unsupported_export_format",
+          message: "Supported export formats: csv, json, jsonl, journal-csv",
+        };
+      }
 
-    if (preset && !isExportPreset(preset)) {
-      reply.code(400);
-      return {
-        error: "unsupported_export_preset",
-        message: `Supported export presets: ${exportPresetNames.join(", ")}`,
-      };
-    }
+      if (preset && !isExportPreset(preset)) {
+        reply.code(400);
+        return {
+          error: "unsupported_export_preset",
+          message: `Supported export presets: ${exportPresetNames.join(", ")}`,
+        };
+      }
 
-    const ledgerExport = await createLedgerExport(services.db, {
-      profile: services.profile,
-      ...(format ? { format: format as ExportFormat } : {}),
-      ...(preset ? { preset: preset as ExportPreset } : {}),
-      ...(from !== undefined ? { from } : {}),
-      ...(to !== undefined ? { to } : {}),
-      ...(accountId ? { accountIds: [accountId] } : {}),
-      ...(categoryId ? { categoryIds: [categoryId] } : {}),
-    });
+      const ledgerExport = await createLedgerExport(services.db, {
+        profile: services.profile,
+        ...(format ? { format: format as ExportFormat } : {}),
+        ...(preset ? { preset: preset as ExportPreset } : {}),
+        ...(from !== undefined ? { from } : {}),
+        ...(to !== undefined ? { to } : {}),
+        ...(accountId ? { accountIds: [accountId] } : {}),
+        ...(categoryId ? { categoryIds: [categoryId] } : {}),
+      });
 
-    reply.header("content-type", ledgerExport.contentType);
-    reply.header(
-      "content-disposition",
-      `attachment; filename="${ledgerExport.fileName}"`,
-    );
+      reply.header("content-type", ledgerExport.contentType);
+      reply.header(
+        "content-disposition",
+        `attachment; filename="${ledgerExport.fileName}"`,
+      );
 
-    return ledgerExport.body;
-  });
+      return ledgerExport.body;
+    },
+  );
 
   app.get(
     `${localApiRoutePrefix}/fixtures/summary`,
