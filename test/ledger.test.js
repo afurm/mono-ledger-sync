@@ -327,14 +327,121 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/exports/ledger?format=jsonl&categoryId=groceries",
       });
+      const syncRunsResponse = await server.inject({
+        method: "GET",
+        url: "/api/sync/runs",
+      });
+      const syncBody = syncResponse.json();
 
       assert.equal(syncResponse.statusCode, 200);
+      assert.equal(syncBody.run.status, "success");
+      assert.equal(syncBody.accounts.length, 2);
+      assert.equal(syncBody.stats.itemsSeen, 7);
       assert.equal(summaryResponse.statusCode, 200);
       assert.equal(summaryResponse.json().ledgerEntries, 7);
       assert.equal(transactionsResponse.statusCode, 200);
       assert.equal(transactionsResponse.json().total, 1);
       assert.equal(exportResponse.statusCode, 200);
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
+      assert.equal(syncRunsResponse.statusCode, 200);
+      assert.equal(syncRunsResponse.json()[0].id, syncBody.run.id);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("local API validates query strings and webhook payloads", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+    });
+    const webhookEvent = {
+      type: "StatementItem",
+      data: {
+        account: "fixture-account-uah-main",
+        statementItem: {
+          id: "fixture-webhook-validation-test",
+          time: 1775031300,
+          description: "Validation test transfer",
+          mcc: 4829,
+          originalMcc: 4829,
+          amount: -2500,
+          operationAmount: -2500,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97000,
+          hold: false,
+        },
+      },
+    };
+
+    try {
+      const invalidLimitResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?limit=not-a-number",
+      });
+      const unsupportedFormatResponse = await server.inject({
+        method: "GET",
+        url: "/api/exports/ledger?format=sqlite",
+      });
+      const unsupportedPresetResponse = await server.inject({
+        method: "GET",
+        url: "/api/exports/ledger?preset=unknown",
+      });
+      const webhookResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(webhookEvent),
+      });
+      const invalidWebhookResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...webhookEvent,
+          data: {
+            ...webhookEvent.data,
+            statementItem: {
+              ...webhookEvent.data.statementItem,
+              hold: undefined,
+            },
+          },
+        }),
+      });
+      const webhookBody = webhookResponse.json();
+
+      assert.equal(invalidLimitResponse.statusCode, 400);
+      assert.match(invalidLimitResponse.body, /limit/);
+      assert.equal(unsupportedFormatResponse.statusCode, 400);
+      assert.deepEqual(unsupportedFormatResponse.json(), {
+        error: "unsupported_export_format",
+        message: "Supported export formats: csv, json, jsonl, journal-csv",
+      });
+      assert.equal(unsupportedPresetResponse.statusCode, 400);
+      assert.deepEqual(unsupportedPresetResponse.json(), {
+        error: "unsupported_export_preset",
+        message:
+          "Supported export presets: accountant-handoff, monthly-personal-finance, bookkeeping, budget-analysis, raw-transaction-archive",
+      });
+      assert.equal(webhookResponse.statusCode, 200);
+      assert.equal(webhookBody.accepted, true);
+      assert.equal(webhookBody.pullRequired, true);
+      assert.equal(webhookBody.event.accountId, "fixture-account-uah-main");
+      assert.equal(
+        webhookBody.event.statementItemId,
+        "fixture-webhook-validation-test",
+      );
+      assert.equal(invalidWebhookResponse.statusCode, 400);
+      assert.match(invalidWebhookResponse.body, /hold/);
     } finally {
       await server.close();
     }
