@@ -1,5 +1,7 @@
 import os from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import Fastify, { type FastifyInstance } from "fastify";
 import type inject from "light-my-request";
@@ -36,6 +38,10 @@ import type { SyncLedgerResult } from "../sync/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
+
+const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
+const localWebBuildDir = path.resolve(serverModuleDir, "../web");
+const localWebAssetsDir = path.join(localWebBuildDir, "assets");
 
 export interface LocalApiServerOptions {
   host?: "127.0.0.1" | "localhost";
@@ -1218,17 +1224,85 @@ function renderLocalFixtureOverview(
 </html>`;
 }
 
+function contentTypeForAsset(filePath: string): string {
+  switch (path.extname(filePath)) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".ico":
+      return "image/x-icon";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function readBuiltWebIndex(): Promise<string | undefined> {
+  try {
+    return await readFile(path.join(localWebBuildDir, "index.html"), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+async function readBuiltWebAsset(
+  assetPath: string,
+): Promise<{ body: Buffer; contentType: string } | undefined> {
+  const resolvedPath = path.resolve(localWebAssetsDir, assetPath);
+
+  if (!resolvedPath.startsWith(`${localWebAssetsDir}${path.sep}`)) {
+    return undefined;
+  }
+
+  try {
+    return {
+      body: await readFile(resolvedPath),
+      contentType: contentTypeForAsset(resolvedPath),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function registerLocalApiRoutes(
   app: FastifyInstance,
   options: LocalApiServerOptions,
   getServices: () => Promise<LocalAppServices>,
 ): void {
   app.get("/", async (_request, reply): Promise<string> => {
+    const builtWebIndex = await readBuiltWebIndex();
+
+    if (builtWebIndex) {
+      reply.type("text/html; charset=utf-8");
+
+      return builtWebIndex;
+    }
+
     const fixtureSet = await loadMonobankFixtureSet();
 
     reply.type("text/html; charset=utf-8");
 
     return renderLocalFixtureOverview(fixtureSet, resolveProfile(options));
+  });
+
+  app.get("/assets/*", async (request, reply): Promise<Buffer | void> => {
+    const params = request.params as { "*": string };
+    const asset = await readBuiltWebAsset(params["*"]);
+
+    if (!asset) {
+      reply.code(404).send();
+      return;
+    }
+
+    reply.type(asset.contentType);
+
+    return asset.body;
   });
 
   app.get("/favicon.ico", async (_request, reply): Promise<void> => {

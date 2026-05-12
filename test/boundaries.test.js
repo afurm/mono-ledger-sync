@@ -58,7 +58,7 @@ test("serves local API health through Fastify", async () => {
   }
 });
 
-test("serves a local fixture overview page", async () => {
+test("serves the built local web UI when available", async () => {
   const server = createLocalApiServer({
     profile: "demo",
     source: "fixture",
@@ -73,13 +73,8 @@ test("serves a local fixture overview page", async () => {
     assert.equal(response.statusCode, 200);
     assert.match(response.body, /^<!doctype html>/);
     assert.match(response.body, /mono-ledger-sync/);
-    assert.match(response.body, /Profile demo/);
-    assert.match(response.body, /fixture-account-uah-main/);
-    assert.match(response.body, /Salary payment/);
-    assert.match(response.body, /Local database/);
-    assert.match(response.body, /\/api\/exports\/ledger\?format=jsonl/);
-    assert.match(response.body, /\/api\/fixtures\/client-info/);
-    assert.match(response.body, /\/api\/fixtures\/statements/);
+    assert.match(response.body, /id="root"/);
+    assert.match(response.body, /\/assets\//);
   } finally {
     await server.close();
   }
