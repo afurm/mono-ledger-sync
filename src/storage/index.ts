@@ -141,4 +141,8 @@ export interface LedgerDb {
     accountId: string,
   ): Promise<SyncCursor | undefined>;
   recordSyncRun(run: SyncRun): Promise<void>;
+  listWebhookEvents(
+    profile?: string,
+    limit?: number,
+  ): Promise<readonly StoredWebhookEvent[]>;
 }
