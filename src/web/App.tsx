@@ -10,6 +10,8 @@ import {
   ArrowDownIcon,
   ArrowUpDownIcon,
   ArrowUpIcon,
+  BanIcon,
+  CheckCheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckCircle2Icon,
@@ -21,10 +23,16 @@ import {
   LaptopIcon,
   MenuIcon,
   MoonIcon,
+  MoreHorizontalIcon,
   RefreshCwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  SplitIcon,
   SunIcon,
+  TagsIcon,
+  StickyNoteIcon,
+  StoreIcon,
+  TagIcon,
   UserRoundIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -2289,7 +2297,7 @@ function TransactionTable({
             align="right"
           />
           {onViewDetails && (
-            <TableHead className="w-12 text-right">Details</TableHead>
+            <TableHead className="w-12 text-right">Actions</TableHead>
           )}
         </TableRow>
       </TableHeader>
@@ -2324,25 +2332,86 @@ function TransactionTable({
             </TableCell>
             {onViewDetails && (
               <TableCell className="text-right">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="ml-auto"
-                  onClick={() => onViewDetails(entry)}
-                  aria-label={`View details for ${
-                    entry.merchantName ?? entry.description
-                  }`}
-                >
-                  <EyeIcon />
-                  <span className="sr-only">View details</span>
-                </Button>
+                <TransactionRowActions
+                  entry={entry}
+                  onViewDetails={onViewDetails}
+                />
               </TableCell>
             )}
           </TableRow>
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+function TransactionRowActions({
+  entry,
+  onViewDetails,
+}: {
+  entry: LedgerEntry;
+  onViewDetails: (entry: LedgerEntry) => void;
+}) {
+  const label = entry.merchantName ?? entry.description;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="ml-auto"
+          aria-label={`Open actions for ${label}`}
+        >
+          <MoreHorizontalIcon />
+          <span className="sr-only">Open actions</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel>Transaction actions</DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={() => onViewDetails(entry)}>
+            <EyeIcon />
+            View details
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem disabled>
+            <TagIcon />
+            Edit category
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <StoreIcon />
+            Edit merchant
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <StickyNoteIcon />
+            Add note
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <TagsIcon />
+            Add tags
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <SplitIcon />
+            Split transaction
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem disabled>
+            <BanIcon />
+            Ignore
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <CheckCheckIcon />
+            Mark reviewed
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
