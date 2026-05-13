@@ -2022,6 +2022,76 @@ function optionalAmount(value: number | undefined, currencyCode: number) {
     : formatMinorAmount(value, currencyCode);
 }
 
+function transactionCategoryLabel(entry: LedgerEntry): string {
+  return entry.categoryName ?? entry.categoryId ?? "Uncategorized";
+}
+
+function transactionCategoryBadgeClassName(entry: LedgerEntry): string {
+  const categoryKey =
+    `${entry.categoryId ?? ""} ${entry.categoryName ?? ""}`.toLowerCase();
+
+  if (
+    categoryKey.includes("failed") ||
+    categoryKey.includes("declined") ||
+    categoryKey.includes("rejected")
+  ) {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300";
+  }
+
+  if (categoryKey.includes("cashback") || categoryKey.includes("cash back")) {
+    return "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900/60 dark:bg-teal-950/30 dark:text-teal-300";
+  }
+
+  if (
+    categoryKey.includes("fuel") ||
+    categoryKey.includes("gas") ||
+    categoryKey.includes("charging")
+  ) {
+    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300";
+  }
+
+  if (
+    categoryKey.includes("transport") ||
+    categoryKey.includes("metro") ||
+    categoryKey.includes("taxi")
+  ) {
+    return "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-300";
+  }
+
+  if (
+    categoryKey.includes("grocery") ||
+    categoryKey.includes("groceries") ||
+    categoryKey.includes("subscription") ||
+    categoryKey.includes("travel") ||
+    categoryKey.includes("info")
+  ) {
+    return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300";
+  }
+
+  if (entry.amount > 0 || categoryKey.includes("income")) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300";
+  }
+
+  return "border-border bg-background text-muted-foreground";
+}
+
+function TransactionCategoryBadge({
+  entry,
+  className = "",
+}: {
+  entry: LedgerEntry;
+  className?: string;
+}) {
+  return (
+    <Badge
+      className={`${transactionCategoryBadgeClassName(entry)} ${className}`}
+      variant="outline"
+    >
+      {transactionCategoryLabel(entry)}
+    </Badge>
+  );
+}
+
 function TransactionDetailDrawer({
   entry,
   open,
@@ -2088,12 +2158,14 @@ function TransactionDetailDrawer({
                   label="Account"
                   value={entry.accountId}
                 />
-                <TransactionDetailField
-                  label="Category"
-                  value={
-                    entry.categoryName ?? entry.categoryId ?? "Uncategorized"
-                  }
-                />
+                <div className="grid gap-1">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    Category
+                  </dt>
+                  <dd>
+                    <TransactionCategoryBadge entry={entry} />
+                  </dd>
+                </div>
                 <TransactionDetailField
                   label="Currency"
                   value={String(entry.currencyCode)}
@@ -2225,13 +2297,19 @@ function TransactionTable({
         {entries.map((entry) => (
           <TableRow key={entry.id}>
             <TableCell>{formatDate(entry.time)}</TableCell>
-            <TableCell className="max-w-[8.5rem] truncate font-medium sm:max-w-none">
-              {entry.merchantName ?? entry.description}
+            <TableCell className="max-w-[8.5rem] sm:max-w-none">
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="truncate font-medium">
+                  {entry.merchantName ?? entry.description}
+                </span>
+                <TransactionCategoryBadge
+                  className="w-fit sm:hidden"
+                  entry={entry}
+                />
+              </div>
             </TableCell>
             <TableCell className="hidden sm:table-cell">
-              <Badge variant="outline">
-                {entry.categoryName ?? "Uncategorized"}
-              </Badge>
+              <TransactionCategoryBadge entry={entry} />
             </TableCell>
             <TableCell className="hidden max-w-44 truncate text-muted-foreground lg:table-cell">
               {entry.accountId}
