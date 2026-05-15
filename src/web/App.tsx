@@ -425,6 +425,25 @@ const ruleEditorTransactionTypeOptions = ["Income", "Expense", "Transfer"];
 const ruleEditorAccountOptions = ["All accounts"];
 const ruleEditorDateOptions = ["Any date", "Current statement window"];
 
+type BuiltInRuleSummary = (typeof builtInRuleSummaries)[number];
+
+interface RuleTestSample {
+  merchantName: string;
+  description: string;
+  mcc: string;
+  amount: number;
+  transactionType: string;
+  account: string;
+  currencyCode: number;
+}
+
+interface RuleTestCheck {
+  id: string;
+  label: string;
+  detail: string;
+  matched: boolean;
+}
+
 function getInitialRoute(): RouteId {
   const hashRoute = window.location.hash.replace("#", "");
   const [route] = hashRoute.split("?");
@@ -3689,6 +3708,216 @@ function RuleEditorPreviewSelect({
   );
 }
 
+function ruleConstraintTerms(value: string): string[] {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue.startsWith("any") || normalizedValue === "not required") {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function firstRuleConstraintTerm(value: string, fallback: string): string {
+  return ruleConstraintTerms(value)[0] ?? fallback;
+}
+
+function textMatchesRuleConstraint(value: string, text: string): boolean {
+  const terms = ruleConstraintTerms(value);
+  const normalizedText = text.toLowerCase();
+
+  return (
+    terms.length === 0 || terms.some((term) => normalizedText.includes(term))
+  );
+}
+
+function createRuleTestSample(
+  rule: BuiltInRuleSummary,
+  account: LedgerAccount | undefined,
+): RuleTestSample {
+  const transactionType = rule.editor.transactionType;
+  const amount =
+    transactionType === "Income"
+      ? 250_000
+      : transactionType === "Transfer"
+        ? -150_000
+        : -42_000;
+  const merchantName = firstRuleConstraintTerm(
+    rule.editor.merchantContains,
+    transactionType === "Income" ? "salary payout" : "sample merchant",
+  );
+  const description = firstRuleConstraintTerm(
+    rule.editor.descriptionContains,
+    transactionType === "Income" ? "salary payout" : merchantName,
+  );
+
+  return {
+    merchantName,
+    description,
+    mcc: rule.editor.mcc === "Not required" ? "N/A" : rule.editor.mcc,
+    amount,
+    transactionType,
+    account: account?.id ?? rule.editor.account,
+    currencyCode: account?.currencyCode ?? 980,
+  };
+}
+
+function createRuleTestChecks(
+  rule: BuiltInRuleSummary,
+  sample: RuleTestSample,
+): RuleTestCheck[] {
+  const amountTypeMatches =
+    sample.transactionType === rule.editor.transactionType &&
+    (rule.editor.transactionType === "Income"
+      ? sample.amount > 0
+      : rule.editor.transactionType === "Expense"
+        ? sample.amount < 0
+        : true);
+
+  return [
+    {
+      id: "merchant",
+      label: "Merchant text",
+      detail: rule.editor.merchantContains,
+      matched: textMatchesRuleConstraint(
+        rule.editor.merchantContains,
+        sample.merchantName,
+      ),
+    },
+    {
+      id: "description",
+      label: "Description text",
+      detail: rule.editor.descriptionContains,
+      matched: textMatchesRuleConstraint(
+        rule.editor.descriptionContains,
+        sample.description,
+      ),
+    },
+    {
+      id: "mcc",
+      label: "MCC",
+      detail: rule.editor.mcc,
+      matched:
+        rule.editor.mcc === "Not required" || sample.mcc === rule.editor.mcc,
+    },
+    {
+      id: "amount-type",
+      label: "Amount and type",
+      detail: `${rule.editor.amountRange} / ${rule.editor.transactionType}`,
+      matched: amountTypeMatches,
+    },
+  ];
+}
+
+function RuleTestSampleField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-muted/30 px-3 py-2">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="truncate text-sm">{value}</span>
+    </div>
+  );
+}
+
+function RuleTestCheckRow({ check }: { check: RuleTestCheck }) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          {check.matched ? (
+            <CheckCircle2Icon className="size-4 text-green-600" />
+          ) : (
+            <AlertCircleIcon className="size-4 text-amber-600" />
+          )}
+          <span>{check.label}</span>
+        </div>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {check.detail}
+        </p>
+      </div>
+      <Badge
+        className={
+          check.matched
+            ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-300"
+            : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
+        }
+        variant="outline"
+      >
+        {check.matched ? "Match" : "Review"}
+      </Badge>
+    </div>
+  );
+}
+
+function RuleTestPanel({
+  account,
+  rule,
+}: {
+  account: LedgerAccount | undefined;
+  rule: BuiltInRuleSummary;
+}) {
+  const sample = createRuleTestSample(rule, account);
+  const checks = createRuleTestChecks(rule, sample);
+  const matchedChecks = checks.filter((check) => check.matched).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Sample rule test</CardTitle>
+        <CardDescription>
+          Read-only evaluation for the selected built-in rule.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary">
+            {matchedChecks}/{checks.length} match
+          </Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-2">
+          <RuleTestSampleField label="Merchant" value={sample.merchantName} />
+          <RuleTestSampleField label="Description" value={sample.description} />
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+            <RuleTestSampleField label="MCC" value={sample.mcc} />
+            <RuleTestSampleField
+              label="Amount"
+              value={formatMinorAmount(sample.amount, sample.currencyCode)}
+            />
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+            <RuleTestSampleField label="Type" value={sample.transactionType} />
+            <RuleTestSampleField label="Account" value={sample.account} />
+          </div>
+        </div>
+        <Separator />
+        <div className="grid gap-2">
+          {checks.map((check) => (
+            <RuleTestCheckRow check={check} key={check.id} />
+          ))}
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2">
+        <Button disabled size="sm" type="button" variant="outline">
+          <SearchIcon data-icon="inline-start" />
+          Historical preview
+        </Button>
+        <Button disabled size="sm" type="button" variant="outline">
+          <CheckCheckIcon data-icon="inline-start" />
+          Apply to history
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const [rulesSearch, setRulesSearch] = useState("");
   const [selectedRuleId, setSelectedRuleId] = useState<
@@ -3730,6 +3959,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
     "Budget analysis",
     "Raw transaction archive",
   ];
+  const ruleTestAccount = snapshot?.accounts[0];
 
   useEffect(() => {
     if (
@@ -3945,82 +4175,85 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               </CardContent>
             </Card>
 
-            <Card className="xl:self-start">
-              <CardHeader>
-                <CardTitle>Rule editor preview</CardTitle>
-                <CardDescription>
-                  Read-only controls for the selected built-in rule.
-                </CardDescription>
-                <CardAction>
-                  <Badge variant="outline">Read-only</Badge>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                <div className="grid gap-3">
-                  <RuleEditorPreviewField
-                    id="rule-editor-merchant"
-                    label="Merchant contains"
-                    value={selectedRule.editor.merchantContains}
-                  />
-                  <RuleEditorPreviewField
-                    id="rule-editor-description"
-                    label="Description contains"
-                    value={selectedRule.editor.descriptionContains}
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <div className="grid gap-4 xl:self-start">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Rule editor preview</CardTitle>
+                  <CardDescription>
+                    Read-only controls for the selected built-in rule.
+                  </CardDescription>
+                  <CardAction>
+                    <Badge variant="outline">Read-only</Badge>
+                  </CardAction>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div className="grid gap-3">
                     <RuleEditorPreviewField
-                      id="rule-editor-mcc"
-                      label="MCC"
-                      value={selectedRule.editor.mcc}
+                      id="rule-editor-merchant"
+                      label="Merchant contains"
+                      value={selectedRule.editor.merchantContains}
                     />
                     <RuleEditorPreviewField
-                      id="rule-editor-amount"
-                      label="Amount range"
-                      value={selectedRule.editor.amountRange}
+                      id="rule-editor-description"
+                      label="Description contains"
+                      value={selectedRule.editor.descriptionContains}
+                    />
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                      <RuleEditorPreviewField
+                        id="rule-editor-mcc"
+                        label="MCC"
+                        value={selectedRule.editor.mcc}
+                      />
+                      <RuleEditorPreviewField
+                        id="rule-editor-amount"
+                        label="Amount range"
+                        value={selectedRule.editor.amountRange}
+                      />
+                    </div>
+                    <RuleEditorPreviewSelect
+                      label="Transaction type"
+                      options={ruleEditorTransactionTypeOptions}
+                      value={selectedRule.editor.transactionType}
+                    />
+                    <RuleEditorPreviewSelect
+                      label="Account"
+                      options={ruleEditorAccountOptions}
+                      value={selectedRule.editor.account}
+                    />
+                    <RuleEditorPreviewSelect
+                      label="Date constraint"
+                      options={ruleEditorDateOptions}
+                      value={selectedRule.editor.date}
                     />
                   </div>
-                  <RuleEditorPreviewSelect
-                    label="Transaction type"
-                    options={ruleEditorTransactionTypeOptions}
-                    value={selectedRule.editor.transactionType}
-                  />
-                  <RuleEditorPreviewSelect
-                    label="Account"
-                    options={ruleEditorAccountOptions}
-                    value={selectedRule.editor.account}
-                  />
-                  <RuleEditorPreviewSelect
-                    label="Date constraint"
-                    options={ruleEditorDateOptions}
-                    value={selectedRule.editor.date}
-                  />
-                </div>
-                <Separator />
-                <div className="grid gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Target action
-                  </span>
-                  <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-                    <TagIcon className="size-4 text-muted-foreground" />
-                    <span>{selectedRule.targetAction}</span>
+                  <Separator />
+                  <div className="grid gap-2">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Target action
+                    </span>
+                    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                      <TagIcon className="size-4 text-muted-foreground" />
+                      <span>{selectedRule.targetAction}</span>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-              <CardFooter className="flex flex-wrap gap-2">
-                <Button disabled size="sm" type="button" variant="outline">
-                  <SearchIcon data-icon="inline-start" />
-                  Preview matches
-                </Button>
-                <Button disabled size="sm" type="button" variant="outline">
-                  <CheckCheckIcon data-icon="inline-start" />
-                  Apply to history
-                </Button>
-                <Button disabled size="sm" type="button" variant="outline">
-                  <TagIcon data-icon="inline-start" />
-                  Save rule
-                </Button>
-              </CardFooter>
-            </Card>
+                </CardContent>
+                <CardFooter className="flex flex-wrap gap-2">
+                  <Button disabled size="sm" type="button" variant="outline">
+                    <SearchIcon data-icon="inline-start" />
+                    Preview matches
+                  </Button>
+                  <Button disabled size="sm" type="button" variant="outline">
+                    <CheckCheckIcon data-icon="inline-start" />
+                    Apply to history
+                  </Button>
+                  <Button disabled size="sm" type="button" variant="outline">
+                    <TagIcon data-icon="inline-start" />
+                    Save rule
+                  </Button>
+                </CardFooter>
+              </Card>
+              <RuleTestPanel account={ruleTestAccount} rule={selectedRule} />
+            </div>
           </div>
         </TabsContent>
 
