@@ -361,6 +361,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(summaryResponse.json().ledgerEntries, 7);
       assert.equal(transactionsResponse.statusCode, 200);
       assert.equal(transactionsResponse.json().total, 1);
+      assert.match(
+        transactionsResponse.json().entries[0].createdAt,
+        /^\d{4}-\d{2}-\d{2}T/,
+      );
+      assert.match(
+        transactionsResponse.json().entries[0].updatedAt,
+        /^\d{4}-\d{2}-\d{2}T/,
+      );
       assert.equal(merchantResponse.statusCode, 200);
       assert.equal(merchantResponse.json().total, 1);
       assert.equal(holdResponse.statusCode, 200);

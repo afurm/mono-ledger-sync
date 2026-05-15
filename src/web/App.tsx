@@ -2100,17 +2100,106 @@ function TransactionCategoryBadge({
   );
 }
 
+function transactionCategoryRuleMatch(entry: LedgerEntry): string {
+  switch (entry.categoryId) {
+    case "income":
+      return "Built-in positive amount rule";
+    case "groceries":
+      return "Built-in groceries rule: MCC 5411 or grocery text";
+    case "subscriptions":
+      return "Built-in subscription rule: MCC 5734 or subscription text";
+    case "transport":
+      return "Built-in transport rule: MCC 4111 or metro text";
+    case "travel":
+      return "Built-in travel rule: MCC 4722 or travel text";
+    case "dining":
+      return "Built-in dining rule: MCC 5814 or coffee text";
+    case "transfers":
+      return "Built-in transfer rule: MCC 4829 or transfer text";
+    case "uncategorized":
+      return "Fallback: no built-in category rule matched";
+    default:
+      return entry.categoryId
+        ? `Stored local category: ${entry.categoryId}`
+        : "No category assignment stored";
+  }
+}
+
+function transactionCategoryHistory(entry: LedgerEntry): string {
+  if (!entry.categoryId || entry.categoryId === "uncategorized") {
+    return "Initial ledger assignment only; no category changes recorded";
+  }
+
+  return "Initial ledger assignment from the current sync rules";
+}
+
+function syncSourceLabel(
+  source: LocalAppSnapshot["config"]["source"] | undefined,
+) {
+  switch (source) {
+    case "fixture":
+      return "Fixture sync";
+    case "monobank":
+      return "Monobank personal API sync";
+    default:
+      return "Local sync";
+  }
+}
+
+function latestSyncRunSummary(run: SyncRun | undefined): string {
+  if (!run) {
+    return "No sync run recorded";
+  }
+
+  const finished = run.finishedAt
+    ? `finished ${formatDateTime(run.finishedAt)}`
+    : "not finished";
+
+  return `${run.status}, ${finished}; ${run.itemsSeen} seen, ${run.itemsInserted} inserted, ${run.itemsUpdated} updated`;
+}
+
+function matchingWebhookHint(
+  entry: LedgerEntry,
+  events: readonly WebhookEvent[],
+): WebhookEvent | undefined {
+  return events.find(
+    (event) => event.statementItemId === entry.rawStatementItemId,
+  );
+}
+
+function webhookHintSummary(event: WebhookEvent | undefined): string {
+  if (!event) {
+    return "No matching webhook hint recorded";
+  }
+
+  const processed = event.processedAt
+    ? `processed ${formatDateTime(event.processedAt)}`
+    : "pending reconcile";
+
+  return `${event.type} received ${formatDateTime(event.receivedAt)}; ${processed}`;
+}
+
 function TransactionDetailDrawer({
   entry,
   open,
   onOpenChange,
+  source,
+  syncRuns = [],
+  webhookEvents = [],
 }: {
   entry: LedgerEntry | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  source: LocalAppSnapshot["config"]["source"] | undefined;
+  syncRuns: readonly SyncRun[] | undefined;
+  webhookEvents: readonly WebhookEvent[] | undefined;
 }) {
   const title = entry?.merchantName ?? entry?.description ?? "Transaction";
   const status = entry?.hold ? "Hold" : "Posted";
+  const latestRun = syncRuns[0];
+  const webhookHint = entry
+    ? matchingWebhookHint(entry, webhookEvents)
+    : undefined;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -2177,6 +2266,70 @@ function TransactionDetailDrawer({
                 <TransactionDetailField
                   label="Currency"
                   value={String(entry.currencyCode)}
+                />
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium text-foreground">
+                Category provenance
+              </h3>
+              <dl className="grid gap-3">
+                <div className="grid gap-1">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    Current assignment
+                  </dt>
+                  <dd>
+                    <TransactionCategoryBadge entry={entry} />
+                  </dd>
+                </div>
+                <TransactionDetailField
+                  label="Rule match"
+                  value={transactionCategoryRuleMatch(entry)}
+                />
+                <TransactionDetailField
+                  label="History"
+                  value={transactionCategoryHistory(entry)}
+                />
+              </dl>
+            </section>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium text-foreground">
+                Sync provenance
+              </h3>
+              <dl className="grid gap-3">
+                <TransactionDetailField
+                  label="Source"
+                  value={syncSourceLabel(source)}
+                />
+                <TransactionDetailField
+                  label="Latest local sync"
+                  value={latestSyncRunSummary(latestRun)}
+                />
+                <TransactionDetailField
+                  label="Ledger created"
+                  value={
+                    entry.createdAt
+                      ? formatDateTime(entry.createdAt)
+                      : "Not available"
+                  }
+                />
+                <TransactionDetailField
+                  label="Ledger updated"
+                  value={
+                    entry.updatedAt
+                      ? formatDateTime(entry.updatedAt)
+                      : "Not available"
+                  }
+                />
+                <TransactionDetailField
+                  label="Webhook hint"
+                  value={webhookHintSummary(webhookHint)}
                 />
               </dl>
             </section>
@@ -3105,6 +3258,9 @@ function TransactionsRoute({
         <TransactionDetailDrawer
           entry={selectedTransaction}
           open={selectedTransaction !== undefined}
+          source={snapshot?.config.source}
+          syncRuns={snapshot?.syncRuns}
+          webhookEvents={snapshot?.webhookEvents}
           onOpenChange={(open) => {
             if (!open) {
               setSelectedTransaction(undefined);

@@ -54,6 +54,8 @@ export interface LedgerEntry {
   hold?: boolean;
   balance?: number;
   rawStatementItemId: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface LedgerEntryPage {

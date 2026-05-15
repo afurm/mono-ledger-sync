@@ -124,6 +124,8 @@ interface SqliteLedgerEntryRow {
   raw_statement_item_id: string;
   hold: number;
   balance: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface SqliteSyncCursorRow {
@@ -387,6 +389,8 @@ function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
     currencyCode: row.currency_code,
     rawStatementItemId: row.raw_statement_item_id,
     hold: row.hold === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 
   if (row.operation_amount !== null) {
@@ -957,7 +961,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           SELECT
             id, account_id, time, description, amount, operation_amount,
             currency_code, category_id, category_name, merchant_name,
-            raw_statement_item_id, hold, balance
+            raw_statement_item_id, hold, balance, created_at, updated_at
           FROM ledger_entries
           WHERE ${where.sql}
           ORDER BY ${orderBy}
