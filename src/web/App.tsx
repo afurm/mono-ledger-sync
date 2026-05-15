@@ -3546,21 +3546,24 @@ function AccountsRoute({
 }
 
 function duplicateCandidateCount(entries: readonly LedgerEntry[]): number {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
+  const counts = new Map<string, number>();
 
   for (const entry of entries) {
     const merchant = entry.merchantName ?? entry.description;
     const key = `${merchant}:${entry.amount}:${entry.time}`;
 
-    if (seen.has(key)) {
-      duplicates.add(key);
-    } else {
-      seen.add(key);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  let candidates = 0;
+
+  for (const count of counts.values()) {
+    if (count > 1) {
+      candidates += count;
     }
   }
 
-  return duplicates.size;
+  return candidates;
 }
 
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
