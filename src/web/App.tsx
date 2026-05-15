@@ -306,6 +306,51 @@ const transactionFilterPresets = [
   },
 ] as const satisfies readonly TransactionFilterPreset[];
 
+const builtInRuleSummaries = [
+  {
+    id: "income",
+    label: "Income",
+    match: "Positive amount",
+    target: "Income",
+  },
+  {
+    id: "groceries",
+    label: "Groceries",
+    match: "MCC 5411 or grocery text",
+    target: "Groceries",
+  },
+  {
+    id: "subscriptions",
+    label: "Subscriptions",
+    match: "MCC 5734 or subscription text",
+    target: "Subscriptions",
+  },
+  {
+    id: "transport",
+    label: "Transport",
+    match: "MCC 4111 or metro text",
+    target: "Transport",
+  },
+  {
+    id: "travel",
+    label: "Travel",
+    match: "MCC 4722 or travel text",
+    target: "Travel",
+  },
+  {
+    id: "dining",
+    label: "Dining",
+    match: "MCC 5814 or coffee text",
+    target: "Dining",
+  },
+  {
+    id: "transfers",
+    label: "Transfers",
+    match: "MCC 4829 or transfer text",
+    target: "Transfers",
+  },
+] as const;
+
 function getInitialRoute(): RouteId {
   const hashRoute = window.location.hash.replace("#", "");
   const [route] = hashRoute.split("?");
@@ -3500,6 +3545,264 @@ function AccountsRoute({
   );
 }
 
+function duplicateCandidateCount(entries: readonly LedgerEntry[]): number {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const entry of entries) {
+    const merchant = entry.merchantName ?? entry.description;
+    const key = `${merchant}:${entry.amount}:${entry.time}`;
+
+    if (seen.has(key)) {
+      duplicates.add(key);
+    } else {
+      seen.add(key);
+    }
+  }
+
+  return duplicates.size;
+}
+
+function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+  const entries = snapshot?.transactions.entries ?? [];
+  const categoryCount = new Set(
+    entries.map((entry) => entry.categoryId ?? "uncategorized"),
+  ).size;
+  const merchants = [
+    ...new Set(entries.map((entry) => entry.merchantName ?? entry.description)),
+  ].filter(Boolean);
+  const uncategorizedCount = entries.filter((entry) => {
+    return !entry.categoryId || entry.categoryId === "uncategorized";
+  }).length;
+  const duplicateCandidates = duplicateCandidateCount(entries);
+  const exportTargets = [
+    "Accountant handoff",
+    "Monthly personal finance",
+    "Budget analysis",
+    "Raw transaction archive",
+  ];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Rules & Mappings</CardTitle>
+          <CardDescription>
+            Local categorization rules, merchant cleanup, duplicate review, and
+            export mapping setup.
+          </CardDescription>
+          <CardAction>
+            <Badge variant="secondary">
+              {snapshot?.config.source ?? "local"}
+            </Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-4">
+          <OverviewStatusItem
+            label="Built-in rules"
+            value={String(builtInRuleSummaries.length)}
+            detail="Read-only rules currently applied during sync"
+          />
+          <OverviewStatusItem
+            label="Categories seen"
+            value={String(categoryCount)}
+            detail={`${uncategorizedCount} rows still need review`}
+          />
+          <OverviewStatusItem
+            label="Merchants"
+            value={String(merchants.length)}
+            detail="Merchant labels from local ledger rows"
+          />
+          <OverviewStatusItem
+            label="Duplicate candidates"
+            value={String(duplicateCandidates)}
+            detail="Potential same merchant, amount, and time matches"
+          />
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="categorization">
+        <TabsList className="h-auto w-full flex-wrap justify-start sm:w-fit">
+          <TabsTrigger value="categorization">
+            <TagIcon data-icon="inline-start" />
+            Categorization
+          </TabsTrigger>
+          <TabsTrigger value="merchants">
+            <StoreIcon data-icon="inline-start" />
+            Merchants
+          </TabsTrigger>
+          <TabsTrigger value="duplicates">
+            <ShieldCheckIcon data-icon="inline-start" />
+            Duplicates
+          </TabsTrigger>
+          <TabsTrigger value="exports">
+            <DownloadIcon data-icon="inline-start" />
+            Export targets
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="categorization">
+          <Card>
+            <CardHeader>
+              <CardTitle>Categorization rules</CardTitle>
+              <CardDescription>
+                Current built-in rules that assign initial local categories.
+              </CardDescription>
+              <CardAction>
+                <Button disabled size="sm" type="button" variant="outline">
+                  <TagIcon data-icon="inline-start" />
+                  Add rule
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rule</TableHead>
+                    <TableHead>Match</TableHead>
+                    <TableHead>Target</TableHead>
+                    <TableHead className="text-right">State</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {builtInRuleSummaries.map((rule) => (
+                    <TableRow key={rule.id}>
+                      <TableCell className="font-medium">
+                        {rule.label}
+                      </TableCell>
+                      <TableCell>{rule.match}</TableCell>
+                      <TableCell>{rule.target}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant="outline">Active</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Alert>
+                <ShieldCheckIcon />
+                <AlertTitle>Manual rule writes are not enabled yet</AlertTitle>
+                <AlertDescription>
+                  This route shows current local rule coverage first. Editing,
+                  preview, and historical apply controls stay disabled until
+                  storage write flows are stable.
+                </AlertDescription>
+              </Alert>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="merchants">
+          <Card>
+            <CardHeader>
+              <CardTitle>Merchant mapping</CardTitle>
+              <CardDescription>
+                Local merchant labels ready for future cleanup rules.
+              </CardDescription>
+              <CardAction>
+                <Button disabled size="sm" type="button" variant="outline">
+                  <StoreIcon data-icon="inline-start" />
+                  Add mapping
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              {merchants.length === 0 ? (
+                <Alert>
+                  <AlertCircleIcon />
+                  <AlertTitle>No merchants loaded</AlertTitle>
+                  <AlertDescription>
+                    Run sync before building merchant cleanup rules.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {merchants.slice(0, 8).map((merchant) => (
+                    <Badge key={merchant} variant="secondary">
+                      {merchant}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Merchant edits will stay local and reversible once write flows
+                are enabled.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="duplicates">
+          <Card>
+            <CardHeader>
+              <CardTitle>Duplicate detection</CardTitle>
+              <CardDescription>
+                Review queue for potential duplicate or reversal records.
+              </CardDescription>
+              <CardAction>
+                <Button disabled size="sm" type="button" variant="outline">
+                  <CheckCheckIcon data-icon="inline-start" />
+                  Resolve
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <Alert>
+                {duplicateCandidates > 0 ? (
+                  <AlertCircleIcon />
+                ) : (
+                  <CheckCircle2Icon />
+                )}
+                <AlertTitle>
+                  {duplicateCandidates > 0
+                    ? "Potential duplicates found"
+                    : "No duplicate candidates in the current local page"}
+                </AlertTitle>
+                <AlertDescription>
+                  The first pass checks local rows with the same merchant,
+                  amount, and time. Merge and ignore controls will be added
+                  after review writes are available.
+                </AlertDescription>
+              </Alert>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="exports">
+          <Card>
+            <CardHeader>
+              <CardTitle>Export targets</CardTitle>
+              <CardDescription>
+                Mapping presets for local export flows and future rule outputs.
+              </CardDescription>
+              <CardAction>
+                <Button disabled size="sm" type="button" variant="outline">
+                  <DownloadIcon data-icon="inline-start" />
+                  Configure
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {exportTargets.map((target) => (
+                <div
+                  className="rounded-md border border-border p-3"
+                  key={target}
+                >
+                  <p className="font-medium">{target}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Local-only preset; no tokens or secret headers included.
+                  </p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
 function PlaceholderRoute({ routeId }: { routeId: RouteId }) {
   const metadata = routeMetadata(routeId);
 
@@ -3554,8 +3857,9 @@ function RouteContent({
       return <SyncRoute snapshot={snapshot} onRouteChange={onRouteChange} />;
     case "accounts":
       return <AccountsRoute snapshot={snapshot} />;
-    case "exports":
     case "rules":
+      return <RulesRoute snapshot={snapshot} />;
+    case "exports":
     case "logs":
     case "settings":
     case "help":
