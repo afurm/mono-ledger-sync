@@ -313,6 +313,15 @@ const builtInRuleSummaries = [
     priority: 10,
     conditions: "Positive amount",
     targetAction: "Set category to Income",
+    editor: {
+      merchantContains: "Any merchant",
+      descriptionContains: "Any incoming description",
+      mcc: "Not required",
+      amountRange: "Greater than 0.00",
+      transactionType: "Income",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
   {
     id: "groceries",
@@ -320,6 +329,15 @@ const builtInRuleSummaries = [
     priority: 20,
     conditions: "MCC 5411 or grocery text",
     targetAction: "Set category to Groceries",
+    editor: {
+      merchantContains: "grocery, supermarket",
+      descriptionContains: "grocery",
+      mcc: "5411",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
   {
     id: "subscriptions",
@@ -327,6 +345,15 @@ const builtInRuleSummaries = [
     priority: 30,
     conditions: "MCC 5734 or subscription text",
     targetAction: "Set category to Subscriptions",
+    editor: {
+      merchantContains: "app store, streaming, software",
+      descriptionContains: "subscription",
+      mcc: "5734",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
   {
     id: "transport",
@@ -334,6 +361,15 @@ const builtInRuleSummaries = [
     priority: 40,
     conditions: "MCC 4111 or metro text",
     targetAction: "Set category to Transport",
+    editor: {
+      merchantContains: "metro, taxi, transport",
+      descriptionContains: "metro",
+      mcc: "4111",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
   {
     id: "travel",
@@ -341,6 +377,15 @@ const builtInRuleSummaries = [
     priority: 50,
     conditions: "MCC 4722 or travel text",
     targetAction: "Set category to Travel",
+    editor: {
+      merchantContains: "travel, airline, hotel",
+      descriptionContains: "travel",
+      mcc: "4722",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
   {
     id: "dining",
@@ -348,6 +393,15 @@ const builtInRuleSummaries = [
     priority: 60,
     conditions: "MCC 5814 or coffee text",
     targetAction: "Set category to Dining",
+    editor: {
+      merchantContains: "cafe, coffee, restaurant",
+      descriptionContains: "coffee",
+      mcc: "5814",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
   {
     id: "transfers",
@@ -355,8 +409,21 @@ const builtInRuleSummaries = [
     priority: 70,
     conditions: "MCC 4829 or transfer text",
     targetAction: "Set category to Transfers",
+    editor: {
+      merchantContains: "transfer",
+      descriptionContains: "transfer",
+      mcc: "4829",
+      amountRange: "Any amount",
+      transactionType: "Transfer",
+      account: "All accounts",
+      date: "Any date",
+    },
   },
 ] as const;
+
+const ruleEditorTransactionTypeOptions = ["Income", "Expense", "Transfer"];
+const ruleEditorAccountOptions = ["All accounts"];
+const ruleEditorDateOptions = ["Any date", "Current statement window"];
 
 function getInitialRoute(): RouteId {
   const hashRoute = window.location.hash.replace("#", "");
@@ -3573,8 +3640,60 @@ function duplicateCandidateCount(entries: readonly LedgerEntry[]): number {
   return candidates;
 }
 
+function RuleEditorPreviewField({
+  id,
+  label,
+  value,
+}: {
+  id: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <label className="text-xs font-medium text-muted-foreground" htmlFor={id}>
+        {label}
+      </label>
+      <Input id={id} readOnly value={value} className="bg-background" />
+    </div>
+  );
+}
+
+function RuleEditorPreviewSelect({
+  label,
+  options,
+  value,
+}: {
+  label: string;
+  options: readonly string[];
+  value: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <Select disabled value={value}>
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {options.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const [rulesSearch, setRulesSearch] = useState("");
+  const [selectedRuleId, setSelectedRuleId] = useState<
+    (typeof builtInRuleSummaries)[number]["id"]
+  >(builtInRuleSummaries[0].id);
   const entries = snapshot?.transactions.entries ?? [];
   const normalizedRulesSearch = rulesSearch.trim().toLowerCase();
   const filteredRules = useMemo(() => {
@@ -3584,11 +3703,17 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
 
     return builtInRuleSummaries.filter((rule) => {
       const searchableText =
-        `${rule.label} ${rule.conditions} ${rule.targetAction}`.toLowerCase();
+        `${rule.label} ${rule.conditions} ${rule.targetAction} ${Object.values(
+          rule.editor,
+        ).join(" ")}`.toLowerCase();
 
       return searchableText.includes(normalizedRulesSearch);
     });
   }, [normalizedRulesSearch]);
+  const selectedRule =
+    builtInRuleSummaries.find((rule) => rule.id === selectedRuleId) ??
+    filteredRules[0] ??
+    builtInRuleSummaries[0];
   const categoryCount = new Set(
     entries.map((entry) => entry.categoryId ?? "uncategorized"),
   ).size;
@@ -3605,6 +3730,15 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
     "Budget analysis",
     "Raw transaction archive",
   ];
+
+  useEffect(() => {
+    if (
+      filteredRules.length > 0 &&
+      !filteredRules.some((rule) => rule.id === selectedRuleId)
+    ) {
+      setSelectedRuleId(filteredRules[0].id);
+    }
+  }, [filteredRules, selectedRuleId]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -3666,126 +3800,228 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
         </TabsList>
 
         <TabsContent value="categorization">
-          <Card>
-            <CardHeader>
-              <CardTitle>Categorization rules</CardTitle>
-              <CardDescription>
-                Current built-in rules that assign initial local categories.
-              </CardDescription>
-              <CardAction>
-                <Button disabled size="sm" type="button" variant="outline">
-                  <TagIcon data-icon="inline-start" />
-                  Add rule
-                </Button>
-              </CardAction>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="grid gap-2 sm:max-w-sm">
-                <label
-                  className="text-xs font-medium text-muted-foreground"
-                  htmlFor="rules-search"
-                >
-                  Search rules
-                </label>
-                <div className="relative">
-                  <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="rules-search"
-                    type="search"
-                    value={rulesSearch}
-                    onChange={(event) => setRulesSearch(event.target.value)}
-                    className="pl-9"
-                    placeholder="Name, condition, or target"
-                  />
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Categorization rules</CardTitle>
+                <CardDescription>
+                  Current built-in rules that assign initial local categories.
+                </CardDescription>
+                <CardAction>
+                  <Button disabled size="sm" type="button" variant="outline">
+                    <TagIcon data-icon="inline-start" />
+                    Add rule
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <div className="grid gap-2 sm:max-w-sm">
+                  <label
+                    className="text-xs font-medium text-muted-foreground"
+                    htmlFor="rules-search"
+                  >
+                    Search rules
+                  </label>
+                  <div className="relative">
+                    <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="rules-search"
+                      type="search"
+                      value={rulesSearch}
+                      onChange={(event) => setRulesSearch(event.target.value)}
+                      className="pl-9"
+                      placeholder="Name, condition, or target"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {filteredRules.length === 0 ? (
+                {filteredRules.length === 0 ? (
+                  <Alert>
+                    <AlertCircleIcon />
+                    <AlertTitle>No matching rules</AlertTitle>
+                    <AlertDescription>
+                      Adjust the search to find a built-in rule by name,
+                      condition, or target action.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Rule</TableHead>
+                        <TableHead>Conditions</TableHead>
+                        <TableHead>Target action</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead className="w-12 text-right">
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRules.map((rule) => (
+                        <TableRow
+                          key={rule.id}
+                          data-state={
+                            selectedRule.id === rule.id ? "selected" : undefined
+                          }
+                        >
+                          <TableCell className="font-mono text-xs">
+                            {rule.priority}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-foreground"
+                              onClick={() => setSelectedRuleId(rule.id)}
+                            >
+                              {rule.label}
+                            </Button>
+                          </TableCell>
+                          <TableCell>{rule.conditions}</TableCell>
+                          <TableCell>{rule.targetAction}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">Active</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="ml-auto"
+                                  aria-label={`Open actions for ${rule.label} rule`}
+                                >
+                                  <MoreHorizontalIcon />
+                                  <span className="sr-only">Open actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuLabel>
+                                  Rule actions
+                                </DropdownMenuLabel>
+                                <DropdownMenuGroup>
+                                  <DropdownMenuItem
+                                    onSelect={() => setSelectedRuleId(rule.id)}
+                                  >
+                                    <EyeIcon />
+                                    View editor
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem disabled>
+                                    <SearchIcon />
+                                    Preview matches
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem disabled>
+                                    <TagIcon />
+                                    Edit rule
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem disabled>
+                                    <CheckCheckIcon />
+                                    Apply to history
+                                  </DropdownMenuItem>
+                                </DropdownMenuGroup>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
                 <Alert>
-                  <AlertCircleIcon />
-                  <AlertTitle>No matching rules</AlertTitle>
+                  <ShieldCheckIcon />
+                  <AlertTitle>
+                    Manual rule writes are not enabled yet
+                  </AlertTitle>
                   <AlertDescription>
-                    Adjust the search to find a built-in rule by name,
-                    condition, or target action.
+                    This route shows current local rule coverage first. Editing,
+                    preview, and historical apply controls stay disabled until
+                    storage write flows are stable.
                   </AlertDescription>
                 </Alert>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Priority</TableHead>
-                      <TableHead>Rule</TableHead>
-                      <TableHead>Conditions</TableHead>
-                      <TableHead>Target action</TableHead>
-                      <TableHead>State</TableHead>
-                      <TableHead className="w-12 text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredRules.map((rule) => (
-                      <TableRow key={rule.id}>
-                        <TableCell className="font-mono text-xs">
-                          {rule.priority}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {rule.label}
-                        </TableCell>
-                        <TableCell>{rule.conditions}</TableCell>
-                        <TableCell>{rule.targetAction}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">Active</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                className="ml-auto"
-                                aria-label={`Open actions for ${rule.label} rule`}
-                              >
-                                <MoreHorizontalIcon />
-                                <span className="sr-only">Open actions</span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuLabel>
-                                Rule actions
-                              </DropdownMenuLabel>
-                              <DropdownMenuGroup>
-                                <DropdownMenuItem disabled>
-                                  <EyeIcon />
-                                  Preview matches
-                                </DropdownMenuItem>
-                                <DropdownMenuItem disabled>
-                                  <TagIcon />
-                                  Edit rule
-                                </DropdownMenuItem>
-                                <DropdownMenuItem disabled>
-                                  <CheckCheckIcon />
-                                  Apply to history
-                                </DropdownMenuItem>
-                              </DropdownMenuGroup>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-              <Alert>
-                <ShieldCheckIcon />
-                <AlertTitle>Manual rule writes are not enabled yet</AlertTitle>
-                <AlertDescription>
-                  This route shows current local rule coverage first. Editing,
-                  preview, and historical apply controls stay disabled until
-                  storage write flows are stable.
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+
+            <Card className="xl:self-start">
+              <CardHeader>
+                <CardTitle>Rule editor preview</CardTitle>
+                <CardDescription>
+                  Read-only controls for the selected built-in rule.
+                </CardDescription>
+                <CardAction>
+                  <Badge variant="outline">Read-only</Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <div className="grid gap-3">
+                  <RuleEditorPreviewField
+                    id="rule-editor-merchant"
+                    label="Merchant contains"
+                    value={selectedRule.editor.merchantContains}
+                  />
+                  <RuleEditorPreviewField
+                    id="rule-editor-description"
+                    label="Description contains"
+                    value={selectedRule.editor.descriptionContains}
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <RuleEditorPreviewField
+                      id="rule-editor-mcc"
+                      label="MCC"
+                      value={selectedRule.editor.mcc}
+                    />
+                    <RuleEditorPreviewField
+                      id="rule-editor-amount"
+                      label="Amount range"
+                      value={selectedRule.editor.amountRange}
+                    />
+                  </div>
+                  <RuleEditorPreviewSelect
+                    label="Transaction type"
+                    options={ruleEditorTransactionTypeOptions}
+                    value={selectedRule.editor.transactionType}
+                  />
+                  <RuleEditorPreviewSelect
+                    label="Account"
+                    options={ruleEditorAccountOptions}
+                    value={selectedRule.editor.account}
+                  />
+                  <RuleEditorPreviewSelect
+                    label="Date constraint"
+                    options={ruleEditorDateOptions}
+                    value={selectedRule.editor.date}
+                  />
+                </div>
+                <Separator />
+                <div className="grid gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Target action
+                  </span>
+                  <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                    <TagIcon className="size-4 text-muted-foreground" />
+                    <span>{selectedRule.targetAction}</span>
+                  </div>
+                </div>
+              </CardContent>
+              <CardFooter className="flex flex-wrap gap-2">
+                <Button disabled size="sm" type="button" variant="outline">
+                  <SearchIcon data-icon="inline-start" />
+                  Preview matches
+                </Button>
+                <Button disabled size="sm" type="button" variant="outline">
+                  <CheckCheckIcon data-icon="inline-start" />
+                  Apply to history
+                </Button>
+                <Button disabled size="sm" type="button" variant="outline">
+                  <TagIcon data-icon="inline-start" />
+                  Save rule
+                </Button>
+              </CardFooter>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="merchants">
