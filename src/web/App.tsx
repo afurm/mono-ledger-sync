@@ -310,44 +310,51 @@ const builtInRuleSummaries = [
   {
     id: "income",
     label: "Income",
-    match: "Positive amount",
-    target: "Income",
+    priority: 10,
+    conditions: "Positive amount",
+    targetAction: "Set category to Income",
   },
   {
     id: "groceries",
     label: "Groceries",
-    match: "MCC 5411 or grocery text",
-    target: "Groceries",
+    priority: 20,
+    conditions: "MCC 5411 or grocery text",
+    targetAction: "Set category to Groceries",
   },
   {
     id: "subscriptions",
     label: "Subscriptions",
-    match: "MCC 5734 or subscription text",
-    target: "Subscriptions",
+    priority: 30,
+    conditions: "MCC 5734 or subscription text",
+    targetAction: "Set category to Subscriptions",
   },
   {
     id: "transport",
     label: "Transport",
-    match: "MCC 4111 or metro text",
-    target: "Transport",
+    priority: 40,
+    conditions: "MCC 4111 or metro text",
+    targetAction: "Set category to Transport",
   },
   {
     id: "travel",
     label: "Travel",
-    match: "MCC 4722 or travel text",
-    target: "Travel",
+    priority: 50,
+    conditions: "MCC 4722 or travel text",
+    targetAction: "Set category to Travel",
   },
   {
     id: "dining",
     label: "Dining",
-    match: "MCC 5814 or coffee text",
-    target: "Dining",
+    priority: 60,
+    conditions: "MCC 5814 or coffee text",
+    targetAction: "Set category to Dining",
   },
   {
     id: "transfers",
     label: "Transfers",
-    match: "MCC 4829 or transfer text",
-    target: "Transfers",
+    priority: 70,
+    conditions: "MCC 4829 or transfer text",
+    targetAction: "Set category to Transfers",
   },
 ] as const;
 
@@ -3567,7 +3574,21 @@ function duplicateCandidateCount(entries: readonly LedgerEntry[]): number {
 }
 
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+  const [rulesSearch, setRulesSearch] = useState("");
   const entries = snapshot?.transactions.entries ?? [];
+  const normalizedRulesSearch = rulesSearch.trim().toLowerCase();
+  const filteredRules = useMemo(() => {
+    if (!normalizedRulesSearch) {
+      return builtInRuleSummaries;
+    }
+
+    return builtInRuleSummaries.filter((rule) => {
+      const searchableText =
+        `${rule.label} ${rule.conditions} ${rule.targetAction}`.toLowerCase();
+
+      return searchableText.includes(normalizedRulesSearch);
+    });
+  }, [normalizedRulesSearch]);
   const categoryCount = new Set(
     entries.map((entry) => entry.categoryId ?? "uncategorized"),
   ).size;
@@ -3659,30 +3680,101 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               </CardAction>
             </CardHeader>
             <CardContent className="grid gap-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Rule</TableHead>
-                    <TableHead>Match</TableHead>
-                    <TableHead>Target</TableHead>
-                    <TableHead className="text-right">State</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {builtInRuleSummaries.map((rule) => (
-                    <TableRow key={rule.id}>
-                      <TableCell className="font-medium">
-                        {rule.label}
-                      </TableCell>
-                      <TableCell>{rule.match}</TableCell>
-                      <TableCell>{rule.target}</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant="outline">Active</Badge>
-                      </TableCell>
+              <div className="grid gap-2 sm:max-w-sm">
+                <label
+                  className="text-xs font-medium text-muted-foreground"
+                  htmlFor="rules-search"
+                >
+                  Search rules
+                </label>
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="rules-search"
+                    type="search"
+                    value={rulesSearch}
+                    onChange={(event) => setRulesSearch(event.target.value)}
+                    className="pl-9"
+                    placeholder="Name, condition, or target"
+                  />
+                </div>
+              </div>
+
+              {filteredRules.length === 0 ? (
+                <Alert>
+                  <AlertCircleIcon />
+                  <AlertTitle>No matching rules</AlertTitle>
+                  <AlertDescription>
+                    Adjust the search to find a built-in rule by name,
+                    condition, or target action.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Rule</TableHead>
+                      <TableHead>Conditions</TableHead>
+                      <TableHead>Target action</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead className="w-12 text-right">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRules.map((rule) => (
+                      <TableRow key={rule.id}>
+                        <TableCell className="font-mono text-xs">
+                          {rule.priority}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {rule.label}
+                        </TableCell>
+                        <TableCell>{rule.conditions}</TableCell>
+                        <TableCell>{rule.targetAction}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">Active</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="ml-auto"
+                                aria-label={`Open actions for ${rule.label} rule`}
+                              >
+                                <MoreHorizontalIcon />
+                                <span className="sr-only">Open actions</span>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuLabel>
+                                Rule actions
+                              </DropdownMenuLabel>
+                              <DropdownMenuGroup>
+                                <DropdownMenuItem disabled>
+                                  <EyeIcon />
+                                  Preview matches
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled>
+                                  <TagIcon />
+                                  Edit rule
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled>
+                                  <CheckCheckIcon />
+                                  Apply to history
+                                </DropdownMenuItem>
+                              </DropdownMenuGroup>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
               <Alert>
                 <ShieldCheckIcon />
                 <AlertTitle>Manual rule writes are not enabled yet</AlertTitle>
