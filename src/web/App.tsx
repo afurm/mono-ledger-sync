@@ -3918,6 +3918,140 @@ function RuleTestPanel({
   );
 }
 
+function ledgerEntryMatchesRule(
+  entry: LedgerEntry,
+  rule: BuiltInRuleSummary,
+): boolean {
+  const merchantText = `${entry.merchantName ?? ""} ${entry.description}`;
+  const descriptionText = entry.description;
+  const merchantTerms = ruleConstraintTerms(rule.editor.merchantContains);
+  const descriptionTerms = ruleConstraintTerms(rule.editor.descriptionContains);
+  const hasTextConstraint =
+    merchantTerms.length > 0 || descriptionTerms.length > 0;
+  const textMatches =
+    !hasTextConstraint ||
+    textMatchesRuleConstraint(rule.editor.merchantContains, merchantText) ||
+    textMatchesRuleConstraint(rule.editor.descriptionContains, descriptionText);
+  const amountTypeMatches =
+    rule.editor.transactionType === "Income"
+      ? entry.amount > 0
+      : rule.editor.transactionType === "Expense"
+        ? entry.amount < 0
+        : true;
+
+  return textMatches && amountTypeMatches;
+}
+
+function RuleHistoryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function RuleHistoricalPreviewPanel({
+  entries,
+  rule,
+  totalRows,
+}: {
+  entries: readonly LedgerEntry[];
+  rule: BuiltInRuleSummary;
+  totalRows: number;
+}) {
+  const matchedEntries = entries.filter((entry) =>
+    ledgerEntryMatchesRule(entry, rule),
+  );
+  const previewEntries = matchedEntries.slice(0, 3);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Historical preview</CardTitle>
+        <CardDescription>
+          Read-only impact estimate against loaded local rows.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary">{matchedEntries.length} affected</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+          <RuleHistoryMetric
+            label="Loaded rows"
+            value={String(entries.length)}
+          />
+          <RuleHistoryMetric label="Ledger rows" value={String(totalRows)} />
+        </div>
+        <Alert>
+          <FileClockIcon />
+          <AlertTitle>Preview only</AlertTitle>
+          <AlertDescription>
+            MCC matching is not available on normalized local history rows yet.
+            This estimate uses merchant text, description text, and amount
+            direction.
+          </AlertDescription>
+        </Alert>
+        {entries.length === 0 ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>No transactions loaded</AlertTitle>
+            <AlertDescription>
+              Run sync before previewing historical rule impact.
+            </AlertDescription>
+          </Alert>
+        ) : previewEntries.length === 0 ? (
+          <Alert>
+            <CheckCircle2Icon />
+            <AlertTitle>No loaded rows would change</AlertTitle>
+            <AlertDescription>
+              The selected rule does not match the currently loaded local rows.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="grid gap-2">
+            {previewEntries.map((entry) => (
+              <div
+                className="grid gap-2 rounded-md border border-border px-3 py-2"
+                key={entry.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {entry.merchantName ?? entry.description}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {entry.description}
+                    </div>
+                  </div>
+                  <Badge variant="outline">
+                    {formatMinorAmount(entry.amount, entry.currencyCode)}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span>{formatDateTime(entry.time)}</span>
+                  <span>{transactionCategoryLabel(entry)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2">
+        <Button disabled size="sm" type="button" variant="outline">
+          <SearchIcon data-icon="inline-start" />
+          Refresh preview
+        </Button>
+        <Button disabled size="sm" type="button" variant="outline">
+          <CheckCheckIcon data-icon="inline-start" />
+          Apply previewed changes
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const [rulesSearch, setRulesSearch] = useState("");
   const [selectedRuleId, setSelectedRuleId] = useState<
@@ -4253,6 +4387,11 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 </CardFooter>
               </Card>
               <RuleTestPanel account={ruleTestAccount} rule={selectedRule} />
+              <RuleHistoricalPreviewPanel
+                entries={entries}
+                rule={selectedRule}
+                totalRows={snapshot?.transactions.total ?? entries.length}
+              />
             </div>
           </div>
         </TabsContent>
