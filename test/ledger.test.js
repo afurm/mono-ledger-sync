@@ -1234,6 +1234,10 @@ test("local API validates query strings and webhook payloads", async () => {
         method: "GET",
         url: "/api/exports/ledger?preset=unknown",
       });
+      const webhookValidationResponse = await server.inject({
+        method: "GET",
+        url: "/api/webhooks/monobank",
+      });
       const webhookResponse = await server.inject({
         method: "POST",
         url: "/api/webhooks/monobank",
@@ -1285,6 +1289,8 @@ test("local API validates query strings and webhook payloads", async () => {
         message:
           "Supported export presets: accountant-handoff, monthly-personal-finance, bookkeeping, budget-analysis, raw-transaction-archive",
       });
+      assert.equal(webhookValidationResponse.statusCode, 200);
+      assert.equal(webhookValidationResponse.body, "ok");
       assert.equal(webhookResponse.statusCode, 200);
       assert.equal(webhookBody.accepted, true);
       assert.equal(webhookBody.pullRequired, true);
