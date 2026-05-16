@@ -3004,6 +3004,7 @@ function TransactionsRoute({
   const [selectedTransaction, setSelectedTransaction] = useState<
     LedgerEntry | undefined
   >();
+  const [transactionsReloadToken, setTransactionsReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -3039,6 +3040,7 @@ function TransactionsRoute({
     filters,
     snapshot?.summary.lastSyncedAt,
     snapshot?.summary.ledgerEntries,
+    transactionsReloadToken,
   ]);
 
   const categoryOptions = useMemo(() => {
@@ -3219,6 +3221,7 @@ function TransactionsRoute({
 
   function handleTransactionUpdated(entry: LedgerEntry): void {
     setSelectedTransaction(entry);
+    setTransactionsReloadToken((current) => current + 1);
     setPageState((current) => {
       if (!current.data) {
         return current;
