@@ -18,6 +18,7 @@ import {
   CheckCircle2Icon,
   DatabaseIcon,
   DownloadIcon,
+  EyeOffIcon,
   EyeIcon,
   FilterXIcon,
   FileClockIcon,
@@ -134,6 +135,8 @@ import {
   type WebhookEvent,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
+  clearMonobankToken,
+  saveMonobankToken,
   runFixtureSync,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
@@ -2327,11 +2330,28 @@ function RouteLoadingSkeleton({ routeId }: { routeId: RouteId }) {
       return <TransactionsLoadingSkeleton />;
     case "sync":
       return <SyncLoadingSkeleton />;
+    case "settings":
+      return <SettingsLoadingSkeleton />;
     case "accounts":
       return <AccountsLoadingSkeleton />;
     default:
       return <PlaceholderLoadingSkeleton routeId={routeId} />;
   }
+}
+
+function SettingsLoadingSkeleton() {
+  return (
+    <Card aria-busy="true" aria-label="Settings loading">
+      <CardHeader>
+        <Skeleton className="h-5 w-36" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-28 w-full" />
+      </CardContent>
+    </Card>
+  );
 }
 
 function OverviewStatusItem({
@@ -4334,6 +4354,281 @@ function SyncRoute({
   );
 }
 
+function tokenStateLabel(hasToken: boolean): {
+  state: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+  description: string;
+} {
+  if (hasToken) {
+    return {
+      state: "Configured",
+      variant: "default",
+      description:
+        "A Monobank token is available for the running server session.",
+    };
+  }
+
+  return {
+    state: "Not configured",
+    variant: "outline",
+    description:
+      "No token is configured for this workspace. Monobank sync will not run.",
+  };
+}
+
+function SettingsRoute({
+  snapshot,
+  loading,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  loading: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenError, setTokenError] = useState<string | undefined>();
+  const [tokenActionError, setTokenActionError] = useState<
+    string | undefined
+  >();
+  const [tokenActionMessage, setTokenActionMessage] = useState<
+    string | undefined
+  >();
+  const [isSavingToken, setIsSavingToken] = useState(false);
+  const [isDeletingToken, setIsDeletingToken] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+
+  if (loading && !snapshot) {
+    return <SettingsLoadingSkeleton />;
+  }
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const {
+    state: tokenState,
+    variant: tokenVariant,
+    description,
+  } = tokenStateLabel(snapshot.config.token.hasToken);
+  const isBusy = isSavingToken || isDeletingToken;
+  const isTokenInputValid = tokenInput.trim().length > 0;
+  const isMonobankSource = snapshot.config.source === "monobank";
+
+  async function saveToken(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    const nextToken = tokenInput.trim();
+
+    if (!nextToken) {
+      setTokenError("Monobank token cannot be empty or whitespace.");
+      return;
+    }
+
+    setIsSavingToken(true);
+    setTokenError(undefined);
+    setTokenActionError(undefined);
+    setTokenActionMessage(undefined);
+
+    try {
+      await saveMonobankToken(nextToken);
+      setTokenInput("");
+      setShowToken(false);
+      setTokenActionMessage(
+        "Monobank token saved for the current local server session.",
+      );
+      await onRefresh();
+    } catch (error) {
+      setTokenActionError(
+        error instanceof Error ? error.message : "Unable to save token.",
+      );
+    } finally {
+      setIsSavingToken(false);
+    }
+  }
+
+  async function removeToken(): Promise<void> {
+    setIsDeletingToken(true);
+    setTokenActionError(undefined);
+    setTokenActionMessage(undefined);
+
+    try {
+      await clearMonobankToken();
+      setTokenActionMessage(
+        "Monobank token removed from the current local server session.",
+      );
+      await onRefresh();
+    } catch (error) {
+      setTokenActionError(
+        error instanceof Error ? error.message : "Unable to remove token.",
+      );
+    } finally {
+      setIsDeletingToken(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Monobank token</CardTitle>
+          <CardDescription>
+            Manage local token onboarding and deletion for the running Monobank
+            source.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Token status
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={tokenVariant}>{tokenState}</Badge>
+              <p className="text-sm text-muted-foreground">{description}</p>
+            </div>
+          </div>
+
+          <form className="grid gap-3" onSubmit={saveToken}>
+            <label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Monobank personal API token
+              </span>
+              <Input
+                type={showToken ? "text" : "password"}
+                value={tokenInput}
+                placeholder={
+                  isMonobankSource
+                    ? "Paste token from Monobank"
+                    : "Enter token for Monobank when switching source"
+                }
+                autoComplete="new-password"
+                inputMode="text"
+                onChange={(event) => {
+                  setTokenInput(event.target.value);
+                  setTokenError(undefined);
+                  setTokenActionError(undefined);
+                  setTokenActionMessage(undefined);
+                }}
+                aria-invalid={tokenError ? true : undefined}
+                aria-describedby={
+                  tokenError ? "monobank-token-error" : undefined
+                }
+              />
+              {tokenError && (
+                <span
+                  id="monobank-token-error"
+                  className="text-xs text-destructive"
+                >
+                  {tokenError}
+                </span>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowToken((current) => !current)}
+                >
+                  {showToken ? (
+                    <>
+                      <EyeOffIcon data-icon="inline-start" />
+                      Hide token
+                    </>
+                  ) : (
+                    <>
+                      <EyeIcon data-icon="inline-start" />
+                      Show token
+                    </>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => setTokenInput("")}
+                  disabled={tokenInput.length === 0}
+                >
+                  <XIcon data-icon="inline-start" />
+                  Clear input
+                </Button>
+              </div>
+            </label>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="submit"
+                disabled={isBusy || !isTokenInputValid || loading}
+              >
+                {isSavingToken ? "Saving..." : "Save token"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isBusy || !snapshot.config.token.hasToken}
+                onClick={removeToken}
+              >
+                {isDeletingToken ? "Removing..." : "Remove token"}
+              </Button>
+            </div>
+          </form>
+
+          {tokenActionError && (
+            <Alert variant="destructive">
+              <AlertCircleIcon />
+              <AlertTitle>Token update failed</AlertTitle>
+              <AlertDescription>{tokenActionError}</AlertDescription>
+            </Alert>
+          )}
+
+          {tokenActionMessage && (
+            <Alert>
+              <CheckCircle2Icon />
+              <AlertTitle>Token state updated</AlertTitle>
+              <AlertDescription>{tokenActionMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Local runtime guidance</CardTitle>
+          <CardDescription>
+            Token scope and workspace behavior for local-first mode.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <Alert>
+            <ShieldCheckIcon />
+            <AlertTitle>Local-only token policy</AlertTitle>
+            <AlertDescription>
+              Tokens are used only by the local API server process. They are not
+              included in exported payloads or persisted to the local ledger.
+              Restarting the local process drops the cached token.
+            </AlertDescription>
+          </Alert>
+
+          <p className="text-muted-foreground">
+            Source:{" "}
+            <span className="font-medium">{snapshot.config.source}</span>
+          </p>
+          <p className="text-muted-foreground">
+            Data directory:{" "}
+            <span className="break-all font-medium">
+              {snapshot.config.dataDir}
+            </span>
+          </p>
+          <p className="text-muted-foreground">
+            Database:{" "}
+            <span className="break-all font-medium">
+              {snapshot.config.databasePath}
+            </span>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function AccountDetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -5467,11 +5762,13 @@ function RouteContent({
   snapshot,
   loading,
   onRouteChange,
+  onRefresh,
 }: {
   activeRoute: RouteId;
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
   onRouteChange: (routeId: RouteId) => void;
+  onRefresh: () => Promise<void>;
 }) {
   if (loading && !snapshot) {
     return <RouteLoadingSkeleton routeId={activeRoute} />;
@@ -5490,6 +5787,14 @@ function RouteContent({
       return <TransactionsRoute snapshot={snapshot} />;
     case "sync":
       return <SyncRoute snapshot={snapshot} onRouteChange={onRouteChange} />;
+    case "settings":
+      return (
+        <SettingsRoute
+          snapshot={snapshot}
+          loading={loading}
+          onRefresh={onRefresh}
+        />
+      );
     case "accounts":
       return <AccountsRoute snapshot={snapshot} />;
     case "rules":
@@ -5497,7 +5802,6 @@ function RouteContent({
     case "exports":
     case "logs":
       return <LogsRoute snapshot={snapshot} />;
-    case "settings":
     case "help":
       return <PlaceholderRoute routeId={activeRoute} />;
   }
@@ -5675,6 +5979,7 @@ export default function App() {
               activeRoute={activeRoute}
               loading={loading}
               onRouteChange={onRouteChange}
+              onRefresh={refresh}
               snapshot={snapshot}
             />
 
