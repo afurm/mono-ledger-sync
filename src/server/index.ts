@@ -39,6 +39,7 @@ import type {
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntrySortDirection,
   LedgerEntrySortField,
@@ -312,6 +313,34 @@ const ledgerEntryAnnotationBodySchema = {
       type: "array",
       maxItems: 12,
       items: { type: "string", minLength: 1, maxLength: 40 },
+    },
+  },
+} as const;
+
+const ledgerEntrySplitPlanLineSchema = {
+  type: "object",
+  required: ["category", "amount"],
+  additionalProperties: false,
+  properties: {
+    category: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^(?!\\s*$).+",
+    },
+    amount: { type: "integer" },
+  },
+} as const;
+
+const ledgerEntrySplitPlanBodySchema = {
+  type: "object",
+  required: ["lines"],
+  additionalProperties: false,
+  properties: {
+    lines: {
+      type: "array",
+      maxItems: 20,
+      items: ledgerEntrySplitPlanLineSchema,
     },
   },
 } as const;
@@ -740,6 +769,41 @@ function readLedgerEntryAnnotationUpdate(
     update.tags = record.tags.filter((tag): tag is string => {
       return typeof tag === "string";
     });
+  }
+
+  return update;
+}
+
+function readLedgerEntrySplitPlanUpdate(
+  body: unknown,
+): LedgerEntrySplitPlanUpdate {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {};
+  }
+
+  const record = body as Record<string, unknown>;
+  const update: LedgerEntrySplitPlanUpdate = {};
+
+  if (Array.isArray(record.lines)) {
+    update.lines = record.lines
+      .map((line) => {
+        if (!line || typeof line !== "object" || Array.isArray(line)) {
+          return undefined;
+        }
+
+        const item = line as Record<string, unknown>;
+        const category = item.category;
+        const amount = item.amount;
+
+        if (typeof category !== "string" || typeof amount !== "number") {
+          return undefined;
+        }
+
+        return { category, amount };
+      })
+      .filter((line): line is { category: string; amount: number } => {
+        return line !== undefined;
+      });
   }
 
   return update;
@@ -1580,6 +1644,51 @@ function registerLocalApiRoutes(
         services.profile,
         id,
         readLedgerEntryAnnotationUpdate(request.body),
+      );
+
+      if (!entry) {
+        reply.code(404);
+        return {
+          error: "not_found",
+          message: "Transaction was not found",
+        };
+      }
+
+      return entry;
+    },
+  );
+
+  app.patch(
+    `${localApiRoutePrefix}/ledger/transactions/:id/split-plan`,
+    {
+      schema: {
+        body: ledgerEntrySplitPlanBodySchema,
+        response: {
+          200: { type: "object", additionalProperties: true },
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<LedgerEntry | { error: string; message: string }> => {
+      const services = await getServices();
+      const params = request.params as { id?: string };
+      const id = params.id?.trim();
+
+      if (!id) {
+        reply.code(404);
+        return {
+          error: "not_found",
+          message: "Transaction was not found",
+        };
+      }
+
+      const entry = await services.db.updateLedgerEntrySplitPlan(
+        services.profile,
+        id,
+        readLedgerEntrySplitPlanUpdate(request.body),
       );
 
       if (!entry) {

@@ -25,10 +25,12 @@ import {
   MenuIcon,
   MoonIcon,
   MoreHorizontalIcon,
+  PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   ShieldCheckIcon,
   SplitIcon,
+  XIcon,
   SunIcon,
   TagsIcon,
   StickyNoteIcon,
@@ -132,6 +134,7 @@ import {
   loadLedgerTransactions,
   runFixtureSync,
   updateLedgerTransactionAnnotation,
+  updateLedgerTransactionSplitPlan,
 } from "./api";
 import {
   currencyLabel,
@@ -213,6 +216,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const STALE_SYNC_THRESHOLD_MS = DAY_MS;
 const SYNC_HEALTH_DAYS = 30;
+const MAX_SPLIT_PLAN_LINES = 20;
 const transactionSortFields = [
   "time",
   "merchant",
@@ -2270,6 +2274,38 @@ function transactionCategoryRuleMatch(entry: LedgerEntry): string {
   }
 }
 
+type SplitPlanLineInput = {
+  category: string;
+  amount: string;
+};
+
+type ParsedSplitPlanLine = {
+  category: string;
+  amount: number;
+};
+
+function splitPlanLineInputAmount(amount: number): string {
+  return (amount / 100).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function splitPlanLinesFromEntry(entry: LedgerEntry): SplitPlanLineInput[] {
+  const lines = entry.splitPlan;
+
+  if (lines && lines.length > 0) {
+    return lines.map((line) => ({
+      category: line.category,
+      amount: splitPlanLineInputAmount(line.amount),
+    }));
+  }
+
+  return [
+    {
+      category: transactionCategoryLabel(entry),
+      amount: splitPlanLineInputAmount(entry.amount),
+    },
+  ];
+}
+
 function transactionCategoryHistory(entry: LedgerEntry): string {
   if (!entry.categoryId || entry.categoryId === "uncategorized") {
     return "Initial ledger assignment only; no category changes recorded";
@@ -2339,18 +2375,42 @@ function parseTagsInput(value: string): readonly string[] {
   ];
 }
 
-function transactionSplitPlanningRows(entry: LedgerEntry): readonly {
-  label: string;
-  category: string;
-  amount: number;
-}[] {
-  return [
-    {
-      label: "Current allocation",
-      category: transactionCategoryLabel(entry),
-      amount: entry.amount,
-    },
-  ];
+function splitPlanLineStateFromDraft(
+  line: SplitPlanLineInput,
+): ParsedSplitPlanLine | undefined {
+  const category = line.category.trim();
+  const amount = amountInputToMinor(line.amount);
+
+  if (!category || amount === undefined) {
+    return undefined;
+  }
+
+  return { category, amount };
+}
+
+function splitPlanLineStateToPayload(lines: readonly SplitPlanLineInput[]) {
+  return lines
+    .map((line) => splitPlanLineStateFromDraft(line))
+    .filter((line): line is ParsedSplitPlanLine => line !== undefined);
+}
+
+function splitPlanLinesMatch(
+  left: readonly ParsedSplitPlanLine[],
+  right: readonly ParsedSplitPlanLine[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((entry, index) => {
+    const other = right[index];
+
+    return (
+      other !== undefined &&
+      entry.category === other.category &&
+      entry.amount === other.amount
+    );
+  });
 }
 
 function TransactionDetailDrawer({
@@ -2375,6 +2435,12 @@ function TransactionDetailDrawer({
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
+  const [splitPlanLines, setSplitPlanLines] = useState<
+    readonly SplitPlanLineInput[]
+  >([]);
+  const [splitPlanSaveState, setSplitPlanSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
   const openRef = useRef(open);
   const entryIdRef = useRef(entry?.id);
   const title = entry?.merchantName ?? entry?.description ?? "Transaction";
@@ -2386,11 +2452,33 @@ function TransactionDetailDrawer({
   const annotationChanged =
     entry !== undefined &&
     (note !== (entry.note ?? "") || tags !== tagsInputValue(entry.tags));
+  const splitPlanParsedLines = useMemo(
+    () => splitPlanLineStateToPayload(splitPlanLines),
+    [splitPlanLines],
+  );
+  const splitPlanBaselineLines = useMemo(() => {
+    if (!entry) {
+      return [];
+    }
+
+    return splitPlanLineStateToPayload(splitPlanLinesFromEntry(entry));
+  }, [entry]);
+  const splitPlanHasInvalidLine =
+    splitPlanParsedLines.length !== splitPlanLines.length;
+  const splitPlanChanged =
+    !splitPlanLinesMatch(splitPlanParsedLines, splitPlanBaselineLines) ||
+    splitPlanParsedLines.length !== splitPlanBaselineLines.length;
+  const canSaveSplitPlan =
+    splitPlanChanged &&
+    !splitPlanHasInvalidLine &&
+    splitPlanSaveState !== "saving";
 
   useEffect(() => {
     setNote(entry?.note ?? "");
     setTags(tagsInputValue(entry?.tags));
     setSaveState("idle");
+    setSplitPlanLines(entry ? splitPlanLinesFromEntry(entry) : []);
+    setSplitPlanSaveState("idle");
   }, [entry]);
 
   useEffect(() => {
@@ -2425,6 +2513,71 @@ function TransactionDetailDrawer({
       }
 
       setSaveState("error");
+    }
+  }
+
+  function addSplitPlanLine(): void {
+    if (splitPlanLines.length >= MAX_SPLIT_PLAN_LINES) {
+      return;
+    }
+
+    setSplitPlanLines((current) => [...current, { category: "", amount: "" }]);
+    setSplitPlanSaveState("idle");
+  }
+
+  function removeSplitPlanLine(index: number): void {
+    setSplitPlanLines((current) =>
+      current.filter((_, currentIndex) => currentIndex !== index),
+    );
+    setSplitPlanSaveState("idle");
+  }
+
+  function updateSplitPlanLine(
+    index: number,
+    value: string,
+    field: "category" | "amount",
+  ): void {
+    setSplitPlanLines((current) => {
+      return current.map((line, lineIndex) => {
+        if (lineIndex !== index) {
+          return line;
+        }
+
+        return {
+          ...line,
+          [field]: value,
+        };
+      });
+    });
+    setSplitPlanSaveState("idle");
+  }
+
+  async function saveSplitPlan(): Promise<void> {
+    if (!entry || splitPlanSaveState === "saving" || splitPlanHasInvalidLine) {
+      return;
+    }
+
+    const savedEntryId = entry.id;
+
+    setSplitPlanSaveState("saving");
+
+    try {
+      const updatedEntry = await updateLedgerTransactionSplitPlan(entry.id, {
+        lines: splitPlanParsedLines,
+      });
+
+      if (!openRef.current || entryIdRef.current !== savedEntryId) {
+        return;
+      }
+
+      onEntryUpdated(updatedEntry);
+      setSplitPlanSaveState("saved");
+    } catch {
+      if (!openRef.current || entryIdRef.current !== savedEntryId) {
+        return;
+      }
+
+      setSplitPlanSaveState("error");
     }
   }
 
@@ -2601,36 +2754,122 @@ function TransactionDetailDrawer({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Line</TableHead>
+                      <TableHead className="w-10">Line</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="w-10"> </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {transactionSplitPlanningRows(entry).map((row) => (
-                      <TableRow key={row.label}>
-                        <TableCell>{row.label}</TableCell>
-                        <TableCell>{row.category}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatMinorAmount(row.amount, entry.currencyCode)}
+                    {splitPlanLines.map((line, index) => {
+                      const amountInputIsInvalid =
+                        amountInputToMinor(line.amount) === undefined;
+                      const categoryError = !line.category.trim();
+                      const amountError =
+                        !line.amount.trim() || amountInputIsInvalid;
+
+                      return (
+                        <TableRow key={`${entry.id}-${index}`}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell className="space-y-1">
+                            <Input
+                              value={line.category}
+                              placeholder="Category"
+                              onChange={(event) => {
+                                updateSplitPlanLine(
+                                  index,
+                                  event.target.value,
+                                  "category",
+                                );
+                              }}
+                            />
+                            {categoryError && (
+                              <span className="text-xs text-destructive">
+                                Enter a category
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="space-y-1">
+                            <Input
+                              inputMode="decimal"
+                              placeholder="-12.34"
+                              value={line.amount}
+                              onChange={(event) => {
+                                updateSplitPlanLine(
+                                  index,
+                                  event.target.value,
+                                  "amount",
+                                );
+                              }}
+                            />
+                            {amountError && (
+                              <span className="text-xs text-destructive">
+                                Enter a valid amount
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove split line ${index + 1}`}
+                              onClick={() => {
+                                removeSplitPlanLine(index);
+                              }}
+                            >
+                              <XIcon />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {splitPlanLines.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <span className="text-xs text-muted-foreground">
+                            No split lines yet.
+                          </span>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
               </div>
               <p className="text-xs text-muted-foreground">
-                Split drafts will stay in local review data and never rewrite
-                raw Monobank statement payloads.
+                Split drafts stay local in review data and do not rewrite raw
+                Monobank payloads.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" disabled>
-                  <SplitIcon data-icon="inline-start" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    addSplitPlanLine();
+                  }}
+                  disabled={splitPlanLines.length >= MAX_SPLIT_PLAN_LINES}
+                >
+                  <PlusIcon data-icon="inline-start" />
                   Add split line
                 </Button>
-                <Button type="button" disabled>
+                <Button
+                  type="button"
+                  disabled={!canSaveSplitPlan}
+                  onClick={() => {
+                    void saveSplitPlan();
+                  }}
+                >
+                  <SplitIcon data-icon="inline-start" />
                   Save split plan
                 </Button>
+                {splitPlanSaveState === "saved" && (
+                  <span className="text-xs text-muted-foreground">Saved</span>
+                )}
+                {splitPlanSaveState === "error" && (
+                  <span className="text-xs text-destructive">
+                    Could not save split plan
+                  </span>
+                )}
               </div>
             </section>
 
@@ -2885,7 +3124,7 @@ function TransactionRowActions({
             <TagsIcon />
             Add tags
           </DropdownMenuItem>
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onSelect={() => onViewDetails(entry)}>
             <SplitIcon />
             Split transaction
           </DropdownMenuItem>

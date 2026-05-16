@@ -19,6 +19,7 @@ import type {
   LedgerDbTransaction,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySortField,
@@ -91,6 +92,11 @@ export interface SqliteLedgerDb extends LedgerDb {
     id: string,
     update: LedgerEntryAnnotationUpdate,
   ): Promise<LedgerEntry | undefined>;
+  updateLedgerEntrySplitPlan(
+    profile: string,
+    id: string,
+    update: LedgerEntrySplitPlanUpdate,
+  ): Promise<LedgerEntry | undefined>;
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
@@ -132,6 +138,7 @@ interface SqliteLedgerEntryRow {
   balance: number | null;
   note: string | null;
   tags_json: string | null;
+  split_plan_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -322,6 +329,13 @@ const migrations: readonly SqliteMigration[] = [
       ALTER TABLE ledger_entries ADD COLUMN tags_json TEXT;
     `,
   },
+  {
+    id: "0003_transaction_split_plan",
+    description: "Add local transaction split plans",
+    sql: `
+      ALTER TABLE ledger_entries ADD COLUMN split_plan_json TEXT;
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -393,6 +407,64 @@ function parseTags(value: string | null): readonly string[] | undefined {
   });
 
   return tags.length > 0 ? tags : undefined;
+}
+
+function parseSplitPlan(
+  value: string | null,
+): readonly { category: string; amount: number }[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(value) as unknown;
+
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  const lines = parsed
+    .map((entry): { category: string; amount: number } | undefined => {
+      if (typeof entry !== "object" || entry === null) {
+        return undefined;
+      }
+
+      const record = entry as Record<string, unknown>;
+      const category =
+        typeof record.category === "string" ? record.category.trim() : "";
+      const amount = Number(record.amount);
+
+      if (!category || !Number.isInteger(amount)) {
+        return undefined;
+      }
+
+      return { category, amount };
+    })
+    .filter((entry): entry is { category: string; amount: number } => {
+      return entry !== undefined;
+    });
+
+  return lines.length > 0 ? lines : undefined;
+}
+
+function normalizeLedgerEntrySplitPlan(update: LedgerEntrySplitPlanUpdate): {
+  splitPlanJson: string | null | undefined;
+} {
+  if (update.lines === undefined) {
+    return {
+      splitPlanJson: undefined,
+    };
+  }
+
+  const lines = update.lines
+    .map((entry) => ({
+      category: entry.category.trim(),
+      amount: Number(entry.amount),
+    }))
+    .filter((entry) => entry.category && Number.isInteger(entry.amount));
+
+  return {
+    splitPlanJson: lines.length === 0 ? null : JSON.stringify(lines),
+  };
 }
 
 function normalizeLedgerEntryAnnotation(update: LedgerEntryAnnotationUpdate): {
@@ -476,6 +548,12 @@ function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
 
   if (tags) {
     entry.tags = tags;
+  }
+
+  const splitPlan = parseSplitPlan(row.split_plan_json);
+
+  if (splitPlan) {
+    entry.splitPlan = splitPlan;
   }
 
   return entry;
@@ -1026,7 +1104,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           SELECT
             id, account_id, time, description, amount, operation_amount,
             currency_code, category_id, category_name, merchant_name,
-            raw_statement_item_id, hold, balance, note, tags_json,
+            raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
             created_at, updated_at
           FROM ledger_entries
           WHERE ${where.sql}
@@ -1052,10 +1130,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     const annotation = normalizeLedgerEntryAnnotation(update);
     const selectEntry = this.#database.prepare(
       `
-        SELECT
-          id, account_id, time, description, amount, operation_amount,
-          currency_code, category_id, category_name, merchant_name,
-          raw_statement_item_id, hold, balance, note, tags_json,
+          SELECT
+            id, account_id, time, description, amount, operation_amount,
+            currency_code, category_id, category_name, merchant_name,
+          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
           created_at, updated_at
         FROM ledger_entries
         WHERE profile = ? AND id = ?
@@ -1088,6 +1166,56 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         note: annotation.note ?? null,
         hasTags: annotation.tagsJson === undefined ? 0 : 1,
         tagsJson: annotation.tagsJson ?? null,
+        updatedAt: nowIso(),
+      });
+
+    const row = selectEntry.get(profile, id) as
+      | SqliteLedgerEntryRow
+      | undefined;
+
+    return row ? mapLedgerEntryRow(row) : undefined;
+  }
+
+  async updateLedgerEntrySplitPlan(
+    profile: string,
+    id: string,
+    update: LedgerEntrySplitPlanUpdate,
+  ): Promise<LedgerEntry | undefined> {
+    const splitPlan = normalizeLedgerEntrySplitPlan(update);
+    const selectEntry = this.#database.prepare(
+      `
+        SELECT
+          id, account_id, time, description, amount, operation_amount,
+          currency_code, category_id, category_name, merchant_name,
+          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
+          created_at, updated_at
+        FROM ledger_entries
+        WHERE profile = ? AND id = ?
+      `,
+    );
+
+    if (splitPlan.splitPlanJson === undefined) {
+      const existingRow = selectEntry.get(profile, id) as
+        | SqliteLedgerEntryRow
+        | undefined;
+
+      return existingRow ? mapLedgerEntryRow(existingRow) : undefined;
+    }
+
+    this.#database
+      .prepare(
+        `
+          UPDATE ledger_entries
+          SET
+            split_plan_json = @splitPlanJson,
+            updated_at = @updatedAt
+          WHERE profile = @profile AND id = @id
+        `,
+      )
+      .run({
+        profile,
+        id,
+        splitPlanJson: splitPlan.splitPlanJson,
         updatedAt: nowIso(),
       });
 

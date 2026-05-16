@@ -55,9 +55,20 @@ export interface LedgerEntry {
   balance?: number;
   note?: string;
   tags?: readonly string[];
+  splitPlan?: readonly {
+    category: string;
+    amount: number;
+  }[];
   rawStatementItemId: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface LedgerEntrySplitPlanUpdate {
+  lines: readonly {
+    category: string;
+    amount: number;
+  }[];
 }
 
 export interface LedgerEntryPage {
@@ -185,6 +196,22 @@ export async function updateLedgerTransactionAnnotation(
 ): Promise<LedgerEntry> {
   return requestJson<LedgerEntry>(
     `/api/ledger/transactions/${encodeURIComponent(id)}/annotation`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(update),
+    },
+  );
+}
+
+export async function updateLedgerTransactionSplitPlan(
+  id: string,
+  update: LedgerEntrySplitPlanUpdate,
+): Promise<LedgerEntry> {
+  return requestJson<LedgerEntry>(
+    `/api/ledger/transactions/${encodeURIComponent(id)}/split-plan`,
     {
       method: "PATCH",
       headers: {

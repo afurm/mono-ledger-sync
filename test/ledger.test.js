@@ -74,6 +74,45 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         transactions.entries[0].id,
         {},
       );
+      const splitPlanFirst = await db.updateLedgerEntrySplitPlan(
+        profile,
+        transactions.entries[0].id,
+        {
+          lines: [
+            {
+              category: "Groceries",
+              amount: -1200,
+            },
+            {
+              category: "Coffee",
+              amount: 100,
+            },
+          ],
+        },
+      );
+      const splitPlanChanged = await db.updateLedgerEntrySplitPlan(
+        profile,
+        transactions.entries[0].id,
+        {
+          lines: [
+            {
+              category: "Groceries",
+              amount: -1100,
+            },
+            {
+              category: "Coffee",
+              amount: 200,
+            },
+          ],
+        },
+      );
+      const splitPlanCleared = await db.updateLedgerEntrySplitPlan(
+        profile,
+        transactions.entries[0].id,
+        {
+          lines: [],
+        },
+      );
       const annotatedTransactions = await db.listLedgerEntries({
         profile,
         search: "reimbursable",
@@ -98,6 +137,15 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       assert.equal(noteOnlyUpdate.note, "Updated review note");
       assert.deepEqual(noteOnlyUpdate.tags, ["tax", "reimbursable"]);
       assert.equal(emptyUpdate.updatedAt, noteOnlyUpdate.updatedAt);
+      assert.deepEqual(splitPlanFirst.splitPlan, [
+        { category: "Groceries", amount: -1200 },
+        { category: "Coffee", amount: 100 },
+      ]);
+      assert.deepEqual(splitPlanChanged.splitPlan, [
+        { category: "Groceries", amount: -1100 },
+        { category: "Coffee", amount: 200 },
+      ]);
+      assert.equal(splitPlanCleared.splitPlan, undefined);
       assert.equal(annotatedTransactions.total, 1);
     } finally {
       await db.close();
@@ -388,6 +436,41 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         url: `/api/ledger/transactions/${firstTransaction.id}/annotation`,
         body: {},
       });
+      const splitPlanResponse = await server.inject({
+        method: "PATCH",
+        url: `/api/ledger/transactions/${firstTransaction.id}/split-plan`,
+        body: {
+          lines: [
+            {
+              category: "Groceries",
+              amount: -1800,
+            },
+            {
+              category: "Utilities",
+              amount: 200,
+            },
+          ],
+        },
+      });
+      const splitPlanClearResponse = await server.inject({
+        method: "PATCH",
+        url: `/api/ledger/transactions/${firstTransaction.id}/split-plan`,
+        body: {
+          lines: [],
+        },
+      });
+      const splitPlanInvalidResponse = await server.inject({
+        method: "PATCH",
+        url: `/api/ledger/transactions/${firstTransaction.id}/split-plan`,
+        body: {
+          lines: [
+            {
+              category: "Groceries",
+              amount: 12.34,
+            },
+          ],
+        },
+      });
       const exportResponse = await server.inject({
         method: "GET",
         url: "/api/exports/ledger?format=jsonl&categoryId=groceries",
@@ -445,6 +528,20 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         "subscription",
       ]);
       assert.equal(emptyAnnotationResponse.statusCode, 400);
+      assert.equal(splitPlanResponse.statusCode, 200);
+      assert.deepEqual(splitPlanResponse.json().splitPlan, [
+        {
+          category: "Groceries",
+          amount: -1800,
+        },
+        {
+          category: "Utilities",
+          amount: 200,
+        },
+      ]);
+      assert.equal(splitPlanClearResponse.statusCode, 200);
+      assert.equal(splitPlanClearResponse.json().splitPlan, undefined);
+      assert.equal(splitPlanInvalidResponse.statusCode, 400);
       assert.equal(exportResponse.statusCode, 200);
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
       assert.equal(syncRunsResponse.statusCode, 200);
