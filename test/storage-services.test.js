@@ -68,7 +68,10 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(page.limit, 3);
       assert.equal(page.entries.length, 3);
       assert.equal(page.total, 7);
-      assert.deepEqual(categories, []);
+      const categoryIds = categories.map((category) => category.id);
+      assert.equal(categoryIds.length > 0, true);
+      assert.ok(categoryIds.includes("income"));
+      assert.ok(categoryIds.includes("uncategorized"));
       assert.equal(runs.length, 1);
       assert.equal(runs[0].profile, profile);
       assert.ok(Array.isArray(events));
