@@ -1,3 +1,9 @@
+import type {
+  LocalActivityEvent as DomainLocalActivityEvent,
+  LocalActivityEventSeverity as DomainLocalActivityEventSeverity,
+  LocalActivityEventType as DomainLocalActivityEventType,
+} from "../domain/index.js";
+
 export interface LocalApiHealth {
   status: "ok";
   localOnly: true;
@@ -151,31 +157,11 @@ export interface LocalApiFixtureSummary {
   errorStates: number;
 }
 
-export type LocalActivityEventType =
-  | "sync_run"
-  | "webhook_delivery"
-  | "export"
-  | "rule_application"
-  | "warning"
-  | "error";
+export type LocalActivityEventType = DomainLocalActivityEventType;
 
-export type LocalActivityEventSeverity =
-  | "info"
-  | "success"
-  | "partial"
-  | "warning"
-  | "error";
+export type LocalActivityEventSeverity = DomainLocalActivityEventSeverity;
 
-export interface LocalActivityEvent {
-  id: string;
-  type: LocalActivityEventType;
-  title: string;
-  details: string;
-  timestamp: string;
-  severity: LocalActivityEventSeverity;
-  source: string;
-  referenceId?: string;
-}
+export type LocalActivityEvent = DomainLocalActivityEvent;
 
 export interface LocalAppSnapshot {
   health: LocalApiHealth;
