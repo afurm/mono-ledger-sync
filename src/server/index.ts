@@ -493,6 +493,10 @@ const webhookAcceptedResponseSchema = {
   },
 } as const;
 
+const webhookValidationResponseSchema = {
+  type: "string",
+} as const;
+
 const monobankStatementItemBodySchema = {
   type: "object",
   required: [
@@ -1874,6 +1878,18 @@ function registerLocalApiRoutes(
 
       return services.db.listWebhookEvents(services.profile, 20);
     },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/webhooks/monobank`,
+    {
+      schema: {
+        response: {
+          200: webhookValidationResponseSchema,
+        },
+      },
+    },
+    async (): Promise<string> => "ok",
   );
 
   app.post(
