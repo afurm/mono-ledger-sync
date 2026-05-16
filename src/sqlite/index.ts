@@ -1674,6 +1674,45 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     }
 
     if (insertResult.changes === 0) {
+      this.#database
+        .prepare(
+          `
+            UPDATE webhook_events
+              SET status = 'duplicate'
+            WHERE profile = @profile
+              AND payload_hash = @payloadHash
+              AND delivery_fingerprint = @deliveryFingerprint
+              AND status = 'pending';
+          `,
+        )
+        .run({
+          profile: this.profile,
+          payloadHash,
+          deliveryFingerprint,
+        });
+
+      const duplicateRow = this.#database
+        .prepare(
+          `
+            SELECT
+              id, profile, account_id, type, statement_item_id, status,
+              received_at, processed_at
+            FROM webhook_events
+            WHERE profile = @profile
+              AND payload_hash = @payloadHash
+              AND delivery_fingerprint = @deliveryFingerprint
+          `,
+        )
+        .get({
+          profile: this.profile,
+          payloadHash,
+          deliveryFingerprint,
+        }) as SqliteWebhookEventRow | undefined;
+
+      if (duplicateRow) {
+        return mapWebhookEventRow(duplicateRow);
+      }
+
       return {
         ...mapWebhookEventRow(row),
         status: "duplicate",

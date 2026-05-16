@@ -1439,6 +1439,16 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
       assert.equal(thirdResponse.json().event.status, "pending");
       assert.equal(webhookEventsResponse.statusCode, 200);
       assert.equal(webhookBody.length, 2);
+      assert.equal(
+        webhookBody.find((event) => event.id === firstResponse.json().event.id)
+          ?.status,
+        "duplicate",
+      );
+      assert.equal(
+        webhookBody.find((event) => event.id === thirdResponse.json().event.id)
+          ?.status,
+        "pending",
+      );
     } finally {
       await server.close();
     }
