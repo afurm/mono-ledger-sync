@@ -2339,6 +2339,20 @@ function parseTagsInput(value: string): readonly string[] {
   ];
 }
 
+function transactionSplitPlanningRows(entry: LedgerEntry): readonly {
+  label: string;
+  category: string;
+  amount: number;
+}[] {
+  return [
+    {
+      label: "Current allocation",
+      category: transactionCategoryLabel(entry),
+      amount: entry.amount,
+    },
+  ];
+}
+
 function TransactionDetailDrawer({
   entry,
   open,
@@ -2571,6 +2585,52 @@ function TransactionDetailDrawer({
                     Could not save annotations
                   </span>
                 )}
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium text-foreground">
+                  Split planning
+                </h3>
+                <Badge variant="secondary">Local draft</Badge>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Line</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {transactionSplitPlanningRows(entry).map((row) => (
+                      <TableRow key={row.label}>
+                        <TableCell>{row.label}</TableCell>
+                        <TableCell>{row.category}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatMinorAmount(row.amount, entry.currencyCode)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Split drafts will stay in local review data and never rewrite
+                raw Monobank statement payloads.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" disabled>
+                  <SplitIcon data-icon="inline-start" />
+                  Add split line
+                </Button>
+                <Button type="button" disabled>
+                  Save split plan
+                </Button>
               </div>
             </section>
 
