@@ -583,6 +583,7 @@ const ledgerExportQuerySchema = {
     to: { type: "integer", minimum: 0 },
     accountId: { type: "string" },
     categoryId: { type: "string" },
+    tag: { type: "string" },
   },
 } as const;
 
@@ -2081,6 +2082,9 @@ function registerLocalApiRoutes(
         ...(to !== undefined ? { to } : {}),
         ...(accountId ? { accountIds: [accountId] } : {}),
         ...(categoryId ? { categoryIds: [categoryId] } : {}),
+        ...(readStringQuery(query.tag)
+          ? { tag: readStringQuery(query.tag)! }
+          : {}),
       });
 
       reply.header("content-type", ledgerExport.contentType);

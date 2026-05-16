@@ -289,6 +289,7 @@ export interface LedgerEntryQuery {
   accountId?: string;
   categoryId?: string;
   merchantName?: string;
+  tag?: string;
   status?: "hold" | "posted";
   amountMin?: number;
   amountMax?: number;

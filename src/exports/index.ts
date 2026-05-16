@@ -17,6 +17,7 @@ export interface ExportRequest {
   to?: number;
   accountIds?: readonly string[];
   categoryIds?: readonly string[];
+  tag?: string;
 }
 
 export interface LedgerExport {
@@ -147,6 +148,10 @@ function createExportFileName(
     parts.push(`category-${safeFileSegment(request.categoryIds[0])}`);
   }
 
+  if (request.tag?.trim()) {
+    parts.push(`tag-${safeFileSegment(request.tag)}`);
+  }
+
   return `${parts.join("-")}.${fileExtension(format)}`;
 }
 
@@ -178,6 +183,10 @@ function createEntryQuery(request: ExportRequest): LedgerEntryQuery {
     if (categoryId) {
       query.categoryId = categoryId;
     }
+  }
+
+  if (request.tag?.trim()) {
+    query.tag = request.tag.trim();
   }
 
   return query;
@@ -232,6 +241,10 @@ function exportFilters(request: ExportRequest): Record<string, unknown> {
 
   if (request.categoryIds?.length) {
     filters.categoryIds = [...request.categoryIds];
+  }
+
+  if (request.tag?.trim()) {
+    filters.tag = request.tag.trim();
   }
 
   return filters;
