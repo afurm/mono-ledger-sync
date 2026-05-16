@@ -1,6 +1,6 @@
 {
   "clientId": "fixture-client-primary",
-  "name": "Fixture Personal User",
+  "name": "fixture-local-profile",
   "webHookUrl": "https://localhost.example/mono-ledger-sync/webhook",
   "permissions": "psfj",
   "accounts": [

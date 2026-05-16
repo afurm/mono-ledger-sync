@@ -40,6 +40,69 @@ const fixtureFiles = [
   "errors/server-error.json",
 ];
 
+const personalNameCheckedKeys = new Set(["name", "counterName"]);
+const personalNamePattern =
+  /\b(?:[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ']{2,})(?:\s+(?:[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ']{2,})){1,2}\b/g;
+const nonPersonNameTokens = new Set([
+  "fixture",
+  "synthetic",
+  "demo",
+  "employer",
+  "grocery",
+  "coffee",
+  "metro",
+  "user",
+  "client",
+  "account",
+  "vendor",
+  "profile",
+  "bank",
+  "monobank",
+]);
+const organizationSuffixes =
+  /\b(?:llc|inc|ltd|gmbh|plc|corp|corporation|co|co\.)\b/i;
+
+function containsPersonalName(value) {
+  const candidates = value.match(personalNamePattern);
+
+  if (candidates === null) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    if (organizationSuffixes.test(candidate)) {
+      return false;
+    }
+
+    return candidate
+      .split(/\s+/)
+      .every((token) => !nonPersonNameTokens.has(token.toLowerCase()));
+  });
+}
+
+function collectPersonalNameViolations(value, path, violations) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectPersonalNameViolations(item, `${path}[${index}]`, violations);
+    });
+    return;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    Object.entries(value).forEach(([key, nested]) => {
+      const nextPath = path ? `${path}.${key}` : key;
+
+      if (typeof nested === "string" && personalNameCheckedKeys.has(key)) {
+        if (containsPersonalName(nested)) {
+          violations.push({ path: nextPath, value: nested });
+        }
+      }
+
+      collectPersonalNameViolations(nested, nextPath, violations);
+    });
+  }
+}
+
 async function readFixture(relativePath) {
   const text = await readFile(path.join(fixturesDir, relativePath), "utf8");
 
@@ -85,6 +148,8 @@ async function withTempLedger(callback) {
 test("fixtures stay synthetic and avoid real-looking sensitive values", async () => {
   for (const fixtureFile of fixtureFiles) {
     const text = await readFile(path.join(fixturesDir, fixtureFile), "utf8");
+    const payload = JSON.parse(text);
+    const violations = [];
 
     assert.doesNotMatch(
       text,
@@ -102,7 +167,12 @@ test("fixtures stay synthetic and avoid real-looking sensitive values", async ()
       `${fixtureFile} must not contain the API docs sample token`,
     );
 
-    JSON.parse(text);
+    collectPersonalNameViolations(payload, "", violations);
+    assert.equal(
+      violations.length,
+      0,
+      `${fixtureFile} must not contain obvious personal-name strings in sensitive fields`,
+    );
   }
 });
 
