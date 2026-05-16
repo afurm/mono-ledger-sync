@@ -70,6 +70,19 @@ const plan = createSyncPlan({
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
 
+## Webhook endpoint safety
+
+The local server exposes webhook settings in `/api/app/config.webhook`:
+
+- `webhook.host`: usually `127.0.0.1`
+- `webhook.port`: local API port
+- `webhook.path`: one high-entropy per-instance path (for example `/api/webhooks/monobank-ab12...`)
+- `webhook.url`: full URL to register in Monobank personal webhook settings
+
+Webhook registration should always use the returned `webhook.url` and remain local-only.
+Webhook payloads are recorded as local hints and are reconciled through statement pulls before
+they affect the final ledger state.
+
 ## Disclaimer
 
 This project is a local data ownership tool, not financial, tax, accounting, or legal advice. Verify exported data before making financial decisions or sending records to an accountant.
