@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { DomainError, type DomainErrorDescriptor } from "../domain/index.js";
 import { redactSensitiveText } from "../privacy/index.js";
 import type {
   MonobankAccount as DomainMonobankAccount,
@@ -73,26 +74,92 @@ export const bundledMonobankFixturesDir = fileURLToPath(
   new URL("../../fixtures/monobank", import.meta.url),
 );
 
-export class MonobankValidationError extends Error {
+export class MonobankValidationError extends DomainError {
   constructor(
     readonly path: string,
     readonly expected: string,
   ) {
-    super(`${path} must be ${expected}`);
+    super(`${path} must be ${expected}`, "validation_failed", "validation", {
+      path,
+      expected,
+    });
     this.name = "MonobankValidationError";
   }
 }
 
-export class MonobankApiError extends Error {
+export class MonobankApiError extends DomainError {
   constructor(
     readonly response: MonobankErrorResponse,
     readonly endpoint: string,
   ) {
+    const descriptor = createMonobankDomainErrorDescriptor(response);
     super(
       `${endpoint} failed with ${response.statusCode}: ${response.message}`,
+      descriptor.code,
+      descriptor.category,
+      {
+        endpoint,
+        statusCode: response.statusCode,
+        monobankCode: response.code,
+      },
     );
     this.name = "MonobankApiError";
   }
+}
+
+function createMonobankDomainErrorDescriptor(
+  response: MonobankErrorResponse,
+): DomainErrorDescriptor {
+  if (
+    response.statusCode === 401 ||
+    response.statusCode === 403 ||
+    response.code === "forbidden" ||
+    response.code === "unauthorized" ||
+    response.code === "token_invalid"
+  ) {
+    return {
+      code: "token_invalid",
+      category: "auth",
+    };
+  }
+
+  if (
+    response.statusCode === 429 ||
+    response.code === "rate_limited" ||
+    response.code === "too_many_requests"
+  ) {
+    return {
+      code: "rate_limit_exceeded",
+      category: "rate_limit",
+    };
+  }
+
+  if (response.statusCode >= 400 && response.statusCode < 500) {
+    return {
+      code: "request_invalid",
+      category: "validation",
+    };
+  }
+
+  return {
+    code: response.statusCode >= 500 ? "internal_error" : "validation_failed",
+    category: response.statusCode >= 500 ? "internal" : "validation",
+  };
+}
+
+function createMonobankNetworkError(
+  endpoint: string,
+  reason: unknown,
+): DomainError {
+  return new DomainError(
+    `Network request to ${endpoint} failed`,
+    "network_unreachable",
+    "network",
+    {
+      endpoint,
+      reason: reason instanceof Error ? reason.message : String(reason),
+    },
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -550,9 +617,10 @@ export function createMonobankHttpAdapter(
     }
   }
 
-  async function request(endpoint: string, init: RequestInit = {}) {
-    let lastError: unknown;
-
+  async function request(
+    endpoint: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       await waitForRateLimit(endpoint);
 
@@ -596,17 +664,19 @@ export function createMonobankHttpAdapter(
         return response;
       } catch (error) {
         clearTimeout(timeout);
-        lastError = error;
-
-        if (error instanceof MonobankApiError || attempt >= maxRetries) {
+        if (error instanceof MonobankApiError) {
           throw error;
+        }
+
+        if (attempt >= maxRetries) {
+          throw createMonobankNetworkError(endpoint, error);
         }
 
         await sleep(retryDelayMs(attempt));
       }
     }
 
-    throw lastError;
+    throw createMonobankNetworkError(endpoint, "max retries exceeded");
   }
 
   async function requestJson(endpoint: string, init: RequestInit = {}) {

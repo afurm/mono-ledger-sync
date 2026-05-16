@@ -22,6 +22,12 @@ export {
   type SyncRun,
 } from "./storage/index.js";
 export {
+  type DomainErrorCategory,
+  type DomainErrorCode,
+  domainErrorCategories,
+  domainErrorCodes,
+  type DomainErrorDescriptor,
+  DomainError,
   type AccountBalance as DomainAccountBalance,
   type Category,
   type Budget,
