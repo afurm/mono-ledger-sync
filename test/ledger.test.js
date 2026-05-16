@@ -870,6 +870,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0002_ledger_entry_annotations",
         "0003_transaction_split_plan",
         "0004_sync_run_stats_columns",
+        "0005_webhook_delivery_dedup",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1312,6 +1313,104 @@ test("local API validates query strings and webhook payloads", async () => {
         error: "invalid_webhook_payload",
         message: "Webhook payload is malformed.",
       });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("local API deduplicates webhook deliveries by payload and delivery metadata", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+    });
+    const webhookEvent = {
+      type: "StatementItem",
+      data: {
+        account: "fixture-account-uah-main",
+        statementItem: {
+          id: "fixture-webhook-duplicate-test",
+          time: 1775031300,
+          description: "Duplicate delivery transfer",
+          mcc: 4829,
+          originalMcc: 4829,
+          amount: -2500,
+          operationAmount: -2500,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97000,
+          hold: false,
+        },
+      },
+    };
+
+    try {
+      const firstResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+          "x-monobank-delivery-id": "delivery-111",
+        },
+        body: JSON.stringify(webhookEvent),
+      });
+      const secondResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+          "x-monobank-delivery-id": "delivery-111",
+        },
+        body: JSON.stringify(webhookEvent),
+      });
+      const thirdResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+          "x-monobank-delivery-id": "delivery-222",
+        },
+        body: JSON.stringify(webhookEvent),
+      });
+      const webhookEventsResponse = await server.inject({
+        method: "GET",
+        url: "/api/webhooks/events",
+      });
+      const webhookBody = webhookEventsResponse.json();
+
+      assert.equal(firstResponse.statusCode, 200);
+      assert.equal(secondResponse.statusCode, 200);
+      assert.equal(thirdResponse.statusCode, 200);
+      assert.deepEqual(firstResponse.json(), {
+        accepted: true,
+        pullRequired: true,
+        event: {
+          id: firstResponse.json().event.id,
+          profile: "demo",
+          accountId: "fixture-account-uah-main",
+          type: "StatementItem",
+          statementItemId: "fixture-webhook-duplicate-test",
+          receivedAt: firstResponse.json().event.receivedAt,
+          ...(firstResponse.json().event.processedAt === undefined
+            ? {}
+            : { processedAt: firstResponse.json().event.processedAt }),
+        },
+      });
+      assert.equal(
+        secondResponse.json().event.id,
+        firstResponse.json().event.id,
+        "duplicate delivery should not create a new webhook event",
+      );
+      assert.notEqual(
+        thirdResponse.json().event.id,
+        firstResponse.json().event.id,
+        "different delivery metadata should create separate webhook events",
+      );
+      assert.equal(webhookEventsResponse.statusCode, 200);
+      assert.equal(webhookBody.length, 2);
     } finally {
       await server.close();
     }

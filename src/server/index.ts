@@ -1464,6 +1464,49 @@ function registerLocalApiRoutes(
     return false;
   }
 
+  function webhookDeliveryMetadata(
+    headers: Record<string, unknown>,
+    ip: string,
+  ): Record<string, string> {
+    const readHeader = (
+      value: string | string[] | undefined,
+    ): string | undefined => {
+      if (!value) {
+        return undefined;
+      }
+
+      return Array.isArray(value) ? value[0] : value;
+    };
+
+    const metadata: Record<string, string> = {};
+    const deliveryId =
+      readHeader(
+        headers["x-monobank-delivery-id"] as string | string[] | undefined,
+      ) ??
+      readHeader(
+        headers["x-monobank-webhook-id"] as string | string[] | undefined,
+      ) ??
+      readHeader(headers["x-request-id"] as string | string[] | undefined);
+
+    if (deliveryId !== undefined) {
+      metadata.deliveryId = deliveryId;
+    }
+
+    const userAgent = readHeader(
+      headers["user-agent"] as string | string[] | undefined,
+    );
+
+    if (userAgent !== undefined) {
+      metadata.userAgent = userAgent;
+    }
+
+    if (ip) {
+      metadata.sourceIp = ip;
+    }
+
+    return metadata;
+  }
+
   app.get("/", async (_request, reply): Promise<string> => {
     const builtWebIndex = await readBuiltWebIndex();
 
@@ -1910,7 +1953,14 @@ function registerLocalApiRoutes(
         };
       }
 
-      const event = await services.db.recordWebhookEvent(typedWebhookEvent);
+      const event = await services.db.recordWebhookEvent(
+        typedWebhookEvent,
+        undefined,
+        webhookDeliveryMetadata(
+          request.headers as Record<string, unknown>,
+          request.ip,
+        ),
+      );
 
       return {
         accepted: true,
