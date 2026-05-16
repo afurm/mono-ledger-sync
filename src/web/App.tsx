@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -2360,6 +2361,8 @@ function TransactionDetailDrawer({
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
+  const openRef = useRef(open);
+  const entryIdRef = useRef(entry?.id);
   const title = entry?.merchantName ?? entry?.description ?? "Transaction";
   const status = entry?.hold ? "Hold" : "Posted";
   const latestRun = syncRuns[0];
@@ -2376,10 +2379,17 @@ function TransactionDetailDrawer({
     setSaveState("idle");
   }, [entry]);
 
+  useEffect(() => {
+    openRef.current = open;
+    entryIdRef.current = entry?.id;
+  }, [entry?.id, open]);
+
   async function saveAnnotation(): Promise<void> {
     if (!entry || saveState === "saving") {
       return;
     }
+
+    const savedEntryId = entry.id;
 
     setSaveState("saving");
 
@@ -2389,9 +2399,17 @@ function TransactionDetailDrawer({
         tags: parseTagsInput(tags),
       });
 
+      if (!openRef.current || entryIdRef.current !== savedEntryId) {
+        return;
+      }
+
       onEntryUpdated(updatedEntry);
       setSaveState("saved");
     } catch {
+      if (!openRef.current || entryIdRef.current !== savedEntryId) {
+        return;
+      }
+
       setSaveState("error");
     }
   }
