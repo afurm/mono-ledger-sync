@@ -958,6 +958,39 @@ test("local API runs fixture sync and exposes ledger data", async () => {
   });
 });
 
+test("local API returns auth_required for monobank sync without token", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "monobank",
+      monobankToken: "",
+      dataDir: tempRoot,
+    });
+
+    try {
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const syncResponse = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+
+      assert.equal(configResponse.statusCode, 200);
+      assert.equal(configResponse.json().source, "monobank");
+      assert.equal(syncResponse.statusCode, 400);
+      assert.deepEqual(syncResponse.json(), {
+        error: "auth_required",
+        message:
+          "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("local API validates query strings and webhook payloads", async () => {
   await withTempLedger(async ({ tempRoot }) => {
     const server = createLocalApiServer({
