@@ -56,7 +56,7 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "npm run build:lib && npm run build:web",
+    "build": "npm run build:web && npm run build:lib",
     "build:lib": "tsc -p tsconfig.json",
     "build:web": "vite build",
     "clean": "rm -rf dist coverage",

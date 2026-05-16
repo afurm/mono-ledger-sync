@@ -27,6 +27,7 @@
     "src/sqlite/**/*.ts",
     "src/storage/**/*.ts",
     "src/sync/**/*.ts",
+    "src/web/api.ts",
     "src/ui/**/*.ts"
   ]
 }
