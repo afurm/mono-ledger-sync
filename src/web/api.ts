@@ -276,7 +276,7 @@ function formatSyncRunTimestamp(run: SyncRun): string {
     : (run.finishedAt ?? run.startedAt);
 }
 
-function buildLocalActivityEvents(
+export function buildLocalActivityEvents(
   syncRuns: readonly SyncRun[],
   webhookEvents: readonly WebhookEvent[],
 ): readonly LocalActivityEvent[] {
