@@ -55,6 +55,8 @@ import { logStructured } from "../logging/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
+const localWebhookRoutePath = `${localApiRoutePrefix}/webhooks/monobank`;
+const defaultWebhookHost = "127.0.0.1";
 
 const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
 const localWebBuildDir = path.resolve(serverModuleDir, "../web");
@@ -110,12 +112,21 @@ export interface LocalApiHealth {
   architecture: typeof productArchitecture;
 }
 
+export interface LocalApiWebhookSettings {
+  enabled: boolean;
+  path: `${typeof localApiRoutePrefix}/webhooks/monobank`;
+  host: string;
+  port: number;
+  url: string;
+}
+
 export interface LocalApiAppConfig {
   profile: string;
   source: LedgerSource;
   dataDir: string;
   databasePath: string;
   localOnly: true;
+  webhook: LocalApiWebhookSettings;
 }
 
 export interface LocalApiFixtureSummary {
@@ -253,13 +264,31 @@ const fixtureStatementsResponseSchema = {
 
 const appConfigResponseSchema = {
   type: "object",
-  required: ["profile", "source", "dataDir", "databasePath", "localOnly"],
+  required: [
+    "profile",
+    "source",
+    "dataDir",
+    "databasePath",
+    "localOnly",
+    "webhook",
+  ],
   properties: {
     profile: { type: "string" },
     source: { enum: ["fixture", "monobank"] },
     dataDir: { type: "string" },
     databasePath: { type: "string" },
     localOnly: { const: true },
+    webhook: {
+      type: "object",
+      required: ["enabled", "path", "host", "port", "url"],
+      properties: {
+        enabled: { type: "boolean" },
+        path: { const: localWebhookRoutePath },
+        host: { type: "string" },
+        port: { type: "number" },
+        url: { type: "string" },
+      },
+    },
   },
 } as const;
 
@@ -1430,6 +1459,10 @@ function registerLocalApiRoutes(
   app: FastifyInstance,
   options: LocalApiServerOptions,
   getServices: () => Promise<LocalAppServices>,
+  resolveWebhookSettings: () => Omit<
+    LocalApiWebhookSettings,
+    "enabled" | "path"
+  >,
 ): void {
   const now = options.now ?? (() => Date.now());
   const webhookRateLimitWindowMs =
@@ -1578,6 +1611,11 @@ function registerLocalApiRoutes(
         dataDir: services.dataDir,
         databasePath: services.databasePath,
         localOnly: true,
+        webhook: {
+          enabled: true,
+          path: localWebhookRoutePath,
+          ...resolveWebhookSettings(),
+        },
       };
     },
   );
@@ -1874,7 +1912,7 @@ function registerLocalApiRoutes(
   );
 
   app.get(
-    `${localApiRoutePrefix}/webhooks/monobank`,
+    localWebhookRoutePath,
     {
       schema: {
         response: {
@@ -1886,7 +1924,7 @@ function registerLocalApiRoutes(
   );
 
   app.post(
-    `${localApiRoutePrefix}/webhooks/monobank`,
+    localWebhookRoutePath,
     {
       schema: {
         response: {
@@ -2084,6 +2122,38 @@ export function createLocalApiServer(
   });
   let url: string | undefined;
   let servicesPromise: Promise<LocalAppServices> | undefined;
+  let webhookPort = options.port ?? 0;
+  let webhookHost: NonNullable<LocalApiServerOptions["host"]> =
+    options.host ?? defaultWebhookHost;
+
+  function resolveWebhookSettings(): Omit<
+    LocalApiWebhookSettings,
+    "enabled" | "path"
+  > {
+    if (url === undefined) {
+      return {
+        host: webhookHost,
+        port: webhookPort,
+        url: `http://${webhookHost}:${webhookPort}${localWebhookRoutePath}`,
+      };
+    }
+
+    const parsedUrl = new URL(url);
+    const parsedPort = Number(parsedUrl.port);
+
+    if (Number.isFinite(parsedPort) && parsedPort > 0) {
+      webhookPort = parsedPort;
+    }
+    if (parsedUrl.hostname === "127.0.0.1" || parsedUrl.hostname === "localhost") {
+      webhookHost = parsedUrl.hostname;
+    }
+
+    return {
+      host: webhookHost,
+      port: webhookPort,
+      url: `${parsedUrl.protocol}//${webhookHost}:${webhookPort}${localWebhookRoutePath}`,
+    };
+  }
 
   function getServices(): Promise<LocalAppServices> {
     servicesPromise ??= createServices(options);
@@ -2091,7 +2161,7 @@ export function createLocalApiServer(
     return servicesPromise;
   }
 
-  registerLocalApiRoutes(app, options, getServices);
+  registerLocalApiRoutes(app, options, getServices, resolveWebhookSettings);
 
   return {
     get url() {
@@ -2100,9 +2170,12 @@ export function createLocalApiServer(
     apiPrefix: localApiRoutePrefix,
     async listen() {
       url = await app.listen({
-        host: options.host ?? "127.0.0.1",
+        host: options.host ?? defaultWebhookHost,
         port: options.port ?? 0,
       });
+
+      resolveWebhookSettings();
+
       return url;
     },
     async inject(request) {

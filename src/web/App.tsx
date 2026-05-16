@@ -4235,14 +4235,63 @@ function SyncRoute({
         </Card>
       </TabsContent>
       <TabsContent value="webhooks">
-        <Alert>
-          <ShieldCheckIcon />
-          <AlertTitle>Webhook events are sync hints</AlertTitle>
-          <AlertDescription>
-            Personal webhook payloads stay local and require reconciliation
-            before becoming ledger truth.
-          </AlertDescription>
-        </Alert>
+        <div className="grid gap-4">
+          <Alert>
+            <ShieldCheckIcon />
+            <AlertTitle>Webhook events are sync hints</AlertTitle>
+            <AlertDescription>
+              Personal webhook payloads stay local and require reconciliation
+              before becoming ledger truth.
+            </AlertDescription>
+          </Alert>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Webhook settings</CardTitle>
+              <CardDescription>
+                Local endpoint configuration used by the Monobank personal API.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 text-sm">
+              <div>
+                <p className="text-muted-foreground">Profile</p>
+                <p className="font-medium">{snapshot?.config.profile}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Host</p>
+                <p className="font-medium">
+                  {snapshot?.config.webhook.host ?? "Unknown"}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Port</p>
+                <p className="font-medium">
+                  {snapshot?.config.webhook.port}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Path</p>
+                <p className="break-all font-mono font-medium">
+                  {snapshot?.config.webhook.path}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Enabled</p>
+                <Badge
+                  variant={snapshot?.config.webhook.enabled ? "default" : "secondary"}
+                >
+                  {snapshot?.config.webhook.enabled ? "Enabled" : "Disabled"}
+                </Badge>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Webhook endpoint</p>
+                <p className="break-all font-mono font-medium">
+                  {snapshot?.config.webhook.url}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </TabsContent>
     </Tabs>
   );

@@ -1156,6 +1156,8 @@ test("local API returns auth_required for monobank sync without token", async ()
       source: "monobank",
       monobankToken: "",
       dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 55665,
     });
 
     try {
@@ -1170,6 +1172,13 @@ test("local API returns auth_required for monobank sync without token", async ()
 
       assert.equal(configResponse.statusCode, 200);
       assert.equal(configResponse.json().source, "monobank");
+      assert.equal(configResponse.json().webhook.enabled, true);
+      assert.equal(configResponse.json().webhook.host, "127.0.0.1");
+      assert.equal(configResponse.json().webhook.port, 55665);
+      assert.equal(
+        configResponse.json().webhook.url,
+        "http://127.0.0.1:55665/api/webhooks/monobank",
+      );
       assert.equal(syncResponse.statusCode, 400);
       assert.deepEqual(syncResponse.json(), {
         error: "auth_required",
