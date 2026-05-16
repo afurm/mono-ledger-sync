@@ -16,6 +16,7 @@ import type {
 import type {
   AccountBalance,
   LedgerAccount,
+  Category,
   LedgerDb,
   LedgerDbTransaction,
   LedgerEntry,
@@ -99,6 +100,7 @@ export interface SqliteLedgerDb extends LedgerDb {
     update: LedgerEntrySplitPlanUpdate,
   ): Promise<LedgerEntry | undefined>;
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
+  listCategories(profile?: string): Promise<readonly Category[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -194,6 +196,17 @@ interface SqliteSummaryRow {
   net: number | null;
   currencies_json: string;
   last_synced_at: string | null;
+}
+
+interface SqliteCategoryRow {
+  id: string;
+  profile: string;
+  name: string;
+  color: string | null;
+  description: string;
+  is_system: number;
+  created_at: string;
+  updated_at: string;
 }
 
 const migrations: readonly SqliteMigration[] = [
@@ -375,6 +388,27 @@ const migrations: readonly SqliteMigration[] = [
         ON webhook_events(profile, payload_hash, delivery_fingerprint);
     `,
   },
+  {
+    id: "0006_categories",
+    description: "Add categories storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS categories (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        color TEXT,
+        description TEXT NOT NULL,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_categories_profile
+        ON categories(profile, id);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -422,6 +456,23 @@ function webhookDeliveryFingerprint(
           .filter(([, value]) => value.trim().length > 0)
           .sort(([left], [right]) => left.localeCompare(right)),
       ),
+    )
+    .digest("hex");
+}
+
+function webhookEventId(
+  event: MonobankPersonalWebhookEvent,
+  payloadHash: string,
+  deliveryFingerprint: string,
+): string {
+  return createHash("sha256")
+    .update(
+      stableStringify({
+        account: event.data.account,
+        statementItemId: event.data.statementItem.id ?? "missing-id",
+        payloadHash,
+        deliveryFingerprint,
+      }),
     )
     .digest("hex");
 }
@@ -569,6 +620,32 @@ function mapAccountRow(row: SqliteAccountRow): LedgerAccount {
   }
 
   return account;
+}
+
+function mapCategoryRow(row: SqliteCategoryRow): Category {
+  const category: Category = {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+  };
+
+  if (row.color !== null) {
+    category.color = row.color;
+  }
+
+  if (row.description !== "") {
+    category.description = row.description;
+  }
+
+  if (row.is_system === 1) {
+    category.isSystem = true;
+  }
+
+  if (row.updated_at !== row.created_at) {
+    category.updatedAt = row.updated_at;
+  }
+
+  return category;
 }
 
 function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
@@ -1183,6 +1260,28 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     return rows.map(mapAccountRow);
   }
 
+  async listCategories(profile = this.profile): Promise<readonly Category[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            name,
+            color,
+            description,
+            is_system,
+            created_at,
+            updated_at
+          FROM categories
+          WHERE profile = ?
+          ORDER BY name
+        `,
+      )
+      .all(profile) as SqliteCategoryRow[];
+
+    return rows.map(mapCategoryRow);
+  }
+
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
@@ -1415,7 +1514,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     const payloadHash = webhookPayloadHash(event);
     const deliveryFingerprint = webhookDeliveryFingerprint(deliveryMetadata);
     const storedEvent: StoredWebhookEvent = {
-      id: `${event.data.account}:${statementItemId ?? "missing-id"}:${receivedAt}`,
+      id: webhookEventId(event, payloadHash, deliveryFingerprint),
       profile: this.profile,
       accountId: event.data.account,
       type: event.type,

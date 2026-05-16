@@ -871,6 +871,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0003_transaction_split_plan",
         "0004_sync_run_stats_columns",
         "0005_webhook_delivery_dedup",
+        "0006_categories",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
