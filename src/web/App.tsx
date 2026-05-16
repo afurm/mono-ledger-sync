@@ -1036,13 +1036,16 @@ function formatSyncRunDuration(run: SyncRun): string {
 function SyncRunStats({ run }: { run: SyncRun }) {
   const stats = [
     { label: "Seen", value: run.itemsSeen },
+    { label: "API Calls", value: run.apiCalls },
+    { label: "Windows", value: run.windowsFetched },
     { label: "Inserted", value: run.itemsInserted },
     { label: "Updated", value: run.itemsUpdated },
     { label: "Skipped", value: run.itemsSkipped },
+    { label: "Rate-limited", value: run.rateLimited },
   ];
 
   return (
-    <div className="grid gap-2 sm:grid-cols-4">
+    <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
       {stats.map((stat) => (
         <div className="rounded-lg border bg-muted/30 p-2" key={stat.label}>
           <p className="text-xs text-muted-foreground">{stat.label}</p>
@@ -1664,6 +1667,13 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
                   <Badge variant="outline">{run.itemsInserted} inserted</Badge>
                   <Badge variant="outline">{run.itemsUpdated} updated</Badge>
                   <Badge variant="outline">{run.itemsSkipped} skipped</Badge>
+                  <Badge variant="outline">{run.apiCalls} API calls</Badge>
+                  <Badge variant="outline">
+                    {run.windowsFetched} windows
+                  </Badge>
+                  {run.rateLimited > 0 ? (
+                    <Badge variant="destructive">{run.rateLimited} rate-limited</Badge>
+                  ) : null}
                 </div>
               </TableCell>
               <TableCell>
