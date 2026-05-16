@@ -6,6 +6,7 @@ import type {
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
+  Category,
   LedgerSummary,
   StoredWebhookEvent,
   SyncRun,
@@ -17,6 +18,7 @@ export interface LedgerQueryService {
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   getAccountBalances(profile?: string): Promise<readonly AccountBalance[]>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
+  listCategories(profile?: string): Promise<readonly Category[]>;
   listLedgerEntries(
     query: Omit<LedgerEntryQuery, "profile"> & { profile?: string },
   ): Promise<LedgerEntryPage>;
@@ -69,6 +71,9 @@ export function createLedgerQueryService({
     },
     listAccounts(profile) {
       return db.listAccounts(coerceProfile(profile, defaultProfile));
+    },
+    listCategories(profile) {
+      return db.listCategories(coerceProfile(profile, defaultProfile));
     },
     listLedgerEntries({ profile, ...query }) {
       return db.listLedgerEntries({

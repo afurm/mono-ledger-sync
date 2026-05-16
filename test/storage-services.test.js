@@ -57,6 +57,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         sortBy: "time",
         sortDirection: "desc",
       });
+      const categories = await queryService.listCategories();
       const runs = await queryService.listSyncRuns();
       const events = await queryService.listWebhookEvents();
 
@@ -67,6 +68,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(page.limit, 3);
       assert.equal(page.entries.length, 3);
       assert.equal(page.total, 7);
+      assert.deepEqual(categories, []);
       assert.equal(runs.length, 1);
       assert.equal(runs[0].profile, profile);
       assert.ok(Array.isArray(events));

@@ -4,6 +4,7 @@ import type {
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntryPage,
+  Category,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
@@ -23,6 +24,7 @@ export type {
   LedgerEntryAnnotationUpdate,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
+  Category,
   LedgerEntryQuery,
   LedgerSummary,
   SyncCursor,
@@ -70,6 +72,7 @@ export interface LedgerDb {
     accountId: string,
   ): Promise<SyncCursor | undefined>;
   recordSyncRun(run: SyncRun): Promise<void>;
+  listCategories(profile?: string): Promise<readonly Category[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,
