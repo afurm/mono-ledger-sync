@@ -19,6 +19,7 @@ import {
   version,
   type LedgerSource,
 } from "../core/index.js";
+import { DomainError } from "../domain/index.js";
 import {
   assertMonobankPersonalWebhookEvent,
   createBundledFixtureMonobankAdapter,
@@ -677,6 +678,49 @@ function resolveDataDir(options: LocalApiServerOptions): string {
   );
 }
 
+function resolveMonobankToken(
+  options: LocalApiServerOptions,
+): string | undefined {
+  if (options.monobankToken !== undefined) {
+    const normalized = options.monobankToken.trim();
+
+    return normalized || undefined;
+  }
+
+  const envToken = process.env.MONOBANK_TOKEN?.trim();
+
+  return envToken || undefined;
+}
+
+function createMissingMonobankTokenAdapter(): MonobankAdapter {
+  const createError = (): DomainError =>
+    new DomainError(
+      "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+      "auth_required",
+      "auth",
+      { source: "monobank" },
+    );
+
+  async function throwOnUse(): Promise<never> {
+    throw createError();
+  }
+
+  return {
+    async getClientInfo() {
+      return throwOnUse();
+    },
+    async getStatement() {
+      return throwOnUse();
+    },
+    async getCurrency() {
+      return throwOnUse();
+    },
+    async setWebhook() {
+      return throwOnUse();
+    },
+  };
+}
+
 function safeProfileFileName(profile: string): string {
   return profile.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
 }
@@ -697,13 +741,15 @@ async function createServices(
   const source = resolveSource(options);
   const dataDir = resolveDataDir(options);
   const databasePath = resolveLocalLedgerDatabasePath(options);
-  const token = options.monobankToken ?? process.env.MONOBANK_TOKEN;
+  const token = resolveMonobankToken(options);
   const adapter =
     source === "fixture"
       ? await createBundledFixtureMonobankAdapter()
-      : createMonobankHttpAdapter({
-          token: token ?? "",
-        });
+      : token === undefined
+        ? createMissingMonobankTokenAdapter()
+        : createMonobankHttpAdapter({
+            token,
+          });
   const db = createSqliteLedgerDb({
     filePath: databasePath,
     profile,
@@ -1754,10 +1800,27 @@ function registerLocalApiRoutes(
       schema: {
         response: {
           200: syncRunResultResponseSchema,
+          400: localApiErrorResponseSchema,
         },
       },
     },
-    async (): Promise<SyncLedgerResult> => {
+    async (
+      _request,
+      reply,
+    ): Promise<SyncLedgerResult | { error: string; message: string }> => {
+      if (
+        resolveSource(options) === "monobank" &&
+        !resolveMonobankToken(options)
+      ) {
+        reply.code(400);
+
+        return {
+          error: "auth_required",
+          message:
+            "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+        };
+      }
+
       const services = await getServices();
       const syncAbortController = new AbortController();
       const handleInterrupt = (): void => {
