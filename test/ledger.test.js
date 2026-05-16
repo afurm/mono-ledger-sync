@@ -1165,6 +1165,7 @@ test("local API returns auth_required for monobank sync without token", async ()
         method: "GET",
         url: "/api/app/config",
       });
+      const webhookPath = configResponse.json().webhook.path;
       const syncResponse = await server.inject({
         method: "POST",
         url: "/api/sync/run",
@@ -1177,7 +1178,7 @@ test("local API returns auth_required for monobank sync without token", async ()
       assert.equal(configResponse.json().webhook.port, 55665);
       assert.equal(
         configResponse.json().webhook.url,
-        "http://127.0.0.1:55665/api/webhooks/monobank",
+        `http://127.0.0.1:55665${webhookPath}`,
       );
       assert.equal(syncResponse.statusCode, 400);
       assert.deepEqual(syncResponse.json(), {
@@ -1220,6 +1221,12 @@ test("local API validates query strings and webhook payloads", async () => {
     };
 
     try {
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const webhookPath = configResponse.json().webhook.path;
+
       const invalidLimitResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/transactions?limit=not-a-number",
@@ -1246,11 +1253,11 @@ test("local API validates query strings and webhook payloads", async () => {
       });
       const webhookValidationResponse = await server.inject({
         method: "GET",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
       });
       const webhookResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
         },
@@ -1258,7 +1265,7 @@ test("local API validates query strings and webhook payloads", async () => {
       });
       const invalidWebhookResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
         },
@@ -1357,9 +1364,15 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
     };
 
     try {
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const webhookPath = configResponse.json().webhook.path;
+
       const firstResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
           "x-monobank-delivery-id": "delivery-111",
@@ -1368,7 +1381,7 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
       });
       const secondResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
           "x-monobank-delivery-id": "delivery-111",
@@ -1377,7 +1390,7 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
       });
       const thirdResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
           "x-monobank-delivery-id": "delivery-222",
@@ -1459,9 +1472,15 @@ test("local API does not log raw webhook payloads", async () => {
     };
 
     try {
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const webhookPath = configResponse.json().webhook.path;
+
       const response = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
         },
@@ -1522,9 +1541,15 @@ test("local API rate limits webhook delivery endpoint", async () => {
     };
 
     try {
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const webhookPath = configResponse.json().webhook.path;
+
       const firstResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
         },
@@ -1532,7 +1557,7 @@ test("local API rate limits webhook delivery endpoint", async () => {
       });
       const secondResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
         },
@@ -1541,7 +1566,7 @@ test("local API rate limits webhook delivery endpoint", async () => {
       now += 60;
       const thirdResponse = await server.inject({
         method: "POST",
-        url: "/api/webhooks/monobank",
+        url: webhookPath,
         headers: {
           "content-type": "application/json",
         },
