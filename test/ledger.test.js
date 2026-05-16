@@ -1291,6 +1291,95 @@ test("local API returns auth_required for monobank sync without token", async ()
   });
 });
 
+test("local API token endpoint saves and deletes monobank token state", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "monobank",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 55666,
+    });
+
+    try {
+      const noTokenConfig = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const emptyTokenSync = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+      const saveResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/token",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          token: "test-monobank-token",
+        }),
+      });
+      const invalidSaveResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/token",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          token: "   ",
+        }),
+      });
+      const populatedTokenConfig = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const deleteResponse = await server.inject({
+        method: "DELETE",
+        url: "/api/app/token",
+      });
+      const deletedTokenConfig = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const deletedTokenSync = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+
+      assert.equal(noTokenConfig.statusCode, 200);
+      assert.equal(noTokenConfig.json().token.hasToken, false);
+      assert.equal(emptyTokenSync.statusCode, 400);
+      assert.deepEqual(emptyTokenSync.json(), {
+        error: "auth_required",
+        message:
+          "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+      });
+      assert.equal(saveResponse.statusCode, 200);
+      assert.deepEqual(saveResponse.json(), { hasToken: true });
+      assert.equal(invalidSaveResponse.statusCode, 400);
+      assert.deepEqual(invalidSaveResponse.json(), {
+        error: "invalid_token",
+        message: "Monobank token must be a non-empty string.",
+      });
+      assert.equal(populatedTokenConfig.statusCode, 200);
+      assert.equal(populatedTokenConfig.json().token.hasToken, true);
+      assert.equal(deleteResponse.statusCode, 200);
+      assert.deepEqual(deleteResponse.json(), { hasToken: false });
+      assert.equal(deletedTokenConfig.statusCode, 200);
+      assert.equal(deletedTokenConfig.json().token.hasToken, false);
+      assert.equal(deletedTokenSync.statusCode, 400);
+      assert.deepEqual(deletedTokenSync.json(), {
+        error: "auth_required",
+        message:
+          "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("local API validates query strings and webhook payloads", async () => {
   await withTempLedger(async ({ tempRoot }) => {
     const server = createLocalApiServer({

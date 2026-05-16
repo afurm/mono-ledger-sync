@@ -26,6 +26,10 @@ export interface LocalApiWebhookSettings {
   url: string;
 }
 
+export interface LocalApiMonobankTokenStatus {
+  hasToken: boolean;
+}
+
 export interface LocalApiAppConfig {
   profile: string;
   source: "fixture" | "monobank";
@@ -33,6 +37,7 @@ export interface LocalApiAppConfig {
   databasePath: string;
   localOnly: true;
   webhook: LocalApiWebhookSettings;
+  token: LocalApiMonobankTokenStatus;
 }
 
 export interface LedgerSummary {
@@ -534,5 +539,23 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
 export async function runFixtureSync(): Promise<void> {
   await requestJson("/api/sync/run", {
     method: "POST",
+  });
+}
+
+export async function saveMonobankToken(
+  token: string,
+): Promise<LocalApiMonobankTokenStatus> {
+  return requestJson<LocalApiMonobankTokenStatus>("/api/app/token", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function clearMonobankToken(): Promise<LocalApiMonobankTokenStatus> {
+  return requestJson<LocalApiMonobankTokenStatus>("/api/app/token", {
+    method: "DELETE",
   });
 }
