@@ -34,3 +34,22 @@ For stricter local privacy, place the data directory on an encrypted volume or e
 - Windows: use BitLocker or another encrypted folder/volume and set `MONO_LEDGER_SYNC_DATA_DIR` to that path.
 
 Backups and exports are ordinary local files. Store them in the same encrypted location if they contain sensitive transaction history.
+
+## Personas
+
+- Solo user
+  - wants a quick local setup, token-first sync, and a simple dashboard for checking spending without any cloud dependency.
+- Privacy-focused user
+  - cares that tokens, balances, and raw ledger data never leave their machine and prefers encrypted storage for database and exports.
+- Finance analyst / accountant user
+  - needs reproducible exports and the ability to annotate categories and split entries before sharing reports or preparing tax documentation.
+- Open-source contributor
+  - wants fixture-first development and clear local-first boundaries so changes can be tested without a live token.
+
+## First release success criteria
+
+- User can add a token, fetch client information, and discover accounts.
+- User can sync statements for selected accounts to a local SQLite ledger.
+- Users can review transactions, assign notes/tags, and adjust split plans.
+- Querying and exporting of local transactions to CSV/JSON works consistently across fresh and legacy states.
+- The release validates structured redaction and fixture tests, with no real banking credentials or personal payloads committed.
