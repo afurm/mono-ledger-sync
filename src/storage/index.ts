@@ -47,6 +47,14 @@ export {
   ledgerEntrySortDirections,
   syncRunStatuses,
 } from "../domain/index.js";
+export {
+  createLedgerQueryService,
+  createLedgerServices,
+  createLedgerWriteService,
+  type LedgerQueryService,
+  type LedgerServices,
+  type LedgerWriteService,
+} from "./services.js";
 
 export interface LedgerDbTransaction {
   upsertLedgerEntries(entries: readonly LedgerEntry[]): Promise<void>;
