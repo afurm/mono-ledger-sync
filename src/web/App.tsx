@@ -2680,6 +2680,10 @@ function TransactionDetailDrawer({
     () => splitPlanLineStateToPayload(splitPlanLines),
     [splitPlanLines],
   );
+  const splitPlanLinesTotal = useMemo(
+    () => splitPlanParsedLines.reduce((total, line) => total + line.amount, 0),
+    [splitPlanParsedLines],
+  );
   const splitPlanBaselineLines = useMemo(() => {
     if (!entry) {
       return [];
@@ -2689,12 +2693,17 @@ function TransactionDetailDrawer({
   }, [entry]);
   const splitPlanHasInvalidLine =
     splitPlanParsedLines.length !== splitPlanLines.length;
+  const splitPlanHasInvalidTotal =
+    !!entry &&
+    splitPlanParsedLines.length > 0 &&
+    splitPlanLinesTotal !== entry.amount;
   const splitPlanChanged =
     !splitPlanLinesMatch(splitPlanParsedLines, splitPlanBaselineLines) ||
     splitPlanParsedLines.length !== splitPlanBaselineLines.length;
   const canSaveSplitPlan =
     splitPlanChanged &&
     !splitPlanHasInvalidLine &&
+    !splitPlanHasInvalidTotal &&
     splitPlanSaveState !== "saving";
 
   useEffect(() => {
@@ -3064,6 +3073,30 @@ function TransactionDetailDrawer({
                 Split drafts stay local in review data and do not rewrite raw
                 Monobank payloads.
               </p>
+              {entry && splitPlanParsedLines.length > 0 ? (
+                <p className="text-xs">
+                  <span
+                    className={
+                      splitPlanHasInvalidTotal
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    Total draft:{" "}
+                    {formatMinorAmount(splitPlanLinesTotal, entry.currencyCode)}
+                  </span>
+                  <span className="text-muted-foreground"> · Target: </span>
+                  <span
+                    className={
+                      splitPlanHasInvalidTotal
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {formatMinorAmount(entry.amount, entry.currencyCode)}
+                  </span>
+                </p>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
