@@ -1,4 +1,5 @@
 import os from "node:os";
+import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,8 +56,19 @@ import { logStructured } from "../logging/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
-const localWebhookRoutePath = `${localApiRoutePrefix}/webhooks/monobank`;
 const defaultWebhookHost = "127.0.0.1";
+const defaultWebhookPathEntropyBytes = 8;
+const webhookRouteIdPrefix = `${localApiRoutePrefix}/webhooks/monobank-`;
+type LocalWebhookRoutePath =
+  `${typeof localApiRoutePrefix}/webhooks/monobank-${string}`;
+
+function createWebhookRoutePath(): LocalWebhookRoutePath {
+  const pathId = crypto
+    .randomBytes(defaultWebhookPathEntropyBytes)
+    .toString("hex");
+
+  return `${webhookRouteIdPrefix}${pathId}`;
+}
 
 const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
 const localWebBuildDir = path.resolve(serverModuleDir, "../web");
@@ -114,7 +126,7 @@ export interface LocalApiHealth {
 
 export interface LocalApiWebhookSettings {
   enabled: boolean;
-  path: `${typeof localApiRoutePrefix}/webhooks/monobank`;
+  path: LocalWebhookRoutePath;
   host: string;
   port: number;
   url: string;
@@ -283,7 +295,10 @@ const appConfigResponseSchema = {
       required: ["enabled", "path", "host", "port", "url"],
       properties: {
         enabled: { type: "boolean" },
-        path: { const: localWebhookRoutePath },
+        path: {
+          type: "string",
+          pattern: "^/api/webhooks/monobank-[a-f0-9]{16}$",
+        },
         host: { type: "string" },
         port: { type: "number" },
         url: { type: "string" },
@@ -1459,6 +1474,7 @@ function registerLocalApiRoutes(
   app: FastifyInstance,
   options: LocalApiServerOptions,
   getServices: () => Promise<LocalAppServices>,
+  localWebhookRoutePath: LocalWebhookRoutePath,
   resolveWebhookSettings: () => Omit<
     LocalApiWebhookSettings,
     "enabled" | "path"
@@ -1959,7 +1975,7 @@ function registerLocalApiRoutes(
             "warn",
             "Rejected malformed webhook payload",
             {
-              route: `${localApiRoutePrefix}/webhooks/monobank`,
+              route: localWebhookRoutePath,
               path: error.path,
               expected: error.expected,
             },
@@ -2122,6 +2138,7 @@ export function createLocalApiServer(
   });
   let url: string | undefined;
   let servicesPromise: Promise<LocalAppServices> | undefined;
+  const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
   let webhookHost: NonNullable<LocalApiServerOptions["host"]> =
     options.host ?? defaultWebhookHost;
@@ -2164,7 +2181,13 @@ export function createLocalApiServer(
     return servicesPromise;
   }
 
-  registerLocalApiRoutes(app, options, getServices, resolveWebhookSettings);
+  registerLocalApiRoutes(
+    app,
+    options,
+    getServices,
+    localWebhookRoutePath,
+    resolveWebhookSettings,
+  );
 
   return {
     get url() {
