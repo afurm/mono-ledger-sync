@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 
@@ -19,6 +20,9 @@ import {
 } from "../dist/sync/index.js";
 import { DomainError } from "../dist/domain/index.js";
 
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3");
+
 async function withTempLedger(callback) {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-db-"));
 
@@ -27,6 +31,185 @@ async function withTempLedger(callback) {
       tempRoot,
       databasePath: path.join(tempRoot, "ledger.sqlite"),
     });
+  } finally {
+    await rm(tempRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}
+
+async function withLegacyFirstMigrationDb(callback) {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-legacy-db-"));
+
+  try {
+    const databasePath = path.join(tempRoot, "legacy.sqlite");
+    const database = new Database(databasePath);
+
+    try {
+      database.exec(`
+        CREATE TABLE schema_migrations (
+          id TEXT PRIMARY KEY,
+          description TEXT NOT NULL,
+          applied_at TEXT NOT NULL
+        );
+
+        CREATE TABLE profiles (
+          name TEXT PRIMARY KEY,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE accounts (
+          profile TEXT NOT NULL,
+          id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          currency_code INTEGER NOT NULL,
+          balance INTEGER NOT NULL,
+          credit_limit INTEGER NOT NULL,
+          masked_pan_json TEXT,
+          raw_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (profile, id),
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE jars (
+          profile TEXT NOT NULL,
+          id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          currency_code INTEGER NOT NULL,
+          balance INTEGER NOT NULL,
+          goal INTEGER NOT NULL,
+          raw_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (profile, id),
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE currency_rates (
+          profile TEXT NOT NULL,
+          currency_code_a INTEGER NOT NULL,
+          currency_code_b INTEGER NOT NULL,
+          date INTEGER NOT NULL,
+          rate_buy REAL,
+          rate_sell REAL,
+          rate_cross REAL,
+          raw_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (profile, currency_code_a, currency_code_b, date),
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE raw_statement_items (
+          profile TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          statement_item_id TEXT NOT NULL,
+          time INTEGER NOT NULL,
+          payload_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (profile, account_id, statement_item_id),
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE ledger_entries (
+          profile TEXT NOT NULL,
+          id TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          time INTEGER NOT NULL,
+          description TEXT NOT NULL,
+          amount INTEGER NOT NULL,
+          operation_amount INTEGER,
+          currency_code INTEGER NOT NULL,
+          category_id TEXT,
+          category_name TEXT,
+          merchant_name TEXT,
+          raw_statement_item_id TEXT NOT NULL,
+          hold INTEGER NOT NULL,
+          balance INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (profile, id),
+          UNIQUE (profile, account_id, raw_statement_item_id),
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE sync_cursors (
+          profile TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          statement_from INTEGER NOT NULL,
+          statement_to INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (profile, account_id, source),
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE sync_runs (
+          id TEXT PRIMARY KEY,
+          profile TEXT NOT NULL,
+          source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          items_seen INTEGER NOT NULL,
+          items_inserted INTEGER NOT NULL,
+          items_updated INTEGER NOT NULL,
+          items_skipped INTEGER NOT NULL,
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE TABLE webhook_events (
+          id TEXT PRIMARY KEY,
+          profile TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          statement_item_id TEXT,
+          received_at TEXT NOT NULL,
+          processed_at TEXT,
+          payload_json TEXT NOT NULL,
+          FOREIGN KEY (profile) REFERENCES profiles(name)
+        );
+
+        CREATE INDEX idx_ledger_entries_profile_time
+          ON ledger_entries(profile, time DESC);
+        CREATE INDEX idx_ledger_entries_profile_account
+          ON ledger_entries(profile, account_id, time DESC);
+        CREATE INDEX idx_sync_runs_profile_started
+          ON sync_runs(profile, started_at DESC);
+      `);
+
+      database.exec(`INSERT INTO schema_migrations (
+        id,
+        description,
+        applied_at
+      ) VALUES (
+        '0001_local_ledger',
+        'Create local ledger tables',
+        '2026-05-16T08:00:00.000Z'
+      )`);
+      database.exec(`INSERT INTO profiles (name, created_at)
+        VALUES ('legacy', '2026-05-16T08:00:00.000Z')`);
+      database.exec(`
+        INSERT INTO accounts (
+          profile, id, type, currency_code, balance, credit_limit,
+          masked_pan_json, raw_json, updated_at
+        ) VALUES (
+          'legacy',
+          'legacy-account-uah-main',
+          'black',
+          980,
+          100000,
+          0,
+          NULL,
+          '{"fixture":"legacy"}',
+          '2026-05-16T08:00:00.000Z'
+        )`);
+
+      return await callback({ tempRoot, databasePath });
+    } finally {
+      database.close();
+    }
   } finally {
     await rm(tempRoot, {
       force: true,
@@ -470,6 +653,44 @@ test("records a partial run when sync is interrupted and keeps cursor untouched"
         (await db.listLedgerEntries({ profile, limit: 20 })).total,
         1,
       );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("migrates legacy first-migration sqlite DB and preserves baseline queries", async () => {
+  await withLegacyFirstMigrationDb(async ({ databasePath }) => {
+    const profile = "legacy";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      const beforeMigration = await db.getDatabaseInfo(profile);
+      assert.deepEqual(beforeMigration.migrations, ["0001_local_ledger"]);
+      assert.equal(beforeMigration.accounts, 1);
+
+      await db.migrate();
+
+      const afterMigration = await db.getDatabaseInfo(profile);
+      assert.deepEqual(afterMigration.migrations, [
+        "0001_local_ledger",
+        "0002_ledger_entry_annotations",
+        "0003_transaction_split_plan",
+        "0004_sync_run_stats_columns",
+      ]);
+      assert.equal(afterMigration.accounts, 1);
+      assert.equal(afterMigration.ledgerEntries, 0);
+      assert.equal(afterMigration.syncRuns, 0);
+
+      const accounts = await db.listAccounts(profile);
+      assert.equal(accounts.length, 1);
+      assert.equal(accounts[0].id, "legacy-account-uah-main");
+      assert.equal(accounts[0].currencyCode, 980);
+      assert.equal(accounts[0].creditLimit, 0);
+      assert.equal(accounts[0].balance, 100000);
     } finally {
       await db.close();
     }
