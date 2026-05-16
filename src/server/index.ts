@@ -38,6 +38,10 @@ import { syncLedgerWithMonobank } from "../sync/index.js";
 import {
   ledgerEntrySortDirections,
   ledgerEntrySortFields,
+  createLedgerQueryService,
+  createLedgerWriteService,
+  type LedgerQueryService,
+  type LedgerWriteService,
 } from "../storage/index.js";
 import type {
   LedgerAccount,
@@ -178,6 +182,8 @@ interface LocalAppServices {
   databasePath: string;
   db: SqliteLedgerDb;
   adapter: MonobankAdapter;
+  queryService: LedgerQueryService;
+  writeService: LedgerWriteService;
 }
 
 const healthResponseSchema = {
@@ -761,6 +767,8 @@ async function createServices(
     databasePath,
     db,
     adapter,
+    queryService: createLedgerQueryService({ db, defaultProfile: profile }),
+    writeService: createLedgerWriteService({ db, defaultProfile: profile }),
   };
 }
 
@@ -1648,7 +1656,7 @@ function registerLocalApiRoutes(
     async (): Promise<LedgerSummary> => {
       const services = await getServices();
 
-      return services.db.getLedgerSummary(services.profile);
+      return services.queryService.getLedgerSummary(services.profile);
     },
   );
 
@@ -1664,7 +1672,7 @@ function registerLocalApiRoutes(
     async (): Promise<readonly LedgerAccount[]> => {
       const services = await getServices();
 
-      return services.db.listAccounts(services.profile);
+      return services.queryService.listAccounts(services.profile);
     },
   );
 
@@ -1750,7 +1758,7 @@ function registerLocalApiRoutes(
         Object.assign(entryQuery, { sortDirection });
       }
 
-      return services.db.listLedgerEntries(entryQuery);
+      return services.queryService.listLedgerEntries(entryQuery);
     },
   );
 
@@ -1781,10 +1789,10 @@ function registerLocalApiRoutes(
         };
       }
 
-      const entry = await services.db.updateLedgerEntryAnnotation(
-        services.profile,
+      const entry = await services.writeService.updateTransactionAnnotation(
         id,
         readLedgerEntryAnnotationUpdate(request.body),
+        services.profile,
       );
 
       if (!entry) {
@@ -1826,10 +1834,10 @@ function registerLocalApiRoutes(
         };
       }
 
-      const entry = await services.db.updateLedgerEntrySplitPlan(
-        services.profile,
+      const entry = await services.writeService.updateTransactionSplitPlan(
         id,
         readLedgerEntrySplitPlanUpdate(request.body),
+        services.profile,
       );
 
       if (!entry) {
@@ -1907,7 +1915,7 @@ function registerLocalApiRoutes(
     async (): Promise<readonly SyncRun[]> => {
       const services = await getServices();
 
-      return services.db.listSyncRuns(services.profile);
+      return services.queryService.listSyncRuns(services.profile);
     },
   );
 
@@ -1923,7 +1931,7 @@ function registerLocalApiRoutes(
     async (): Promise<readonly StoredWebhookEvent[]> => {
       const services = await getServices();
 
-      return services.db.listWebhookEvents(services.profile, 20);
+      return services.queryService.listWebhookEvents(services.profile, 20);
     },
   );
 
