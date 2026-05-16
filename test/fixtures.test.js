@@ -32,6 +32,7 @@ const fixtureFiles = [
   "client-info.json",
   "currency-rates.json",
   "statements/uah-main-2026-04.json",
+  "statements/uah-main-2026-04-large.json",
   "statements/eur-savings-2026-04.json",
   "statements/empty.json",
   "webhooks/statement-item.json",
@@ -242,6 +243,82 @@ test("fixture files cover the personal Monobank API shapes", async () => {
   assert.equal(rateLimit.retryAfterSeconds, 60);
   assert.equal(serverError.statusCode, 500);
   assert.equal(serverError.code, "server_error");
+});
+
+test("large fixture statement snapshot is schema-valid and intentionally expansive", async () => {
+  const largeStatement = await readFixture(
+    "statements/uah-main-2026-04-large.json",
+  );
+
+  assertMonobankStatementItems(
+    largeStatement,
+    "fixtures/statements/uah-main-2026-04-large.json",
+  );
+
+  assert.ok(largeStatement.length >= 100);
+  assert.ok(
+    largeStatement.some((item) => item.amount > 0),
+    "large fixture should include credits",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.amount < 0),
+    "large fixture should include debits",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.hold),
+    "large fixture should include hold records",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.currencyCode === 840),
+    "large fixture should include USD records",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.currencyCode === 978),
+    "large fixture should include EUR records",
+  );
+  assert.ok(
+    largeStatement.every(
+      (item, index, items) => index === 0 || items[index - 1].time <= item.time,
+    ),
+    "large fixture should be time-ordered",
+  );
+
+  const narrowWindow = largeStatement.filter(
+    (item) => item.time >= 1775169600 && item.time <= 1775350400,
+  );
+  assert.ok(
+    narrowWindow.length >= 5,
+    "time-window slice should still include multiple rows",
+  );
+});
+
+test("large fixture statement snapshot supports precise time-window filtering", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const largeStatement = await readFixture(
+    "statements/uah-main-2026-04-large.json",
+  );
+  const adapter = createFixtureMonobankAdapter({
+    clientInfo,
+    currencyRates,
+    statements: {
+      "fixture-account-uah-main-large": largeStatement,
+    },
+  });
+  const windowStart = largeStatement[12].time;
+  const windowEnd = largeStatement[77].time;
+  const filtered = await adapter.getStatement({
+    accountId: "fixture-account-uah-main-large",
+    from: windowStart,
+    to: windowEnd,
+  });
+
+  assert.equal(filtered.length, 66);
+  assert.ok(
+    filtered.every(
+      (item) => item.time >= windowStart && item.time <= windowEnd,
+    ),
+  );
 });
 
 test("fixture validation reports the failing field path", () => {
