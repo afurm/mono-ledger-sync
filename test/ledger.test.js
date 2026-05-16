@@ -17,6 +17,7 @@ import {
   monobankPersonalStatementWindowMaxSeconds,
   syncLedgerWithMonobank,
 } from "../dist/sync/index.js";
+import { DomainError } from "../dist/domain/index.js";
 
 async function withTempLedger(callback) {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-db-"));
@@ -289,9 +290,85 @@ test("previews sync work without writing ledger data in dry-run mode", async () 
       assert.equal(result.stats.apiCalls, 5);
       assert.equal(result.stats.windowsFetched, 3);
       assert.equal(result.stats.itemsSeen, 5);
+      assert.equal(result.stats.rateLimited, 0);
       assert.equal(info.accounts, 0);
       assert.equal(info.ledgerEntries, 0);
       assert.equal(info.syncRuns, 0);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("tracks rate-limit in sync run stats on adapter failures", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    const syncError = new DomainError(
+      "Rate limit exceeded",
+      "rate_limit_exceeded",
+      "rate_limit",
+      { reason: "tests" },
+    );
+
+    const adapter = {
+      async getClientInfo() {
+        return {
+          clientId: "rate-limit-client",
+          name: "Rate limit client",
+          accounts: [
+            {
+              id: "rate-limit-account",
+              balance: 1_000_00,
+              creditLimit: 0,
+              currencyCode: 980,
+              type: "black",
+            },
+          ],
+          jars: [],
+        };
+      },
+      async getStatement() {
+        throw syncError;
+      },
+      async getCurrency() {
+        return [];
+      },
+      async setWebhook() {
+        return undefined;
+      },
+    };
+
+    try {
+      const syncPromise = syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter,
+        db,
+        from: 1,
+        to: 10,
+      });
+      await assert.rejects(
+        syncPromise,
+        (error) =>
+          error instanceof DomainError &&
+          error.category === "rate_limit" &&
+          error.code === "rate_limit_exceeded",
+      );
+
+      const runs = await db.listSyncRuns(profile);
+
+      assert.equal(runs[0].status, "failed");
+      assert.equal(runs[0].apiCalls, 3);
+      assert.equal(runs[0].windowsFetched, 0);
+      assert.equal(runs[0].rateLimited, 1);
+      assert.equal(runs[0].itemsSeen, 0);
+      assert.equal(runs[0].itemsInserted, 0);
+      assert.equal(runs[0].itemsUpdated, 0);
+      assert.equal(runs[0].itemsSkipped, 0);
     } finally {
       await db.close();
     }
@@ -377,6 +454,9 @@ test("records a partial run when sync is interrupted and keeps cursor untouched"
 
       const runs = await db.listSyncRuns(profile);
       assert.equal(runs[0].status, "partial");
+      assert.equal(runs[0].apiCalls, 3);
+      assert.equal(runs[0].windowsFetched, 1);
+      assert.equal(runs[0].rateLimited, 0);
       assert.equal(runs[0].itemsSeen, 1);
       assert.equal(runs[0].itemsInserted, 1);
       assert.equal(runs[0].itemsUpdated, 0);
@@ -644,6 +724,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
       assert.equal(syncRunsResponse.statusCode, 200);
       assert.equal(syncRunsResponse.json()[0].id, syncBody.run.id);
+      assert.equal(
+        syncRunsResponse.json()[0].apiCalls,
+        syncBody.stats.apiCalls,
+      );
+      assert.equal(syncBody.run.apiCalls, syncBody.stats.apiCalls);
+      assert.equal(syncBody.run.windowsFetched, syncBody.stats.windowsFetched);
+      assert.equal(syncBody.run.rateLimited, syncBody.stats.rateLimited);
     } finally {
       await server.close();
     }
