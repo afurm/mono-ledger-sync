@@ -642,6 +642,112 @@ test("http adapter integration works against a local mock Monobank server", asyn
   });
 });
 
+test("sync retries statement fetch after a mock 429 response", async () => {
+  const token = "fixture-secret-token";
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const uahStatement = await readFixture("statements/uah-main-2026-04.json");
+  const requestLog = [];
+  const sleepHistory = [];
+  let now = 0;
+  let throttledStatementResponses = 0;
+
+  const statementFrom = 1_775_011_600;
+  const statementTo = 1_777_593_599;
+
+  const baseHandler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+    statementByAccount: {
+      "fixture-account-uah-main": uahStatement,
+    },
+    onRequest: ({ endpoint }) => {
+      requestLog.push(endpoint);
+    },
+  });
+
+  const handler = async (request, response) => {
+    const requestUrl = new URL(request.url, "http://127.0.0.1");
+    const pathname = requestUrl.pathname;
+
+    if (
+      pathname.startsWith("/personal/statement/fixture-account-uah-main/") &&
+      request.method === "GET" &&
+      throttledStatementResponses === 0
+    ) {
+      throttledStatementResponses += 1;
+
+      response.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "60",
+      });
+      response.end(
+        JSON.stringify({
+          error: "rate_limited",
+          message: "rate limit exceeded",
+        }),
+      );
+
+      return;
+    }
+
+    return baseHandler(request, response);
+  };
+
+  await withMockMonobankServer(handler, async (baseUrl) => {
+    const adapter = createMonobankHttpAdapter({
+      token,
+      baseUrl,
+      now: () => now,
+      sleep: async (ms) => {
+        sleepHistory.push(ms);
+        now += ms;
+      },
+    });
+
+    await withTempLedger(async ({ databasePath }) => {
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "demo",
+      });
+
+      try {
+        const result = await syncLedgerWithMonobank({
+          profile: "demo",
+          source: "monobank",
+          adapter,
+          db,
+          from: statementFrom,
+          to: statementTo,
+          accountIds: ["fixture-account-uah-main"],
+        });
+        const summary = await db.getDatabaseInfo("demo");
+
+        assert.equal(result.run.status, "success");
+        assert.equal(result.run.rateLimited, 0);
+        assert.equal(result.accounts.length, 1);
+        assert.equal(result.accounts[0].accountId, "fixture-account-uah-main");
+        assert.equal(summary.accounts, 2);
+        assert.equal(summary.ledgerEntries, uahStatement.length);
+        assert.equal(summary.syncRuns, 1);
+      } finally {
+        await db.close();
+      }
+    });
+  });
+
+  assert.equal(throttledStatementResponses, 1);
+  assert.deepEqual(
+    requestLog.filter((endpoint) =>
+      endpoint.startsWith("GET /personal/statement"),
+    ),
+    [
+      `GET /personal/statement/fixture-account-uah-main/${statementFrom}/${statementTo}`,
+    ],
+  );
+  assert.deepEqual(sleepHistory, [60000, 60000]);
+});
+
 test("monobank mock server helper serves standard fixture endpoints", async () => {
   const clientInfo = await readFixture("client-info.json");
   const currencyRates = await readFixture("currency-rates.json");
