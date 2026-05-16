@@ -298,6 +298,104 @@ test("previews sync work without writing ledger data in dry-run mode", async () 
   });
 });
 
+test("records a partial run when sync is interrupted and keeps cursor untouched", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    const syncAbortController = new AbortController();
+    let statementCalls = 0;
+    const adapter = {
+      async getClientInfo() {
+        return {
+          clientId: "interrupted-client",
+          name: "Interrupted Client",
+          accounts: [
+            {
+              id: "interrupted-account",
+              balance: 1_000_00,
+              creditLimit: 0,
+              currencyCode: 980,
+              type: "black",
+            },
+          ],
+          jars: [],
+        };
+      },
+      async getStatement() {
+        statementCalls += 1;
+
+        if (statementCalls === 1) {
+          syncAbortController.abort(
+            new DOMException("Sync was interrupted", "AbortError"),
+          );
+          return [
+            {
+              id: "statement-item-interrupted",
+              time: 1,
+              description: "Interrupted statement item",
+              mcc: 5814,
+              originalMcc: 5814,
+              amount: -700,
+              operationAmount: -700,
+              currencyCode: 980,
+              commissionRate: 0,
+              cashbackAmount: 0,
+              balance: 10_000,
+              hold: false,
+            },
+          ];
+        }
+
+        return [];
+      },
+      async getCurrency() {
+        return [];
+      },
+      async setWebhook() {
+        return undefined;
+      },
+    };
+
+    try {
+      const syncPromise = syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter,
+        db,
+        signal: syncAbortController.signal,
+        from: 1,
+        to: 10_000,
+        sliceSeconds: 2,
+      });
+      await assert.rejects(
+        syncPromise,
+        (error) => error instanceof DOMException && error.name === "AbortError",
+      );
+
+      const runs = await db.listSyncRuns(profile);
+      assert.equal(runs[0].status, "partial");
+      assert.equal(runs[0].itemsSeen, 1);
+      assert.equal(runs[0].itemsInserted, 1);
+      assert.equal(runs[0].itemsUpdated, 0);
+      assert.equal(runs[0].itemsSkipped, 0);
+      assert.equal(
+        await db.getSyncCursor(profile, "interrupted-account"),
+        undefined,
+      );
+      assert.equal(statementCalls, 1);
+      assert.equal(
+        (await db.listLedgerEntries({ profile, limit: 20 })).total,
+        1,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("exports synced ledger entries as CSV and JSON", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
