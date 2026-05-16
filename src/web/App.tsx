@@ -1668,11 +1668,11 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
                   <Badge variant="outline">{run.itemsUpdated} updated</Badge>
                   <Badge variant="outline">{run.itemsSkipped} skipped</Badge>
                   <Badge variant="outline">{run.apiCalls} API calls</Badge>
-                  <Badge variant="outline">
-                    {run.windowsFetched} windows
-                  </Badge>
+                  <Badge variant="outline">{run.windowsFetched} windows</Badge>
                   {run.rateLimited > 0 ? (
-                    <Badge variant="destructive">{run.rateLimited} rate-limited</Badge>
+                    <Badge variant="destructive">
+                      {run.rateLimited} rate-limited
+                    </Badge>
                   ) : null}
                 </div>
               </TableCell>
