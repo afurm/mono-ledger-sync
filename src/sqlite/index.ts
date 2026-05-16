@@ -1669,9 +1669,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         deliveryFingerprint,
       }) as SqliteWebhookEventRow | undefined;
 
-      if (!row) {
-        return storedEvent;
-      }
+    if (!row) {
+      return storedEvent;
+    }
 
     if (insertResult.changes === 0) {
       this.#database
