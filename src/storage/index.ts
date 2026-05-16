@@ -51,9 +51,16 @@ export interface LedgerEntry {
   merchantName?: string;
   hold?: boolean;
   balance?: number;
+  note?: string;
+  tags?: readonly string[];
   rawStatementItemId: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface LedgerEntryAnnotationUpdate {
+  note?: string;
+  tags?: readonly string[];
 }
 
 export interface LedgerEntryQuery {

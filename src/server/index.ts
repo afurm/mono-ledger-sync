@@ -37,6 +37,8 @@ import {
 } from "../storage/index.js";
 import type {
   LedgerAccount,
+  LedgerEntry,
+  LedgerEntryAnnotationUpdate,
   LedgerEntryPage,
   LedgerEntrySortDirection,
   LedgerEntrySortField,
@@ -297,6 +299,20 @@ const ledgerEntriesPageResponseSchema = {
     total: { type: "number" },
     limit: { type: "number" },
     offset: { type: "number" },
+  },
+} as const;
+
+const ledgerEntryAnnotationBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    note: { type: "string", maxLength: 2000 },
+    tags: {
+      type: "array",
+      maxItems: 12,
+      items: { type: "string", minLength: 1, maxLength: 40 },
+    },
   },
 } as const;
 
@@ -704,6 +720,29 @@ function isLedgerEntrySortDirection(
   value: string | undefined,
 ): value is LedgerEntrySortDirection {
   return ledgerEntrySortDirections.includes(value as LedgerEntrySortDirection);
+}
+
+function readLedgerEntryAnnotationUpdate(
+  body: unknown,
+): LedgerEntryAnnotationUpdate {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {};
+  }
+
+  const record = body as Record<string, unknown>;
+  const update: LedgerEntryAnnotationUpdate = {};
+
+  if (Object.hasOwn(record, "note") && typeof record.note === "string") {
+    update.note = record.note;
+  }
+
+  if (Object.hasOwn(record, "tags") && Array.isArray(record.tags)) {
+    update.tags = record.tags.filter((tag): tag is string => {
+      return typeof tag === "string";
+    });
+  }
+
+  return update;
 }
 
 function renderLocalFixtureOverview(
@@ -1507,6 +1546,51 @@ function registerLocalApiRoutes(
       }
 
       return services.db.listLedgerEntries(entryQuery);
+    },
+  );
+
+  app.patch(
+    `${localApiRoutePrefix}/ledger/transactions/:id/annotation`,
+    {
+      schema: {
+        body: ledgerEntryAnnotationBodySchema,
+        response: {
+          200: { type: "object", additionalProperties: true },
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<LedgerEntry | { error: string; message: string }> => {
+      const services = await getServices();
+      const params = request.params as { id?: string };
+      const id = params.id?.trim();
+
+      if (!id) {
+        reply.code(404);
+        return {
+          error: "not_found",
+          message: "Transaction was not found",
+        };
+      }
+
+      const entry = await services.db.updateLedgerEntryAnnotation(
+        services.profile,
+        id,
+        readLedgerEntryAnnotationUpdate(request.body),
+      );
+
+      if (!entry) {
+        reply.code(404);
+        return {
+          error: "not_found",
+          message: "Transaction was not found",
+        };
+      }
+
+      return entry;
     },
   );
 

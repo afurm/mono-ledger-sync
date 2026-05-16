@@ -18,6 +18,7 @@ import type {
   LedgerDb,
   LedgerDbTransaction,
   LedgerEntry,
+  LedgerEntryAnnotationUpdate,
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySortField,
@@ -85,6 +86,11 @@ export interface SqliteLedgerDb extends LedgerDb {
   ): Promise<LedgerWriteStats>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
   listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage>;
+  updateLedgerEntryAnnotation(
+    profile: string,
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+  ): Promise<LedgerEntry | undefined>;
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
@@ -124,6 +130,8 @@ interface SqliteLedgerEntryRow {
   raw_statement_item_id: string;
   hold: number;
   balance: number | null;
+  note: string | null;
+  tags_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -306,6 +314,14 @@ const migrations: readonly SqliteMigration[] = [
         ON sync_runs(profile, started_at DESC);
     `,
   },
+  {
+    id: "0002_ledger_entry_annotations",
+    description: "Add local transaction notes and tags",
+    sql: `
+      ALTER TABLE ledger_entries ADD COLUMN note TEXT;
+      ALTER TABLE ledger_entries ADD COLUMN tags_json TEXT;
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -361,6 +377,45 @@ function parseMaskedPan(value: string | null): readonly string[] | undefined {
   return parsed.filter((item): item is string => typeof item === "string");
 }
 
+function parseTags(value: string | null): readonly string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(value) as unknown;
+
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  const tags = parsed.filter((item): item is string => {
+    return typeof item === "string" && item.trim() !== "";
+  });
+
+  return tags.length > 0 ? tags : undefined;
+}
+
+function normalizeLedgerEntryAnnotation(update: LedgerEntryAnnotationUpdate): {
+  note: string | null | undefined;
+  tagsJson: string | null | undefined;
+} {
+  const note = update.note === undefined ? undefined : update.note.trim();
+  const tags =
+    update.tags === undefined
+      ? undefined
+      : [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))];
+
+  return {
+    note: note === undefined ? undefined : note === "" ? null : note,
+    tagsJson:
+      tags === undefined
+        ? undefined
+        : tags.length === 0
+          ? null
+          : JSON.stringify(tags),
+  };
+}
+
 function mapAccountRow(row: SqliteAccountRow): LedgerAccount {
   const account: LedgerAccount = {
     id: row.id,
@@ -411,6 +466,16 @@ function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
 
   if (row.balance !== null) {
     entry.balance = row.balance;
+  }
+
+  if (row.note !== null) {
+    entry.note = row.note;
+  }
+
+  const tags = parseTags(row.tags_json);
+
+  if (tags) {
+    entry.tags = tags;
   }
 
   return entry;
@@ -529,7 +594,7 @@ function buildLedgerEntryWhereClause(query: LedgerEntryQuery): {
 
   if (query.search?.trim()) {
     clauses.push(
-      "(description LIKE @search OR merchant_name LIKE @search OR category_name LIKE @search)",
+      "(description LIKE @search OR merchant_name LIKE @search OR category_name LIKE @search OR note LIKE @search OR tags_json LIKE @search)",
     );
     params.search = `%${query.search.trim()}%`;
   }
@@ -961,7 +1026,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           SELECT
             id, account_id, time, description, amount, operation_amount,
             currency_code, category_id, category_name, merchant_name,
-            raw_statement_item_id, hold, balance, created_at, updated_at
+            raw_statement_item_id, hold, balance, note, tags_json,
+            created_at, updated_at
           FROM ledger_entries
           WHERE ${where.sql}
           ORDER BY ${orderBy}
@@ -976,6 +1042,60 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       limit,
       offset,
     };
+  }
+
+  async updateLedgerEntryAnnotation(
+    profile: string,
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+  ): Promise<LedgerEntry | undefined> {
+    const annotation = normalizeLedgerEntryAnnotation(update);
+    const selectEntry = this.#database.prepare(
+      `
+        SELECT
+          id, account_id, time, description, amount, operation_amount,
+          currency_code, category_id, category_name, merchant_name,
+          raw_statement_item_id, hold, balance, note, tags_json,
+          created_at, updated_at
+        FROM ledger_entries
+        WHERE profile = ? AND id = ?
+      `,
+    );
+
+    if (annotation.note === undefined && annotation.tagsJson === undefined) {
+      const existingRow = selectEntry.get(profile, id) as
+        | SqliteLedgerEntryRow
+        | undefined;
+
+      return existingRow ? mapLedgerEntryRow(existingRow) : undefined;
+    }
+
+    this.#database
+      .prepare(
+        `
+          UPDATE ledger_entries
+          SET
+            note = CASE WHEN @hasNote = 1 THEN @note ELSE note END,
+            tags_json = CASE WHEN @hasTags = 1 THEN @tagsJson ELSE tags_json END,
+            updated_at = @updatedAt
+          WHERE profile = @profile AND id = @id
+        `,
+      )
+      .run({
+        profile,
+        id,
+        hasNote: annotation.note === undefined ? 0 : 1,
+        note: annotation.note ?? null,
+        hasTags: annotation.tagsJson === undefined ? 0 : 1,
+        tagsJson: annotation.tagsJson ?? null,
+        updatedAt: nowIso(),
+      });
+
+    const row = selectEntry.get(profile, id) as
+      | SqliteLedgerEntryRow
+      | undefined;
+
+    return row ? mapLedgerEntryRow(row) : undefined;
   }
 
   async getLedgerSummary(profile = this.profile): Promise<LedgerSummary> {
