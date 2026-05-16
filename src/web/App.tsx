@@ -2762,12 +2762,11 @@ function TransactionDetailDrawer({
                   </TableHeader>
                   <TableBody>
                     {splitPlanLines.map((line, index) => {
-                      const parsedLine = splitPlanLineStateFromDraft(line);
-                      const categoryError =
-                        !line.category.trim() ||
-                        parsedLine?.category !== line.category;
+                      const amountInputIsInvalid =
+                        amountInputToMinor(line.amount) === undefined;
+                      const categoryError = !line.category.trim();
                       const amountError =
-                        !line.amount.trim() || parsedLine?.amount === undefined;
+                        !line.amount.trim() || amountInputIsInvalid;
 
                       return (
                         <TableRow key={`${entry.id}-${index}`}>

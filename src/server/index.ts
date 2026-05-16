@@ -322,7 +322,12 @@ const ledgerEntrySplitPlanLineSchema = {
   required: ["category", "amount"],
   additionalProperties: false,
   properties: {
-    category: { type: "string", minLength: 1, maxLength: 120 },
+    category: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^(?!\\s*$).+",
+    },
     amount: { type: "integer" },
   },
 } as const;
