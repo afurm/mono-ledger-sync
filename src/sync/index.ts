@@ -61,6 +61,53 @@ export interface SyncLedgerStats {
 const fixtureSyncTo = 4_102_444_800;
 const liveSyncWindowSeconds = 31 * 24 * 60 * 60;
 
+const fallbackStatementItemIdPrefix = "missing-id:";
+
+function createStatementItemFingerprint(
+  accountId: string,
+  item: MonobankStatementItem,
+): string {
+  const payload = {
+    accountId,
+    time: item.time,
+    description: item.description,
+    mcc: item.mcc,
+    originalMcc: item.originalMcc,
+    amount: item.amount,
+    operationAmount: item.operationAmount,
+    currencyCode: item.currencyCode,
+    commissionRate: item.commissionRate,
+    cashbackAmount: item.cashbackAmount,
+    balance: item.balance,
+    hold: item.hold,
+    comment: item.comment ?? "",
+    receiptId: item.receiptId ?? "",
+    invoiceId: item.invoiceId ?? "",
+    counterEdrpou: item.counterEdrpou ?? "",
+    counterIban: item.counterIban ?? "",
+    counterName: item.counterName ?? "",
+  };
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+}
+
+function statementItemIdentity(
+  accountId: string,
+  item: MonobankStatementItem,
+): string {
+  if (item.id !== undefined && item.id.trim().length > 0) {
+    return item.id;
+  }
+
+  return `${fallbackStatementItemIdPrefix}${createStatementItemFingerprint(
+    accountId,
+    item,
+  )}`;
+}
+
 export const monobankPersonalStatementWindowMaxSeconds =
   31 * 24 * 60 * 60 + 60 * 60;
 
@@ -185,9 +232,10 @@ export function createLedgerEntryFromStatementItem(
   item: MonobankStatementItem,
 ): LedgerEntry {
   const category = categorizeStatementItem(item);
+  const statementItemId = statementItemIdentity(accountId, item);
 
   return {
-    id: `${accountId}:${item.id}`,
+    id: `${accountId}:${statementItemId}`,
     accountId,
     time: item.time,
     description: item.description,
@@ -199,7 +247,7 @@ export function createLedgerEntryFromStatementItem(
     merchantName: item.counterName ?? item.description,
     hold: item.hold,
     balance: item.balance,
-    rawStatementItemId: item.id,
+    rawStatementItemId: statementItemId,
   };
 }
 
