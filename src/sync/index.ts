@@ -475,6 +475,8 @@ export async function syncLedgerWithMonobank(
         accountCompletedWindow !== undefined &&
         windows.length > 0
       ) {
+        const webhookProcessedAt = nowIso();
+
         await options.db.transaction(async (tx) => {
           await tx.setSyncCursor({
             profile: options.profile,
@@ -485,6 +487,12 @@ export async function syncLedgerWithMonobank(
             updatedAt: nowIso(),
           });
         });
+
+        await options.db.markWebhookEventsAsProcessed(
+          options.profile,
+          account.id,
+          webhookProcessedAt,
+        );
       }
 
       accountResults.push({
