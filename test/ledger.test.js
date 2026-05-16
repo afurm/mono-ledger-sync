@@ -23,6 +23,10 @@ import {
   syncLedgerWithMonobank,
 } from "../dist/sync/index.js";
 import { DomainError } from "../dist/domain/index.js";
+import {
+  createMonobankMockHttpHandler,
+  withMockMonobankServer,
+} from "./monobank-mock-server.js";
 
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3");
@@ -1289,6 +1293,121 @@ test("local API returns auth_required for monobank sync without token", async ()
       await server.close();
     }
   });
+});
+
+test("local API sync with monobank source uses env token and base URL", async () => {
+  const monobankToken = "fixture-monobank-token";
+  const fixtureSet = await loadMonobankFixtureSet();
+  const statementByAccount = fixtureSet.statements;
+  const allStatementTimes = Object.values(statementByAccount).flatMap((items) =>
+    items.map((item) => item.time),
+  );
+  const fixtureMinStatementTime =
+    allStatementTimes.length > 0 ? Math.min(...allStatementTimes) : 0;
+  const fixtureItemsCount = Object.values(statementByAccount).reduce(
+    (total, statementItems) => total + statementItems.length,
+    0,
+  );
+  const seenTokens = new Set();
+
+  const mockHandler = createMonobankMockHttpHandler({
+    clientInfo: fixtureSet.clientInfo,
+    currencyRates: fixtureSet.currencyRates,
+    statementByAccount,
+    onRequest: ({ headers }) => {
+      const tokenHeader = headers["x-token"];
+
+      if (typeof tokenHeader === "string" && tokenHeader.length > 0) {
+        seenTokens.add(tokenHeader);
+      }
+    },
+  });
+
+  const previousToken = process.env.MONOBANK_TOKEN;
+  const previousBaseUrl = process.env.MONOBANK_BASE_URL;
+
+  try {
+    const previousNow = Date.now;
+    let syntheticNow = 1_800_000_000_000;
+
+    Date.now = () => {
+      const value = syntheticNow;
+      syntheticNow += 60_001;
+      return value;
+    };
+
+    try {
+      await withMockMonobankServer(mockHandler, async (mockBaseUrl) => {
+        process.env.MONOBANK_TOKEN = monobankToken;
+        process.env.MONOBANK_BASE_URL = mockBaseUrl;
+
+        await withTempLedger(async ({ tempRoot }) => {
+          const db = createSqliteLedgerDb({
+            filePath: path.join(tempRoot, "demo.sqlite"),
+            profile: "demo",
+          });
+
+          try {
+            await db.migrate();
+            await db.transaction(async (tx) => {
+              const cursorTimestamp = new Date().toISOString();
+              for (const account of fixtureSet.clientInfo.accounts) {
+                await tx.setSyncCursor({
+                  profile: "demo",
+                  accountId: account.id,
+                  source: "monobank",
+                  statementFrom: 0,
+                  statementTo: Math.max(0, fixtureMinStatementTime - 1),
+                  updatedAt: cursorTimestamp,
+                });
+              }
+            });
+          } finally {
+            await db.close();
+          }
+
+          const server = createLocalApiServer({
+            profile: "demo",
+            source: "monobank",
+            dataDir: tempRoot,
+          });
+
+          try {
+            const syncResponse = await server.inject({
+              method: "POST",
+              url: "/api/sync/run",
+            });
+
+            assert.equal(syncResponse.statusCode, 200);
+            assert.equal(syncResponse.json().run.status, "success");
+            assert.equal(syncResponse.json().run.source, "monobank");
+            assert.equal(
+              syncResponse.json().stats.itemsSeen,
+              fixtureItemsCount,
+            );
+            assert.ok(syncResponse.json().stats.apiCalls >= 3);
+            assert.equal(seenTokens.has(monobankToken), true);
+          } finally {
+            await server.close();
+          }
+        });
+      });
+    } finally {
+      Date.now = previousNow;
+    }
+  } finally {
+    if (previousToken === undefined) {
+      Reflect.deleteProperty(process.env, "MONOBANK_TOKEN");
+    } else {
+      process.env.MONOBANK_TOKEN = previousToken;
+    }
+
+    if (previousBaseUrl === undefined) {
+      Reflect.deleteProperty(process.env, "MONOBANK_BASE_URL");
+    } else {
+      process.env.MONOBANK_BASE_URL = previousBaseUrl;
+    }
+  }
 });
 
 test("local API token endpoint saves and deletes monobank token state", async () => {
