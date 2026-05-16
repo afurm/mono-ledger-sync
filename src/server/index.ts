@@ -305,6 +305,7 @@ const ledgerEntriesPageResponseSchema = {
 const ledgerEntryAnnotationBodySchema = {
   type: "object",
   additionalProperties: false,
+  minProperties: 1,
   properties: {
     note: { type: "string", maxLength: 2000 },
     tags: {

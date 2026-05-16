@@ -1050,6 +1050,25 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     update: LedgerEntryAnnotationUpdate,
   ): Promise<LedgerEntry | undefined> {
     const annotation = normalizeLedgerEntryAnnotation(update);
+    const selectEntry = this.#database.prepare(
+      `
+        SELECT
+          id, account_id, time, description, amount, operation_amount,
+          currency_code, category_id, category_name, merchant_name,
+          raw_statement_item_id, hold, balance, note, tags_json,
+          created_at, updated_at
+        FROM ledger_entries
+        WHERE profile = ? AND id = ?
+      `,
+    );
+
+    if (annotation.note === undefined && annotation.tagsJson === undefined) {
+      const existingRow = selectEntry.get(profile, id) as
+        | SqliteLedgerEntryRow
+        | undefined;
+
+      return existingRow ? mapLedgerEntryRow(existingRow) : undefined;
+    }
 
     this.#database
       .prepare(
@@ -1072,19 +1091,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         updatedAt: nowIso(),
       });
 
-    const row = this.#database
-      .prepare(
-        `
-          SELECT
-            id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, merchant_name,
-            raw_statement_item_id, hold, balance, note, tags_json,
-            created_at, updated_at
-          FROM ledger_entries
-          WHERE profile = ? AND id = ?
-        `,
-      )
-      .get(profile, id) as SqliteLedgerEntryRow | undefined;
+    const row = selectEntry.get(profile, id) as
+      | SqliteLedgerEntryRow
+      | undefined;
 
     return row ? mapLedgerEntryRow(row) : undefined;
   }
