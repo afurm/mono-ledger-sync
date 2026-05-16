@@ -164,6 +164,8 @@ test("fixture validation reports the failing field path", () => {
       );
       assert.equal(error.path, "fixtures/statements/invalid.json[0].hold");
       assert.equal(error.expected, "a boolean");
+      assert.equal(error.code, "validation_failed");
+      assert.equal(error.category, "validation");
 
       return true;
     },
@@ -239,6 +241,8 @@ test("fixture loader reports invalid bundled fields", async () => {
           error.path,
           "fixtures/statements/uah-main-2026-04.json[0].hold",
         );
+        assert.equal(error.code, "validation_failed");
+        assert.equal(error.category, "validation");
 
         return true;
       },
@@ -381,9 +385,67 @@ test("http adapter redacts token-bearing API errors", async () => {
     () => adapter.getClientInfo(),
     (error) => {
       assert.equal(error.name, "MonobankApiError");
+      assert.equal(error.code, "token_invalid");
+      assert.equal(error.category, "auth");
+      assert.equal(error.details?.statusCode, 403);
       assert.doesNotMatch(error.message, /fixture-secret-token/);
       assert.doesNotMatch(error.message, /UA213223130000026007233566001/);
       assert.match(error.message, /\[redacted\]/);
+
+      return true;
+    },
+  );
+});
+
+test("http adapter classifies API rate-limits as domain errors", async () => {
+  const adapter = createMonobankHttpAdapter({
+    token: "fixture-token",
+    baseUrl: "https://api.example.test",
+    maxRetries: 0,
+    fetch: async () =>
+      Response.json(
+        { message: "rate limit", error: "rate_limited" },
+        {
+          status: 429,
+          headers: {
+            "retry-after": "60",
+          },
+        },
+      ),
+  });
+
+  await assert.rejects(
+    () => adapter.getClientInfo(),
+    (error) => {
+      assert.equal(error.name, "MonobankApiError");
+      assert.equal(error.code, "rate_limit_exceeded");
+      assert.equal(error.category, "rate_limit");
+      assert.equal(error.response.statusCode, 429);
+      assert.equal(error.response.retryAfterSeconds, 60);
+
+      return true;
+    },
+  );
+});
+
+test("http adapter maps transport failures to network domain errors", async () => {
+  const adapter = createMonobankHttpAdapter({
+    token: "fixture-token",
+    baseUrl: "https://api.example.test",
+    maxRetries: 0,
+    fetch: async () => {
+      throw new Error("network unavailable");
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.getClientInfo(),
+    (error) => {
+      assert.equal(error.name, "DomainError");
+      assert.equal(error.code, "network_unreachable");
+      assert.equal(error.category, "network");
+      assert.equal(error.details?.endpoint, "/personal/client-info");
+      assert.equal(error.details?.reason, "network unavailable");
 
       return true;
     },

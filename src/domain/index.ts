@@ -14,6 +14,54 @@ export const ledgerEntrySortDirections = ["asc", "desc"] as const;
 export type LedgerEntrySortDirection =
   (typeof ledgerEntrySortDirections)[number];
 
+export const domainErrorCategories = [
+  "auth",
+  "rate_limit",
+  "validation",
+  "network",
+  "storage",
+  "migration",
+  "config",
+  "privacy",
+  "internal",
+] as const;
+
+export type DomainErrorCategory = (typeof domainErrorCategories)[number];
+
+export const domainErrorCodes = [
+  "auth_required",
+  "token_invalid",
+  "rate_limit_exceeded",
+  "validation_failed",
+  "request_invalid",
+  "network_unreachable",
+  "storage_corrupted",
+  "migration_failed",
+  "config_invalid",
+  "privacy_violation",
+  "internal_error",
+] as const;
+
+export type DomainErrorCode = (typeof domainErrorCodes)[number];
+
+export interface DomainErrorDescriptor {
+  code: DomainErrorCode;
+  category: DomainErrorCategory;
+  details?: Record<string, unknown>;
+}
+
+export class DomainError extends Error {
+  constructor(
+    message: string,
+    readonly code: DomainErrorCode,
+    readonly category: DomainErrorCategory,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "DomainError";
+  }
+}
+
 export const syncRunStatuses = [
   "queued",
   "running",
