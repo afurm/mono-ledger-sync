@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 
 import type BetterSqlite3 from "better-sqlite3";
@@ -106,6 +107,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   recordWebhookEvent(
     event: MonobankPersonalWebhookEvent,
     receivedAt?: string,
+    deliveryMetadata?: Readonly<Record<string, string>>,
   ): Promise<StoredWebhookEvent>;
   getDatabaseInfo(profile?: string): Promise<SqliteDatabaseInfo>;
   compact(): Promise<void>;
@@ -180,6 +182,8 @@ interface SqliteWebhookEventRow {
   statement_item_id: string | null;
   received_at: string;
   processed_at: string | null;
+  payload_hash?: string;
+  delivery_fingerprint?: string;
 }
 
 interface SqliteSummaryRow {
@@ -352,6 +356,25 @@ const migrations: readonly SqliteMigration[] = [
       ALTER TABLE sync_runs ADD COLUMN rate_limited INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    id: "0005_webhook_delivery_dedup",
+    description: "Add webhook dedupe metadata",
+    sql: `
+      ALTER TABLE webhook_events ADD COLUMN payload_hash TEXT NOT NULL DEFAULT '';
+      ALTER TABLE webhook_events ADD COLUMN delivery_fingerprint TEXT NOT NULL DEFAULT '';
+
+      UPDATE webhook_events
+        SET payload_hash = id
+        WHERE payload_hash IS NULL OR payload_hash = '';
+
+      UPDATE webhook_events
+        SET delivery_fingerprint = ''
+        WHERE delivery_fingerprint IS NULL OR delivery_fingerprint = '';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_dedup
+        ON webhook_events(profile, payload_hash, delivery_fingerprint);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -375,6 +398,32 @@ function addWriteStats(
     updated: left.updated + right.updated,
     skipped: left.skipped + right.skipped,
   };
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value);
+}
+
+function webhookPayloadHash(event: MonobankPersonalWebhookEvent): string {
+  return createHash("sha256").update(stableStringify(event)).digest("hex");
+}
+
+function webhookDeliveryFingerprint(
+  deliveryMetadata?: Readonly<Record<string, string>>,
+): string {
+  if (!deliveryMetadata) {
+    return "";
+  }
+
+  return createHash("sha256")
+    .update(
+      stableStringify(
+        Object.entries(deliveryMetadata)
+          .filter(([, value]) => value.trim().length > 0)
+          .sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    )
+    .digest("hex");
 }
 
 function normalizeLimit(limit: number | undefined): number {
@@ -1360,8 +1409,11 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   async recordWebhookEvent(
     event: MonobankPersonalWebhookEvent,
     receivedAt = nowIso(),
+    deliveryMetadata = {},
   ): Promise<StoredWebhookEvent> {
     const statementItemId = event.data.statementItem.id;
+    const payloadHash = webhookPayloadHash(event);
+    const deliveryFingerprint = webhookDeliveryFingerprint(deliveryMetadata);
     const storedEvent: StoredWebhookEvent = {
       id: `${event.data.account}:${statementItemId ?? "missing-id"}:${receivedAt}`,
       profile: this.profile,
@@ -1375,14 +1427,14 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .prepare(
         `
           INSERT INTO webhook_events (
-            id, profile, account_id, type, statement_item_id,
-            received_at, processed_at, payload_json
+            id, profile, account_id, type, statement_item_id, payload_hash,
+            delivery_fingerprint, received_at, processed_at, payload_json
           )
           VALUES (
-            @id, @profile, @accountId, @type, @statementItemId,
-            @receivedAt, @processedAt, @payloadJson
+            @id, @profile, @accountId, @type, @statementItemId, @payloadHash,
+            @deliveryFingerprint, @receivedAt, @processedAt, @payloadJson
           )
-          ON CONFLICT(id) DO NOTHING
+          ON CONFLICT(profile, payload_hash, delivery_fingerprint) DO NOTHING
         `,
       )
       .run({
@@ -1391,12 +1443,34 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         accountId: storedEvent.accountId,
         type: storedEvent.type,
         statementItemId: storedEvent.statementItemId,
+        payloadHash,
+        deliveryFingerprint,
         receivedAt: storedEvent.receivedAt,
         processedAt: storedEvent.processedAt ?? null,
         payloadJson: JSON.stringify(event),
       });
 
-    return storedEvent;
+    const row = this.#database
+      .prepare(
+        `
+          SELECT
+            id, profile, account_id, type, statement_item_id,
+            received_at, processed_at
+          FROM webhook_events
+          WHERE profile = @profile
+            AND payload_hash = @payloadHash
+            AND delivery_fingerprint = @deliveryFingerprint
+          ORDER BY received_at DESC, id DESC
+          LIMIT 1
+        `,
+      )
+      .get({
+        profile: this.profile,
+        payloadHash,
+        deliveryFingerprint,
+      }) as SqliteWebhookEventRow | undefined;
+
+    return row ? mapWebhookEventRow(row) : storedEvent;
   }
 
   async getDatabaseInfo(profile = this.profile): Promise<SqliteDatabaseInfo> {
