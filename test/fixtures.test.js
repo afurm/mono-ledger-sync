@@ -211,6 +211,27 @@ test("fixture validation reports the failing field path", () => {
   );
 });
 
+test("accepts statement items without an external id (for fallback path)", () => {
+  const statementItem = {
+    time: 1775031300,
+    description: "Missing identifier transfer",
+    mcc: 6012,
+    originalMcc: 6012,
+    amount: -3500,
+    operationAmount: -3500,
+    currencyCode: 980,
+    commissionRate: 0,
+    cashbackAmount: 0,
+    balance: 100000,
+    hold: false,
+  };
+
+  assertMonobankStatementItems(
+    [statementItem],
+    "fixtures/statements/no-id.json",
+  );
+});
+
 test("loads bundled fixtures into a validated fixture set", async () => {
   const fixtures = await loadMonobankFixtureSet();
 

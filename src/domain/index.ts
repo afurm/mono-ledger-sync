@@ -120,7 +120,7 @@ export interface MonobankClientInfo {
 }
 
 export interface MonobankStatementItem {
-  id: string;
+  id?: string;
   time: number;
   description: string;
   mcc: number;

@@ -496,7 +496,6 @@ const webhookAcceptedResponseSchema = {
 const monobankStatementItemBodySchema = {
   type: "object",
   required: [
-    "id",
     "time",
     "description",
     "mcc",

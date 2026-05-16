@@ -143,6 +143,10 @@ interface SqliteLedgerEntryRow {
   updated_at: string;
 }
 
+interface SqliteRawStatementItemRow {
+  payload_json: string;
+}
+
 interface SqliteSyncCursorRow {
   profile: string;
   account_id: string;
@@ -1040,11 +1044,13 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     entries: readonly LedgerEntry[],
   ): Promise<LedgerWriteStats> {
     let stats = emptyWriteStats();
-    const entryByStatementId = new Map(
-      entries.map((entry) => [entry.rawStatementItemId, entry]),
-    );
     const rawExists = this.#database.prepare(`
       SELECT 1 FROM raw_statement_items
+      WHERE profile = ? AND account_id = ? AND statement_item_id = ?
+    `);
+    const rawLookup = this.#database.prepare(`
+      SELECT payload_json
+      FROM raw_statement_items
       WHERE profile = ? AND account_id = ? AND statement_item_id = ?
     `);
     const rawUpsert = this.#database.prepare(`
@@ -1059,20 +1065,39 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     `);
 
     const write = this.#database.transaction(() => {
-      for (const item of items) {
+      for (const [index, item] of items.entries()) {
+        const entry = entries[index];
+        const statementItemId = entry?.rawStatementItemId ?? item.id;
+        const payloadJson = JSON.stringify(item);
+
+        if (!statementItemId) {
+          throw new Error(
+            "Statement item is missing an identifier and entry id",
+          );
+        }
+
         const existed = Boolean(
-          rawExists.get(this.profile, accountId, item.id),
+          rawExists.get(this.profile, accountId, statementItemId),
         );
+        const previousPayload = (
+          rawLookup.get(this.profile, accountId, statementItemId) as
+            | SqliteRawStatementItemRow
+            | undefined
+        )?.payload_json;
+
+        if (existed && previousPayload === payloadJson) {
+          stats.skipped += 1;
+          continue;
+        }
+
         rawUpsert.run({
           profile: this.profile,
           accountId,
-          statementItemId: item.id,
+          statementItemId,
           time: item.time,
-          payloadJson: JSON.stringify(item),
+          payloadJson,
           updatedAt: nowIso(),
         });
-
-        const entry = entryByStatementId.get(item.id);
 
         if (!entry) {
           stats.skipped += 1;
@@ -1338,12 +1363,12 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   ): Promise<StoredWebhookEvent> {
     const statementItemId = event.data.statementItem.id;
     const storedEvent: StoredWebhookEvent = {
-      id: `${event.data.account}:${statementItemId}:${receivedAt}`,
+      id: `${event.data.account}:${statementItemId ?? "missing-id"}:${receivedAt}`,
       profile: this.profile,
       accountId: event.data.account,
       type: event.type,
-      statementItemId,
       receivedAt,
+      ...(statementItemId === undefined ? {} : { statementItemId }),
     };
 
     this.#database

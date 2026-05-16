@@ -9,7 +9,10 @@ import {
   createLedgerExport,
   exportPresetDefinitions,
 } from "../dist/exports/index.js";
-import { createBundledFixtureMonobankAdapter } from "../dist/monobank/index.js";
+import {
+  createBundledFixtureMonobankAdapter,
+  loadMonobankFixtureSet,
+} from "../dist/monobank/index.js";
 import { createLocalApiServer } from "../dist/server/index.js";
 import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
 import {
@@ -331,6 +334,95 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       ]);
       assert.equal(splitPlanCleared.splitPlan, undefined);
       assert.equal(annotatedTransactions.total, 1);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("syncs statement items without external IDs using deterministic fingerprints", async () => {
+  const fixtureSet = await loadMonobankFixtureSet();
+  const account = fixtureSet.clientInfo.accounts[0];
+  const windowStatementItem = {
+    ...fixtureSet.statements[account.id][0],
+    id: undefined,
+  };
+  const adapter = {
+    async getClientInfo() {
+      return fixtureSet.clientInfo;
+    },
+    async getStatement(window) {
+      if (window.accountId !== account.id) {
+        return [];
+      }
+
+      if (
+        windowStatementItem.time >= window.from &&
+        windowStatementItem.time <= window.to
+      ) {
+        return [windowStatementItem];
+      }
+
+      return [];
+    },
+    async getCurrency() {
+      return fixtureSet.currencyRates;
+    },
+    async setWebhook() {
+      return undefined;
+    },
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      const firstRun = await syncLedgerWithMonobank({
+        profile,
+        source: "monobank",
+        adapter,
+        db,
+        accountIds: [account.id],
+        from: windowStatementItem.time,
+        to: windowStatementItem.time,
+      });
+      const firstEntries = await db.listLedgerEntries({
+        profile,
+        limit: 20,
+      });
+
+      assert.equal(firstRun.run.status, "success");
+      assert.equal(firstRun.accounts.length, 1);
+      assert.equal(firstRun.accounts[0].writeStats.inserted, 1);
+      assert.equal(firstEntries.total, 1);
+      assert.match(
+        firstEntries.entries[0].rawStatementItemId,
+        /^missing-id:[0-9a-f]{64}$/,
+      );
+
+      const secondRun = await syncLedgerWithMonobank({
+        profile,
+        source: "monobank",
+        adapter,
+        db,
+        accountIds: [account.id],
+        from: windowStatementItem.time,
+        to: windowStatementItem.time,
+      });
+      const secondEntries = await db.listLedgerEntries({
+        profile,
+        limit: 20,
+      });
+
+      assert.equal(secondRun.accounts.length, 1);
+      assert.equal(secondRun.accounts[0].writeStats.inserted, 0);
+      assert.equal(secondRun.accounts[0].writeStats.updated, 0);
+      assert.equal(secondRun.accounts[0].writeStats.skipped, 1);
+      assert.equal(secondEntries.total, 1);
     } finally {
       await db.close();
     }

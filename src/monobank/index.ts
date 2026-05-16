@@ -313,7 +313,9 @@ export function assertMonobankStatementItem(
   path = "statementItem",
 ): asserts value is MonobankStatementItem {
   assertRecord(value, path);
-  assertString(value.id, `${path}.id`);
+  if (value.id !== undefined) {
+    assertString(value.id, `${path}.id`);
+  }
   assertNumber(value.time, `${path}.time`);
   assertString(value.description, `${path}.description`);
   assertNumber(value.mcc, `${path}.mcc`);
