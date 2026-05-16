@@ -977,6 +977,21 @@ test("exports synced ledger entries as CSV and JSON", async () => {
         profile,
         format: "csv",
       });
+      const [firstTransaction] = (
+        await db.listLedgerEntries({
+          profile,
+          limit: 1,
+        })
+      ).entries;
+
+      await db.updateLedgerEntryAnnotation(profile, firstTransaction.id, {
+        tags: ["reviewed"],
+      });
+      const taggedJsonExport = await createLedgerExport(db, {
+        profile,
+        format: "json",
+        tag: "reviewed",
+      });
       const json = await createLedgerExport(db, {
         profile,
         format: "json",
@@ -1009,6 +1024,11 @@ test("exports synced ledger entries as CSV and JSON", async () => {
       assert.equal(parsed.exportedAt, undefined);
       assert.equal(parsed.total, 7);
       assert.equal(parsed.entries.length, 7);
+      const parsedTagged = JSON.parse(taggedJsonExport.body);
+      assert.equal(parsedTagged.filters.tag, "reviewed");
+      assert.equal(parsedTagged.total, 1);
+      assert.equal(parsedTagged.entries.length, 1);
+      assert.equal(parsedTagged.entries[0].id, firstTransaction.id);
       assert.equal(jsonl.contentType, "application/x-ndjson; charset=utf-8");
       assert.match(
         jsonl.fileName,
@@ -1134,6 +1154,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/exports/ledger?format=jsonl&categoryId=groceries",
       });
+      const taggedExportResponse = await server.inject({
+        method: "GET",
+        url: "/api/exports/ledger?format=json&tag=reviewed",
+      });
       const syncRunsResponse = await server.inject({
         method: "GET",
         url: "/api/sync/runs",
@@ -1203,6 +1227,12 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(splitPlanInvalidResponse.statusCode, 400);
       assert.equal(exportResponse.statusCode, 200);
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
+      assert.equal(taggedExportResponse.statusCode, 200);
+      const taggedExportBody = JSON.parse(taggedExportResponse.body);
+      assert.equal(taggedExportBody.filters.tag, "reviewed");
+      assert.equal(taggedExportBody.total, 1);
+      assert.equal(taggedExportBody.entries[0].id, firstTransaction.id);
+      assert.equal(taggedExportBody.entries[0].tags?.[0], "reviewed");
       assert.equal(syncRunsResponse.statusCode, 200);
       assert.equal(syncRunsResponse.json()[0].id, syncBody.run.id);
       assert.equal(

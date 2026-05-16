@@ -897,6 +897,13 @@ function buildLedgerEntryWhereClause(query: LedgerEntryQuery): {
     clauses.push("hold = 0");
   }
 
+  if (query.tag?.trim()) {
+    clauses.push(
+      "EXISTS (SELECT 1 FROM json_each(ledger_entries.tags_json) WHERE value = @tag)",
+    );
+    params.tag = query.tag.trim();
+  }
+
   if (query.amountMin !== undefined) {
     clauses.push("amount >= @amountMin");
     params.amountMin = query.amountMin;
