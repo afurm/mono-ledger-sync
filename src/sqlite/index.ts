@@ -209,6 +209,64 @@ interface SqliteCategoryRow {
   updated_at: string;
 }
 
+interface SeedCategory {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
+}
+
+const seededCategories: readonly SeedCategory[] = [
+  {
+    id: "income",
+    name: "Income",
+    color: "#16a34a",
+    description: "Money received from salary, reimbursements, or transfers in.",
+  },
+  {
+    id: "groceries",
+    name: "Groceries",
+    color: "#0ea5e9",
+    description: "Food purchases and daily grocery spending.",
+  },
+  {
+    id: "subscriptions",
+    name: "Subscriptions",
+    color: "#7c3aed",
+    description: "Recurring subscriptions and service plans.",
+  },
+  {
+    id: "transport",
+    name: "Transport",
+    color: "#f97316",
+    description: "Transit, taxi, and other transport-related expenses.",
+  },
+  {
+    id: "travel",
+    name: "Travel",
+    color: "#06b6d4",
+    description: "Travel, hotel, and travel-related spending.",
+  },
+  {
+    id: "dining",
+    name: "Dining",
+    color: "#f43f5e",
+    description: "Restaurants, cafes, and food outside home.",
+  },
+  {
+    id: "transfers",
+    name: "Transfers",
+    color: "#64748b",
+    description: "Transfers between accounts and known payment transfers.",
+  },
+  {
+    id: "uncategorized",
+    name: "Uncategorized",
+    color: "#64748b",
+    description: "Manual review required; no automatic category match yet.",
+  },
+];
+
 const migrations: readonly SqliteMigration[] = [
   {
     id: "0001_local_ledger",
@@ -885,6 +943,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       }
 
       this.ensureProfile();
+      this.seedDefaultCategories();
       this.#database.exec("COMMIT");
     } catch (error) {
       this.#database.exec("ROLLBACK");
@@ -1635,6 +1694,50 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `,
       )
       .run(this.profile, nowIso());
+  }
+
+  private seedDefaultCategories(): void {
+    const seed = this.#database
+      .prepare(
+        `
+          SELECT 1
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'categories'
+          LIMIT 1
+        `,
+      )
+      .get();
+
+    if (!seed) {
+      return;
+    }
+
+    const insertCategory = this.#database.prepare(
+      `
+        INSERT INTO categories (
+          profile, id, name, color, description, is_system, created_at, updated_at
+        )
+        VALUES (
+          @profile, @id, @name, @color, @description, 1, @timestamp, @timestamp
+        )
+        ON CONFLICT(profile, id) DO NOTHING
+      `,
+    );
+
+    const timestamp = nowIso();
+
+    this.#database.transaction(() => {
+      for (const category of seededCategories) {
+        insertCategory.run({
+          profile: this.profile,
+          id: category.id,
+          name: category.name,
+          color: category.color ?? null,
+          description: category.description ?? "",
+          timestamp,
+        });
+      }
+    })();
   }
 
   private setSyncCursorSync(cursor: SyncCursor): void {

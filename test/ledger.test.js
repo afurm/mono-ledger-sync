@@ -876,6 +876,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
+      assert.equal((await db.listCategories(profile)).length, 8);
 
       const accounts = await db.listAccounts(profile);
       assert.equal(accounts.length, 1);
