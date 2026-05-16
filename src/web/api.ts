@@ -139,6 +139,32 @@ export interface LocalApiFixtureSummary {
   errorStates: number;
 }
 
+export type LocalActivityEventType =
+  | "sync_run"
+  | "webhook_delivery"
+  | "export"
+  | "rule_application"
+  | "warning"
+  | "error";
+
+export type LocalActivityEventSeverity =
+  | "info"
+  | "success"
+  | "partial"
+  | "warning"
+  | "error";
+
+export interface LocalActivityEvent {
+  id: string;
+  type: LocalActivityEventType;
+  title: string;
+  details: string;
+  timestamp: string;
+  severity: LocalActivityEventSeverity;
+  source: string;
+  referenceId?: string;
+}
+
 export interface LocalAppSnapshot {
   health: LocalApiHealth;
   config: LocalApiAppConfig;
@@ -147,7 +173,187 @@ export interface LocalAppSnapshot {
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
   webhookEvents: readonly WebhookEvent[];
+  activityEvents: readonly LocalActivityEvent[];
   fixtures?: LocalApiFixtureSummary;
+}
+
+function syncRunInProgressLabel(status: SyncRun["status"]): boolean {
+  return status === "queued" || status === "running";
+}
+
+function formatSyncRunDuration(run: SyncRun): string {
+  const startedAt = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAt) || syncRunInProgressLabel(run.status)) {
+    return "in progress";
+  }
+
+  const finishedAt = Date.parse(run.finishedAt ?? "");
+
+  if (!Number.isFinite(finishedAt)) {
+    return "unknown";
+  }
+
+  const totalSeconds = Math.round((finishedAt - startedAt) / 1000);
+
+  if (totalSeconds < 1) {
+    return "less than 1s";
+  }
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function syncRunSeverity(
+  status: SyncRun["status"],
+): LocalActivityEventSeverity {
+  if (status === "running" || status === "queued") {
+    return "info";
+  }
+
+  if (status === "partial") {
+    return "warning";
+  }
+
+  if (status === "failed") {
+    return "error";
+  }
+
+  return "success";
+}
+
+function syncRunStatusLabel(status: SyncRun["status"]): string {
+  switch (status) {
+    case "queued":
+      return "Queued sync";
+    case "running":
+      return "Running sync";
+    case "success":
+      return "Successful sync";
+    case "partial":
+      return "Partial sync";
+    case "failed":
+      return "Failed sync";
+  }
+}
+
+function syncRunSummary(run: SyncRun): string {
+  return `Seen ${run.itemsSeen}, inserted ${run.itemsInserted}, updated ${run.itemsUpdated}, skipped ${run.itemsSkipped} in ${formatSyncRunDuration(run)}`;
+}
+
+function syncRunSourceLabel(source: SyncRun["source"]): string {
+  switch (source) {
+    case "fixture":
+      return "Fixture sync";
+    case "monobank":
+      return "Monobank sync";
+    default:
+      return "Local sync";
+  }
+}
+
+function sortActivityEvents(
+  events: readonly LocalActivityEvent[],
+): readonly LocalActivityEvent[] {
+  return [...events].sort(
+    (left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp),
+  );
+}
+
+function formatSyncRunTimestamp(run: SyncRun): string {
+  return syncRunInProgressLabel(run.status) && run.startedAt
+    ? run.startedAt
+    : (run.finishedAt ?? run.startedAt);
+}
+
+function buildLocalActivityEvents(
+  syncRuns: readonly SyncRun[],
+  webhookEvents: readonly WebhookEvent[],
+): readonly LocalActivityEvent[] {
+  const events: LocalActivityEvent[] = [];
+
+  for (const run of syncRuns) {
+    const isInProgress = syncRunInProgressLabel(run.status);
+
+    events.push({
+      id: `sync-run:${run.id}`,
+      type: "sync_run",
+      title: syncRunStatusLabel(run.status),
+      details: `${syncRunSourceLabel(run.source)} • ${syncRunSummary(run)}`,
+      timestamp: formatSyncRunTimestamp(run),
+      severity: syncRunSeverity(run.status),
+      source: run.profile,
+      referenceId: run.id,
+    });
+
+    if (run.status === "failed") {
+      events.push({
+        id: `sync-run:${run.id}:error`,
+        type: "error",
+        title: "Sync run failed",
+        details: `${syncRunSourceLabel(
+          run.source,
+        )} run ${run.id} needs attention`,
+        timestamp: formatSyncRunTimestamp(run),
+        severity: "error",
+        source: run.profile,
+        referenceId: run.id,
+      });
+    } else if (isInProgress) {
+      events.push({
+        id: `sync-run:${run.id}:pending`,
+        type: "warning",
+        title: "Sync still in progress",
+        details: `${syncRunSourceLabel(run.source)} for ${
+          run.profile
+        } has not finished yet`,
+        timestamp: formatSyncRunTimestamp(run),
+        severity: "warning",
+        source: run.profile,
+        referenceId: run.id,
+      });
+    }
+  }
+
+  for (const event of webhookEvents) {
+    events.push({
+      id: `webhook:${event.id}`,
+      type: "webhook_delivery",
+      title: `Webhook ${event.type}`,
+      details: `account ${event.accountId}${event.statementItemId ? ` • statement ${event.statementItemId}` : ""}`,
+      timestamp: event.receivedAt,
+      severity: event.processedAt ? "success" : "warning",
+      source: event.accountId,
+      referenceId: event.id,
+    });
+
+    if (!event.processedAt) {
+      events.push({
+        id: `webhook:${event.id}:warning`,
+        type: "warning",
+        title: "Webhook not reconciled",
+        details: `Pending pull for ${event.accountId} ${event.statementItemId ? `statement ${event.statementItemId}` : ""}`,
+        timestamp: event.receivedAt,
+        severity: "warning",
+        source: event.accountId,
+        referenceId: event.id,
+      });
+    }
+  }
+
+  return sortActivityEvents(events);
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -241,6 +447,8 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
   ]);
 
+  const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
+
   const fixtures =
     config.source === "fixture"
       ? await requestJson<LocalApiFixtureSummary>("/api/fixtures/summary")
@@ -254,6 +462,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     transactions,
     syncRuns,
     webhookEvents,
+    activityEvents,
     ...(fixtures ? { fixtures } : {}),
   };
 }
