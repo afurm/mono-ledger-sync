@@ -673,6 +673,72 @@ test("previews sync work without writing ledger data in dry-run mode", async () 
   });
 });
 
+test("marks pending webhook events as processed after successful account sync", async () => {
+  const fixtureSet = await loadMonobankFixtureSet();
+  const accountId = fixtureSet.clientInfo.accounts[0].id;
+  const statementItems = fixtureSet.statements[accountId];
+  const duplicateWebhookEvent = {
+    type: "StatementItem",
+    data: {
+      account: accountId,
+      statementItem: statementItems[0],
+    },
+  };
+  const pendingWebhookEvent = {
+    type: "StatementItem",
+    data: {
+      account: accountId,
+      statementItem: statementItems[1],
+    },
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      const firstRecord = await db.recordWebhookEvent(duplicateWebhookEvent);
+      const duplicateRecord = await db.recordWebhookEvent(
+        duplicateWebhookEvent,
+      );
+      const pendingRecord = await db.recordWebhookEvent(pendingWebhookEvent);
+
+      assert.equal(firstRecord.id, duplicateRecord.id);
+      assert.equal(duplicateRecord.status, "duplicate");
+
+      const result = await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+        accountIds: [accountId],
+        from: statementItems[0].time,
+        to: statementItems[statementItems.length - 1].time,
+      });
+
+      const webhookEvents = await db.listWebhookEvents(profile, 20);
+      const duplicateEvent = webhookEvents.find((event) => {
+        return event.id === duplicateRecord.id;
+      });
+      const pendingEvent = webhookEvents.find((event) => {
+        return event.id === pendingRecord.id;
+      });
+
+      assert.equal(result.run.status, "success");
+      assert.equal(duplicateEvent?.status, "duplicate");
+      assert.equal(pendingEvent?.status, "processed");
+      assert.equal(typeof pendingEvent?.processedAt, "string");
+      assert.equal(pendingEvent?.processedAt?.trim().length > 0, true);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("tracks rate-limit in sync run stats on adapter failures", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";

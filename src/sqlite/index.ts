@@ -112,6 +112,11 @@ export interface SqliteLedgerDb extends LedgerDb {
     receivedAt?: string,
     deliveryMetadata?: Readonly<Record<string, string>>,
   ): Promise<StoredWebhookEvent>;
+  markWebhookEventsAsProcessed(
+    profile: string,
+    accountId: string,
+    processedAt?: string,
+  ): Promise<void>;
   getDatabaseInfo(profile?: string): Promise<SqliteDatabaseInfo>;
   compact(): Promise<void>;
   close(): Promise<void>;
@@ -1720,6 +1725,37 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     }
 
     return mapWebhookEventRow(row);
+  }
+
+  async markWebhookEventsAsProcessed(
+    profile: string,
+    accountId: string,
+    processedAt = nowIso(),
+  ): Promise<void> {
+    this.#database
+      .prepare(
+        `
+          UPDATE webhook_events
+            SET status = 'processed',
+                processed_at = @processedAt
+          WHERE profile = @profile
+            AND account_id = @accountId
+            AND status = 'pending'
+            AND statement_item_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM ledger_entries
+              WHERE profile = @profile
+                AND account_id = @accountId
+                AND raw_statement_item_id = webhook_events.statement_item_id
+            )
+        `,
+      )
+      .run({
+        profile,
+        accountId,
+        processedAt,
+      });
   }
 
   async getDatabaseInfo(profile = this.profile): Promise<SqliteDatabaseInfo> {
