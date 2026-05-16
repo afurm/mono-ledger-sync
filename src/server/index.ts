@@ -1714,13 +1714,26 @@ function registerLocalApiRoutes(
     },
     async (): Promise<SyncLedgerResult> => {
       const services = await getServices();
+      const syncAbortController = new AbortController();
+      const handleInterrupt = (): void => {
+        syncAbortController.abort();
+      };
 
-      return syncLedgerWithMonobank({
-        profile: services.profile,
-        source: services.source,
-        adapter: services.adapter,
-        db: services.db,
-      });
+      process.on("SIGINT", handleInterrupt);
+      process.on("SIGTERM", handleInterrupt);
+
+      try {
+        return await syncLedgerWithMonobank({
+          profile: services.profile,
+          source: services.source,
+          adapter: services.adapter,
+          db: services.db,
+          signal: syncAbortController.signal,
+        });
+      } finally {
+        process.off("SIGINT", handleInterrupt);
+        process.off("SIGTERM", handleInterrupt);
+      }
     },
   );
 

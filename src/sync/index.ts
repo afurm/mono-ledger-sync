@@ -27,6 +27,7 @@ export interface SyncLedgerOptions {
   to?: number;
   accountIds?: readonly string[];
   sliceSeconds?: number;
+  signal?: AbortSignal;
 }
 
 export interface SyncLedgerAccountResult {
@@ -263,6 +264,14 @@ export function createStatementSyncWindows(
   return windows;
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal || !signal.aborted) {
+    return;
+  }
+
+  throw new DOMException("Sync was interrupted", "AbortError");
+}
+
 function shouldFetchAccount(
   accountId: string,
   accountIds: readonly string[] | undefined,
@@ -273,6 +282,8 @@ function shouldFetchAccount(
 export async function syncLedgerWithMonobank(
   options: SyncLedgerOptions,
 ): Promise<SyncLedgerResult> {
+  throwIfAborted(options.signal);
+
   await options.db.migrate();
 
   const startedAt = nowIso();
@@ -292,9 +303,11 @@ export async function syncLedgerWithMonobank(
     await options.db.recordSyncRun(run);
   }
 
+  let stats = emptySyncStats();
+
   try {
-    let stats = emptySyncStats();
     const clientInfo = await options.adapter.getClientInfo();
+    throwIfAborted(options.signal);
 
     stats = {
       ...stats,
@@ -337,8 +350,11 @@ export async function syncLedgerWithMonobank(
           : [{ from, to }];
       let accountStats = emptyWriteStats();
       let accountItemsSeen = 0;
+      let accountCompletedWindow: { from: number; to: number } | undefined;
 
       for (const window of windows) {
+        throwIfAborted(options.signal);
+
         const statementItems = await options.adapter.getStatement({
           accountId: account.id,
           from: window.from,
@@ -363,16 +379,10 @@ export async function syncLedgerWithMonobank(
             entries,
           );
 
-          await options.db.transaction(async (tx) => {
-            await tx.setSyncCursor({
-              profile: options.profile,
-              accountId: account.id,
-              source: options.source,
-              statementFrom: window.from,
-              statementTo: window.to,
-              updatedAt: nowIso(),
-            });
-          });
+          accountCompletedWindow = {
+            from: window.from,
+            to: window.to,
+          };
         }
 
         accountItemsSeen += statementItems.length;
@@ -381,6 +391,23 @@ export async function syncLedgerWithMonobank(
       }
 
       aggregateStats = addWriteStats(aggregateStats, accountStats);
+      if (
+        !options.dryRun &&
+        accountCompletedWindow !== undefined &&
+        windows.length > 0
+      ) {
+        await options.db.transaction(async (tx) => {
+          await tx.setSyncCursor({
+            profile: options.profile,
+            accountId: account.id,
+            source: options.source,
+            statementFrom: accountCompletedWindow.from,
+            statementTo: accountCompletedWindow.to,
+            updatedAt: nowIso(),
+          });
+        });
+      }
+
       accountResults.push({
         accountId: account.id,
         from,
@@ -418,8 +445,12 @@ export async function syncLedgerWithMonobank(
   } catch (error) {
     const failedRun: SyncRun = {
       ...run,
-      status: "failed",
+      status: options.signal?.aborted ? "partial" : "failed",
       finishedAt: nowIso(),
+      itemsSeen: stats.itemsSeen,
+      itemsInserted: stats.itemsInserted,
+      itemsUpdated: stats.itemsUpdated,
+      itemsSkipped: stats.itemsSkipped,
     };
 
     if (!options.dryRun) {
