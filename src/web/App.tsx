@@ -217,7 +217,9 @@ type LogEventTypeCounts = Record<LocalActivityEventType, number>;
 const DEFAULT_LOG_FILTERS: LogEventFilterState = {
   sync_run: true,
   webhook_delivery: true,
+  ledger_write: true,
   export: true,
+  report_refresh: true,
   rule_application: true,
   warning: true,
   error: true,
@@ -227,6 +229,8 @@ const LOG_EVENT_TYPE_LABELS: Readonly<Record<LocalActivityEventType, string>> =
   {
     sync_run: "Sync runs",
     webhook_delivery: "Webhook deliveries",
+    ledger_write: "Ledger writes",
+    report_refresh: "Report refreshes",
     export: "Exports",
     rule_application: "Rule application",
     warning: "Warnings",
@@ -1253,7 +1257,9 @@ function activityEventCounts(
   const counts: LogEventTypeCounts = {
     sync_run: 0,
     webhook_delivery: 0,
+    ledger_write: 0,
     export: 0,
+    report_refresh: 0,
     rule_application: 0,
     warning: 0,
     error: 0,

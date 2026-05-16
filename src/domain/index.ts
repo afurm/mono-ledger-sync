@@ -72,6 +72,43 @@ export const syncRunStatuses = [
 
 export type SyncRunStatus = (typeof syncRunStatuses)[number];
 
+export const localActivityEventTypes = [
+  "sync_run",
+  "ledger_write",
+  "webhook_delivery",
+  "export",
+  "report_refresh",
+  "rule_application",
+  "warning",
+  "error",
+] as const;
+
+export type LocalActivityEventType = (typeof localActivityEventTypes)[number];
+
+export const localActivityEventSeverities = [
+  "info",
+  "success",
+  "partial",
+  "warning",
+  "error",
+] as const;
+
+export type LocalActivityEventSeverity =
+  (typeof localActivityEventSeverities)[number];
+
+export interface LocalActivityEvent {
+  id: string;
+  profile?: string;
+  type: LocalActivityEventType;
+  title: string;
+  details: string;
+  timestamp: string;
+  severity: LocalActivityEventSeverity;
+  source: string;
+  referenceId?: string;
+  correlationId?: string;
+}
+
 export type LedgerSource = "fixture" | "monobank";
 
 export interface Profile {
