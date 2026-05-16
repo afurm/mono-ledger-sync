@@ -794,13 +794,15 @@ async function createServices(
   const databasePath = resolveLocalLedgerDatabasePath(options);
   const adapter =
     source === "fixture"
-        ? await createBundledFixtureMonobankAdapter()
-        : monobankToken === undefined
-          ? createMissingMonobankTokenAdapter()
-          : createMonobankHttpAdapter({
-              token: monobankToken,
-              ...(monobankBaseUrl === undefined ? {} : { baseUrl: monobankBaseUrl }),
-            });
+      ? await createBundledFixtureMonobankAdapter()
+      : monobankToken === undefined
+        ? createMissingMonobankTokenAdapter()
+        : createMonobankHttpAdapter({
+            token: monobankToken,
+            ...(monobankBaseUrl === undefined
+              ? {}
+              : { baseUrl: monobankBaseUrl }),
+          });
   const db = createSqliteLedgerDb({
     filePath: databasePath,
     profile,
@@ -1713,7 +1715,9 @@ function registerLocalApiRoutes(
     async (
       request,
       reply,
-    ): Promise<LocalApiMonobankTokenStatus | { error: string; message: string }> => {
+    ): Promise<
+      LocalApiMonobankTokenStatus | { error: string; message: string }
+    > => {
       const body = request.body as { token: string } | undefined;
       const token = body?.token?.trim();
 
@@ -2307,7 +2311,9 @@ export function createLocalApiServer(
     };
   }
 
-  async function saveMonobankToken(token: string): Promise<LocalApiMonobankTokenStatus> {
+  async function saveMonobankToken(
+    token: string,
+  ): Promise<LocalApiMonobankTokenStatus> {
     monobankToken = token;
     await rebuildServices();
 
