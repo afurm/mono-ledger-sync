@@ -864,3 +864,86 @@ test("local API validates query strings and webhook payloads", async () => {
     }
   });
 });
+
+test("local API rate limits webhook delivery endpoint", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    let now = 0;
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+      now: () => now,
+      webhookRateLimitWindowMs: 50,
+      webhookRateLimitMaxRequests: 1,
+    });
+    const webhookEvent = {
+      type: "StatementItem",
+      data: {
+        account: "fixture-account-uah-main",
+        statementItem: {
+          id: "fixture-webhook-rate-limit-test",
+          time: 1775031300,
+          description: "Rate limit test transfer",
+          mcc: 4829,
+          originalMcc: 4829,
+          amount: -2500,
+          operationAmount: -2500,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97000,
+          hold: false,
+        },
+      },
+    };
+
+    try {
+      const firstResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(webhookEvent),
+      });
+      const secondResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(webhookEvent),
+      });
+      now += 60;
+      const thirdResponse = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...webhookEvent,
+          data: {
+            ...webhookEvent.data,
+            statementItem: {
+              ...webhookEvent.data.statementItem,
+              id: "fixture-webhook-rate-limit-test-after",
+            },
+          },
+        }),
+      });
+
+      assert.equal(firstResponse.statusCode, 200);
+      assert.equal(firstResponse.json().accepted, true);
+      assert.equal(secondResponse.statusCode, 429);
+      assert.equal(secondResponse.json().error, "webhook_rate_limit_exceeded");
+      assert.match(
+        secondResponse.body,
+        /Webhook endpoint rate limit exceeded/i,
+      );
+      assert.equal(thirdResponse.statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+});

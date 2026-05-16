@@ -64,6 +64,9 @@ export interface LocalApiServerOptions {
   dataDir?: string;
   openBrowser?: boolean;
   monobankToken?: string;
+  now?: () => number;
+  webhookRateLimitMaxRequests?: number;
+  webhookRateLimitWindowMs?: number;
 }
 
 export interface LocalApiServer {
@@ -470,6 +473,9 @@ const webhookEventResponseSchema = {
     processedAt: { type: "string" },
   },
 } as const;
+
+const defaultWebhookRateLimitMaxRequests = 30;
+const defaultWebhookRateLimitWindowMs = 60_000;
 
 const webhookEventsResponseSchema = {
   type: "array",
@@ -1426,6 +1432,39 @@ function registerLocalApiRoutes(
   options: LocalApiServerOptions,
   getServices: () => Promise<LocalAppServices>,
 ): void {
+  const now = options.now ?? (() => Date.now());
+  const webhookRateLimitWindowMs =
+    options.webhookRateLimitWindowMs ?? defaultWebhookRateLimitWindowMs;
+  const webhookRateLimitMaxRequests =
+    options.webhookRateLimitMaxRequests ?? defaultWebhookRateLimitMaxRequests;
+  const webhookRateLimitState = new Map<
+    string,
+    { windowStart: number; requestCount: number }
+  >();
+
+  function isWebhookRateLimited(profile: string, accountId: string): boolean {
+    const key = `${profile}:${accountId}`;
+    const current = now();
+    const state = webhookRateLimitState.get(key);
+
+    if (!state || current - state.windowStart >= webhookRateLimitWindowMs) {
+      webhookRateLimitState.set(key, {
+        windowStart: current,
+        requestCount: 1,
+      });
+
+      return false;
+    }
+
+    if (state.requestCount >= webhookRateLimitMaxRequests) {
+      return true;
+    }
+
+    state.requestCount += 1;
+
+    return false;
+  }
+
   app.get("/", async (_request, reply): Promise<string> => {
     const builtWebIndex = await readBuiltWebIndex();
 
@@ -1782,20 +1821,36 @@ function registerLocalApiRoutes(
         body: monobankWebhookBodySchema,
         response: {
           200: webhookAcceptedResponseSchema,
+          429: localApiErrorResponseSchema,
         },
       },
     },
     async (
       request,
-    ): Promise<{
-      accepted: true;
-      pullRequired: true;
-      event: StoredWebhookEvent;
-    }> => {
+      reply,
+    ): Promise<
+      | {
+          accepted: true;
+          pullRequired: true;
+          event: StoredWebhookEvent;
+        }
+      | { error: string; message: string }
+    > => {
       const services = await getServices();
+      const webhookEvent = request.body as { data: { account: string } };
 
-      assertMonobankPersonalWebhookEvent(request.body, "request.body");
-      const event = await services.db.recordWebhookEvent(request.body);
+      if (isWebhookRateLimited(services.profile, webhookEvent.data.account)) {
+        reply.code(429);
+
+        return {
+          error: "webhook_rate_limit_exceeded",
+          message:
+            "Webhook endpoint rate limit exceeded. Retry with a short delay.",
+        };
+      }
+
+      assertMonobankPersonalWebhookEvent(webhookEvent, "request.body");
+      const event = await services.db.recordWebhookEvent(webhookEvent);
 
       return {
         accepted: true,
