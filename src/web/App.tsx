@@ -4241,7 +4241,10 @@ function SyncRoute({
             <AlertTitle>Webhook events are sync hints</AlertTitle>
             <AlertDescription>
               Personal webhook payloads stay local and require reconciliation
-              before becoming ledger truth.
+              before becoming ledger truth. Until Monobank publishes a
+              verifiable webhook signature, webhook payloads are treated as
+              advisory hints and must pass local reconciliation to affect the
+              ledger.
             </AlertDescription>
           </Alert>
 
