@@ -4265,9 +4265,7 @@ function SyncRoute({
               </div>
               <div>
                 <p className="text-muted-foreground">Port</p>
-                <p className="font-medium">
-                  {snapshot?.config.webhook.port}
-                </p>
+                <p className="font-medium">{snapshot?.config.webhook.port}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Path</p>
@@ -4278,7 +4276,9 @@ function SyncRoute({
               <div>
                 <p className="text-muted-foreground">Enabled</p>
                 <Badge
-                  variant={snapshot?.config.webhook.enabled ? "default" : "secondary"}
+                  variant={
+                    snapshot?.config.webhook.enabled ? "default" : "secondary"
+                  }
                 >
                   {snapshot?.config.webhook.enabled ? "Enabled" : "Disabled"}
                 </Badge>

@@ -2144,7 +2144,10 @@ export function createLocalApiServer(
     if (Number.isFinite(parsedPort) && parsedPort > 0) {
       webhookPort = parsedPort;
     }
-    if (parsedUrl.hostname === "127.0.0.1" || parsedUrl.hostname === "localhost") {
+    if (
+      parsedUrl.hostname === "127.0.0.1" ||
+      parsedUrl.hostname === "localhost"
+    ) {
       webhookHost = parsedUrl.hostname;
     }
 

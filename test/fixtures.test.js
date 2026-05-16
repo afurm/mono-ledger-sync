@@ -431,6 +431,8 @@ test("http adapter integration works against a local mock Monobank server", asyn
   const currencyRates = await readFixture("currency-rates.json");
   const uahStatement = await readFixture("statements/uah-main-2026-04.json");
   const eurStatement = await readFixture("statements/eur-savings-2026-04.json");
+  const sleepHistory = [];
+  let now = 0;
   const recorded = [];
   const statementByAccount = {
     "fixture-account-uah-main": uahStatement,
@@ -505,6 +507,11 @@ test("http adapter integration works against a local mock Monobank server", asyn
       const adapter = createMonobankHttpAdapter({
         token,
         baseUrl,
+        now: () => now,
+        sleep: async (ms) => {
+          sleepHistory.push(ms);
+          now += ms;
+        },
       });
 
       await withTempLedger(async ({ databasePath }) => {
@@ -545,6 +552,7 @@ test("http adapter integration works against a local mock Monobank server", asyn
       );
       assert.equal(recorded[4].endpoint, "POST /personal/webhook");
       assert.equal(recorded[4].contentType, "application/json");
+      assert.deepEqual(sleepHistory, [60000, 60000, 60000]);
       assert.equal(
         recorded.some(
           (request) => request.endpoint === "GET /personal/client-info",
