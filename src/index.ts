@@ -97,6 +97,12 @@ export {
   uiFramework,
 } from "./ui/index.js";
 export {
+  formatStructuredLogLine,
+  logStructured,
+  type StructuredLogLevel,
+  type StructuredLogOptions,
+} from "./logging/index.js";
+export {
   createLedgerExport,
   exportPresetDefinitions,
   exportPresetNames,

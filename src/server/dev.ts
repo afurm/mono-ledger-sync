@@ -1,5 +1,6 @@
 import { isLedgerSource, type LedgerSource } from "../core/index.js";
 import { createLocalApiServer, type LocalApiServerOptions } from "./index.js";
+import { logStructured } from "../logging/index.js";
 
 function readHost(): "127.0.0.1" | "localhost" | undefined {
   const host = process.env.MONO_LEDGER_SYNC_HOST ?? process.env.HOST;
@@ -77,7 +78,14 @@ if (process.env.MONOBANK_TOKEN) {
 const server = createLocalApiServer(serverOptions);
 
 const url = await server.listen();
-console.log(`Local UI available at ${url}`);
+logStructured(
+  "info",
+  "Local UI available",
+  { url },
+  {
+    secrets: serverOptions.monobankToken ? [serverOptions.monobankToken] : [],
+  },
+);
 
 async function shutdown(): Promise<void> {
   await server.close();
