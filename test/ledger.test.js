@@ -54,6 +54,19 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         profile,
         limit: 20,
       });
+      const annotated = await db.updateLedgerEntryAnnotation(
+        profile,
+        transactions.entries[0].id,
+        {
+          note: "Review with accountant",
+          tags: ["tax", "tax", "  reimbursable "],
+        },
+      );
+      const annotatedTransactions = await db.listLedgerEntries({
+        profile,
+        search: "reimbursable",
+        limit: 20,
+      });
 
       assert.equal(result.run.status, "success");
       assert.equal(result.run.itemsSeen, 7);
@@ -68,6 +81,9 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
           );
         }),
       );
+      assert.equal(annotated.note, "Review with accountant");
+      assert.deepEqual(annotated.tags, ["tax", "reimbursable"]);
+      assert.equal(annotatedTransactions.total, 1);
     } finally {
       await db.close();
     }
@@ -343,6 +359,15 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/transactions?sortBy=merchant&sortDirection=asc",
       });
+      const firstTransaction = sortedMerchantResponse.json().entries[0];
+      const annotationResponse = await server.inject({
+        method: "PATCH",
+        url: `/api/ledger/transactions/${firstTransaction.id}/annotation`,
+        body: {
+          note: "Monthly review note",
+          tags: ["reviewed", "subscription"],
+        },
+      });
       const exportResponse = await server.inject({
         method: "GET",
         url: "/api/exports/ledger?format=jsonl&categoryId=groceries",
@@ -393,6 +418,12 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           .entries.map((entry) => entry.merchantName ?? entry.description)
           .sort((left, right) => left.localeCompare(right)),
       );
+      assert.equal(annotationResponse.statusCode, 200);
+      assert.equal(annotationResponse.json().note, "Monthly review note");
+      assert.deepEqual(annotationResponse.json().tags, [
+        "reviewed",
+        "subscription",
+      ]);
       assert.equal(exportResponse.statusCode, 200);
       assert.match(exportResponse.body, /fixture-stmt-2026-04-02-silpo/);
       assert.equal(syncRunsResponse.statusCode, 200);

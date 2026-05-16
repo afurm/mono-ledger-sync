@@ -53,6 +53,8 @@ export interface LedgerEntry {
   merchantName?: string;
   hold?: boolean;
   balance?: number;
+  note?: string;
+  tags?: readonly string[];
   rawStatementItemId: string;
   createdAt?: string;
   updatedAt?: string;
@@ -174,6 +176,22 @@ export async function loadLedgerTransactions(
 
   return requestJson<LedgerEntryPage>(
     `/api/ledger/transactions${queryString ? `?${queryString}` : ""}`,
+  );
+}
+
+export async function updateLedgerTransactionAnnotation(
+  id: string,
+  update: { note?: string; tags?: readonly string[] },
+): Promise<LedgerEntry> {
+  return requestJson<LedgerEntry>(
+    `/api/ledger/transactions/${encodeURIComponent(id)}/annotation`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(update),
+    },
   );
 }
 

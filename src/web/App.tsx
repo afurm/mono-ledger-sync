@@ -130,6 +130,7 @@ import {
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   runFixtureSync,
+  updateLedgerTransactionAnnotation,
 } from "./api";
 import {
   currencyLabel,
@@ -2322,10 +2323,26 @@ function webhookHintSummary(event: WebhookEvent | undefined): string {
   return `${event.type} received ${formatDateTime(event.receivedAt)}; ${processed}`;
 }
 
+function tagsInputValue(tags: readonly string[] | undefined): string {
+  return tags?.join(", ") ?? "";
+}
+
+function parseTagsInput(value: string): readonly string[] {
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
 function TransactionDetailDrawer({
   entry,
   open,
   onOpenChange,
+  onEntryUpdated,
   source,
   syncRuns = [],
   webhookEvents = [],
@@ -2333,16 +2350,51 @@ function TransactionDetailDrawer({
   entry: LedgerEntry | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onEntryUpdated: (entry: LedgerEntry) => void;
   source: LocalAppSnapshot["config"]["source"] | undefined;
   syncRuns: readonly SyncRun[] | undefined;
   webhookEvents: readonly WebhookEvent[] | undefined;
 }) {
+  const [note, setNote] = useState("");
+  const [tags, setTags] = useState("");
+  const [saveState, setSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
   const title = entry?.merchantName ?? entry?.description ?? "Transaction";
   const status = entry?.hold ? "Hold" : "Posted";
   const latestRun = syncRuns[0];
   const webhookHint = entry
     ? matchingWebhookHint(entry, webhookEvents)
     : undefined;
+  const annotationChanged =
+    entry !== undefined &&
+    (note !== (entry.note ?? "") || tags !== tagsInputValue(entry.tags));
+
+  useEffect(() => {
+    setNote(entry?.note ?? "");
+    setTags(tagsInputValue(entry?.tags));
+    setSaveState("idle");
+  }, [entry]);
+
+  async function saveAnnotation(): Promise<void> {
+    if (!entry || saveState === "saving") {
+      return;
+    }
+
+    setSaveState("saving");
+
+    try {
+      const updatedEntry = await updateLedgerTransactionAnnotation(entry.id, {
+        note,
+        tags: parseTagsInput(tags),
+      });
+
+      onEntryUpdated(updatedEntry);
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -2437,6 +2489,71 @@ function TransactionDetailDrawer({
                   value={transactionCategoryHistory(entry)}
                 />
               </dl>
+            </section>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium text-foreground">
+                Local annotations
+              </h3>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Note
+                </span>
+                <textarea
+                  className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  maxLength={2000}
+                  placeholder="Local review note"
+                  value={note}
+                  onChange={(event) => {
+                    setNote(event.target.value);
+                    setSaveState("idle");
+                  }}
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Tags
+                </span>
+                <Input
+                  placeholder="tax, travel, reimbursable"
+                  value={tags}
+                  onChange={(event) => {
+                    setTags(event.target.value);
+                    setSaveState("idle");
+                  }}
+                />
+              </label>
+              {entry.tags && entry.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {entry.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    void saveAnnotation();
+                  }}
+                  disabled={!annotationChanged || saveState === "saving"}
+                >
+                  <StickyNoteIcon data-icon="inline-start" />
+                  {saveState === "saving" ? "Saving" : "Save annotations"}
+                </Button>
+                {saveState === "saved" && (
+                  <span className="text-xs text-muted-foreground">Saved</span>
+                )}
+                {saveState === "error" && (
+                  <span className="text-xs text-destructive">
+                    Could not save annotations
+                  </span>
+                )}
+              </div>
             </section>
 
             <Separator />
@@ -2682,11 +2799,11 @@ function TransactionRowActions({
             <StoreIcon />
             Edit merchant
           </DropdownMenuItem>
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onSelect={() => onViewDetails(entry)}>
             <StickyNoteIcon />
             Add note
           </DropdownMenuItem>
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onSelect={() => onViewDetails(entry)}>
             <TagsIcon />
             Add tags
           </DropdownMenuItem>
@@ -3082,6 +3199,25 @@ function TransactionsRoute({
     writeTransactionFiltersToHash(nextFilters);
   }
 
+  function handleTransactionUpdated(entry: LedgerEntry): void {
+    setSelectedTransaction(entry);
+    setPageState((current) => {
+      if (!current.data) {
+        return current;
+      }
+
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          entries: current.data.entries.map((item) =>
+            item.id === entry.id ? entry : item,
+          ),
+        },
+      };
+    });
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -3404,6 +3540,7 @@ function TransactionsRoute({
           source={snapshot?.config.source}
           syncRuns={snapshot?.syncRuns}
           webhookEvents={snapshot?.webhookEvents}
+          onEntryUpdated={handleTransactionUpdated}
           onOpenChange={(open) => {
             if (!open) {
               setSelectedTransaction(undefined);
