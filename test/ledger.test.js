@@ -62,6 +62,13 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
           tags: ["tax", "tax", "  reimbursable "],
         },
       );
+      const noteOnlyUpdate = await db.updateLedgerEntryAnnotation(
+        profile,
+        transactions.entries[0].id,
+        {
+          note: "Updated review note",
+        },
+      );
       const annotatedTransactions = await db.listLedgerEntries({
         profile,
         search: "reimbursable",
@@ -83,6 +90,8 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       );
       assert.equal(annotated.note, "Review with accountant");
       assert.deepEqual(annotated.tags, ["tax", "reimbursable"]);
+      assert.equal(noteOnlyUpdate.note, "Updated review note");
+      assert.deepEqual(noteOnlyUpdate.tags, ["tax", "reimbursable"]);
       assert.equal(annotatedTransactions.total, 1);
     } finally {
       await db.close();

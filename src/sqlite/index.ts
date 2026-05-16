@@ -396,17 +396,23 @@ function parseTags(value: string | null): readonly string[] | undefined {
 }
 
 function normalizeLedgerEntryAnnotation(update: LedgerEntryAnnotationUpdate): {
-  note: string | null;
-  tagsJson: string | null;
+  note: string | null | undefined;
+  tagsJson: string | null | undefined;
 } {
-  const note = update.note?.trim() ?? "";
-  const tags = [
-    ...new Set(update.tags?.map((tag) => tag.trim()).filter(Boolean) ?? []),
-  ];
+  const note = update.note === undefined ? undefined : update.note.trim();
+  const tags =
+    update.tags === undefined
+      ? undefined
+      : [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))];
 
   return {
-    note: note === "" ? null : note,
-    tagsJson: tags.length === 0 ? null : JSON.stringify(tags),
+    note: note === undefined ? undefined : note === "" ? null : note,
+    tagsJson:
+      tags === undefined
+        ? undefined
+        : tags.length === 0
+          ? null
+          : JSON.stringify(tags),
   };
 }
 
@@ -1049,15 +1055,20 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .prepare(
         `
           UPDATE ledger_entries
-          SET note = @note, tags_json = @tagsJson, updated_at = @updatedAt
+          SET
+            note = CASE WHEN @hasNote = 1 THEN @note ELSE note END,
+            tags_json = CASE WHEN @hasTags = 1 THEN @tagsJson ELSE tags_json END,
+            updated_at = @updatedAt
           WHERE profile = @profile AND id = @id
         `,
       )
       .run({
         profile,
         id,
-        note: annotation.note,
-        tagsJson: annotation.tagsJson,
+        hasNote: annotation.note === undefined ? 0 : 1,
+        note: annotation.note ?? null,
+        hasTags: annotation.tagsJson === undefined ? 0 : 1,
+        tagsJson: annotation.tagsJson ?? null,
         updatedAt: nowIso(),
       });
 

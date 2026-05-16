@@ -731,11 +731,11 @@ function readLedgerEntryAnnotationUpdate(
   const record = body as Record<string, unknown>;
   const update: LedgerEntryAnnotationUpdate = {};
 
-  if (typeof record.note === "string") {
+  if (Object.hasOwn(record, "note") && typeof record.note === "string") {
     update.note = record.note;
   }
 
-  if (Array.isArray(record.tags)) {
+  if (Object.hasOwn(record, "tags") && Array.isArray(record.tags)) {
     update.tags = record.tags.filter((tag): tag is string => {
       return typeof tag === "string";
     });
