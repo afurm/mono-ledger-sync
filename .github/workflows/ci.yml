@@ -18,6 +18,8 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove Gitleaks report artifact
+        run: rm -f results.sarif
       - uses: actions/setup-node@v4
         with:
           node-version: 22
