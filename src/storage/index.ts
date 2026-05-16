@@ -1,151 +1,52 @@
-export type SyncRunStatus =
-  | "queued"
-  | "running"
-  | "success"
-  | "partial"
-  | "failed";
+import type {
+  AccountBalance,
+  LedgerAccount,
+  LedgerEntry,
+  LedgerEntryAnnotationUpdate,
+  LedgerEntryPage,
+  LedgerEntryQuery,
+  LedgerEntrySplitPlanUpdate,
+  LedgerSummary,
+  LedgerWriteStats,
+  SyncCursor,
+  SyncRun,
+  SyncRunStatus,
+  StoredWebhookEvent,
+  ledgerEntrySortDirections,
+  ledgerEntrySortFields,
+} from "../domain/index.js";
 
-export const ledgerEntrySortFields = [
-  "time",
-  "merchant",
-  "amount",
-  "account",
-  "category",
-  "status",
-] as const;
+export type {
+  AccountBalance,
+  LedgerAccount,
+  LedgerEntry,
+  LedgerEntryAnnotationUpdate,
+  LedgerEntrySplitPlanUpdate,
+  LedgerEntryPage,
+  LedgerEntryQuery,
+  LedgerSummary,
+  SyncCursor,
+  SyncRun,
+  SyncRunStatus,
+  StoredWebhookEvent,
+  LedgerWriteStats,
+} from "../domain/index.js";
+
+import type {
+  MonobankAccount,
+  MonobankJar,
+  MonobankStatementItem,
+} from "../monobank/index.js";
 
 export type LedgerEntrySortField = (typeof ledgerEntrySortFields)[number];
-
-export const ledgerEntrySortDirections = ["asc", "desc"] as const;
-
 export type LedgerEntrySortDirection =
   (typeof ledgerEntrySortDirections)[number];
 
-export interface AccountBalance {
-  accountId: string;
-  currencyCode: number;
-  balance: number;
-  creditLimit?: number;
-}
-
-export interface LedgerAccount {
-  id: string;
-  type: string;
-  currencyCode: number;
-  balance: number;
-  creditLimit: number;
-  maskedPan?: readonly string[];
-  updatedAt: string;
-}
-
-export interface LedgerEntry {
-  id: string;
-  accountId: string;
-  time: number;
-  description: string;
-  amount: number;
-  operationAmount?: number;
-  currencyCode: number;
-  categoryId?: string;
-  categoryName?: string;
-  merchantName?: string;
-  hold?: boolean;
-  balance?: number;
-  note?: string;
-  tags?: readonly string[];
-  splitPlan?: readonly {
-    category: string;
-    amount: number;
-  }[];
-  rawStatementItemId: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface LedgerEntryAnnotationUpdate {
-  note?: string;
-  tags?: readonly string[];
-}
-
-export interface LedgerEntrySplitPlanUpdate {
-  lines?: readonly {
-    category: string;
-    amount: number;
-  }[];
-}
-
-export interface LedgerEntryQuery {
-  profile: string;
-  accountId?: string;
-  categoryId?: string;
-  merchantName?: string;
-  status?: "hold" | "posted";
-  amountMin?: number;
-  amountMax?: number;
-  search?: string;
-  from?: number;
-  to?: number;
-  limit?: number;
-  offset?: number;
-  sortBy?: LedgerEntrySortField;
-  sortDirection?: LedgerEntrySortDirection;
-}
-
-export interface LedgerEntryPage {
-  entries: readonly LedgerEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export interface LedgerSummary {
-  profile: string;
-  accounts: number;
-  ledgerEntries: number;
-  income: number;
-  expenses: number;
-  net: number;
-  currencies: readonly number[];
-  lastSyncedAt?: string;
-}
-
-export interface SyncCursor {
-  profile: string;
-  accountId: string;
-  source: "fixture" | "monobank";
-  statementFrom: number;
-  statementTo: number;
-  updatedAt: string;
-}
-
-export interface SyncRun {
-  id: string;
-  profile: string;
-  source: "fixture" | "monobank";
-  status: SyncRunStatus;
-  startedAt: string;
-  finishedAt?: string;
-  itemsSeen: number;
-  itemsInserted: number;
-  itemsUpdated: number;
-  itemsSkipped: number;
-}
-
-export interface LedgerWriteStats {
-  inserted: number;
-  updated: number;
-  skipped: number;
-}
-
-export interface StoredWebhookEvent {
-  id: string;
-  profile: string;
-  accountId: string;
-  type: string;
-  statementItemId?: string;
-  receivedAt: string;
-  processedAt?: string;
-}
+export {
+  ledgerEntrySortFields,
+  ledgerEntrySortDirections,
+  syncRunStatuses,
+} from "../domain/index.js";
 
 export interface LedgerDbTransaction {
   upsertLedgerEntries(entries: readonly LedgerEntry[]): Promise<void>;

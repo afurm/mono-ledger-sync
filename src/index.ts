@@ -22,6 +22,18 @@ export {
   type SyncRun,
 } from "./storage/index.js";
 export {
+  type AccountBalance as DomainAccountBalance,
+  type Category,
+  type Budget,
+  type LedgerAccount as DomainLedgerAccount,
+  type LedgerEntry as DomainLedgerEntry,
+  type MonobankRawEvent,
+  type Profile,
+  type RecurringItem,
+  type SyncCursor as DomainSyncCursor,
+  type SyncRun as DomainSyncRun,
+} from "./domain/index.js";
+export {
   bundledMonobankFixturesDir,
   createBundledFixtureMonobankAdapter,
   createFixtureMonobankAdapter,

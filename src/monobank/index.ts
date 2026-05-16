@@ -3,81 +3,32 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { redactSensitiveText } from "../privacy/index.js";
+import type {
+  MonobankAccount as DomainMonobankAccount,
+  MonobankClientInfo as DomainMonobankClientInfo,
+  MonobankCurrencyRate as DomainMonobankCurrencyRate,
+  MonobankErrorResponse as DomainMonobankErrorResponse,
+  MonobankJar as DomainMonobankJar,
+  MonobankManagedClient as DomainMonobankManagedClient,
+  MonobankPersonalWebhookEvent as DomainMonobankPersonalWebhookEvent,
+  MonobankStatementItem as DomainMonobankStatementItem,
+  MonobankStatementItemWebhookEvent as DomainMonobankStatementItemWebhookEvent,
+  StatementWindow as DomainStatementWindow,
+} from "../domain/index.js";
 
-export interface MonobankAccount {
-  id: string;
-  sendId?: string;
-  currencyCode: number;
-  cashbackType?: string;
-  balance: number;
-  creditLimit: number;
-  type: string;
-  maskedPan?: readonly string[];
-  iban?: string;
-}
+export type MonobankAccount = DomainMonobankAccount;
 
-export interface MonobankJar {
-  id: string;
-  sendId?: string;
-  title: string;
-  description: string;
-  currencyCode: number;
-  balance: number;
-  goal: number;
-}
+export type MonobankJar = DomainMonobankJar;
 
-export interface MonobankManagedClient {
-  clientId: string;
-  tin?: number;
-  name: string;
-  accounts: readonly MonobankAccount[];
-}
+export type MonobankManagedClient = DomainMonobankManagedClient;
 
-export interface MonobankClientInfo {
-  clientId: string;
-  name: string;
-  webHookUrl?: string;
-  permissions?: string;
-  accounts: readonly MonobankAccount[];
-  jars?: readonly MonobankJar[];
-  managedClients?: readonly MonobankManagedClient[];
-}
+export type MonobankClientInfo = DomainMonobankClientInfo;
 
-export interface MonobankStatementItem {
-  id: string;
-  time: number;
-  description: string;
-  mcc: number;
-  originalMcc: number;
-  amount: number;
-  operationAmount: number;
-  currencyCode: number;
-  commissionRate: number;
-  cashbackAmount: number;
-  balance: number;
-  hold: boolean;
-  comment?: string;
-  receiptId?: string;
-  invoiceId?: string;
-  counterEdrpou?: string;
-  counterIban?: string;
-  counterName?: string;
-}
+export type MonobankStatementItem = DomainMonobankStatementItem;
 
-export interface MonobankCurrencyRate {
-  currencyCodeA: number;
-  currencyCodeB: number;
-  date: number;
-  rateBuy?: number;
-  rateSell?: number;
-  rateCross?: number;
-}
+export type MonobankCurrencyRate = DomainMonobankCurrencyRate;
 
-export interface StatementWindow {
-  accountId: string;
-  from: number;
-  to: number;
-}
+export type StatementWindow = DomainStatementWindow;
 
 export interface MonobankAdapter {
   getClientInfo(): Promise<MonobankClientInfo>;
@@ -88,22 +39,12 @@ export interface MonobankAdapter {
   setWebhook(url: string): Promise<void>;
 }
 
-export interface MonobankStatementItemWebhookEvent {
-  type: "StatementItem";
-  data: {
-    account: string;
-    statementItem: MonobankStatementItem;
-  };
-}
+export type MonobankStatementItemWebhookEvent =
+  DomainMonobankStatementItemWebhookEvent;
 
 export type MonobankPersonalWebhookEvent = MonobankStatementItemWebhookEvent;
 
-export interface MonobankErrorResponse {
-  statusCode: number;
-  code: string;
-  message: string;
-  retryAfterSeconds?: number;
-}
+export type MonobankErrorResponse = DomainMonobankErrorResponse;
 
 export interface MonobankFixtureSet {
   clientInfo: MonobankClientInfo;

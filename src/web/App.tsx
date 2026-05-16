@@ -127,6 +127,8 @@ import {
   type LedgerTransactionFilters,
   type LedgerTransactionSortDirection,
   type LedgerTransactionSortField,
+  type LocalActivityEvent,
+  type LocalActivityEventType,
   type LocalAppSnapshot,
   type SyncRun,
   type WebhookEvent,
@@ -208,6 +210,28 @@ interface TransactionFilterPreset {
   label: string;
   buildFilters: () => TransactionFilterFormState;
 }
+
+type LogEventFilterState = Record<LocalActivityEventType, boolean>;
+type LogEventTypeCounts = Record<LocalActivityEventType, number>;
+
+const DEFAULT_LOG_FILTERS: LogEventFilterState = {
+  sync_run: true,
+  webhook_delivery: true,
+  export: true,
+  rule_application: true,
+  warning: true,
+  error: true,
+};
+
+const LOG_EVENT_TYPE_LABELS: Readonly<Record<LocalActivityEventType, string>> =
+  {
+    sync_run: "Sync runs",
+    webhook_delivery: "Webhook deliveries",
+    export: "Exports",
+    rule_application: "Rule application",
+    warning: "Warnings",
+    error: "Errors",
+  };
 
 const TRANSACTION_PAGE_SIZE = 25;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
@@ -800,6 +824,24 @@ function statusVariant(
   return "secondary";
 }
 
+function activityEventTypeVariant(
+  type: LocalActivityEventType,
+): "default" | "secondary" | "destructive" {
+  switch (type) {
+    case "error":
+      return "destructive";
+    case "warning":
+      return "secondary";
+    case "sync_run":
+    case "webhook_delivery":
+    case "export":
+    case "rule_application":
+      return "default";
+    default:
+      return "secondary";
+  }
+}
+
 function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
   return lastSyncedAt
     ? `Updated ${formatDateTime(lastSyncedAt)}`
@@ -1199,6 +1241,188 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function activityEventCounts(
+  events: readonly LocalActivityEvent[],
+): LogEventTypeCounts {
+  const counts: LogEventTypeCounts = {
+    sync_run: 0,
+    webhook_delivery: 0,
+    export: 0,
+    rule_application: 0,
+    warning: 0,
+    error: 0,
+  };
+
+  for (const event of events) {
+    counts[event.type] += 1;
+  }
+
+  return counts;
+}
+
+function LogsEventRow({ event }: { event: LocalActivityEvent }) {
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <CardTitle className="text-base">{event.title}</CardTitle>
+            <CardDescription>
+              {formatDateTime(event.timestamp)} · {event.source}
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Badge variant={activityEventTypeVariant(event.type)}>
+              {LOG_EVENT_TYPE_LABELS[event.type]}
+            </Badge>
+            <Badge variant={statusVariant(event.severity)}>
+              {event.severity}
+            </Badge>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">{event.details}</p>
+        {event.referenceId ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Reference {event.referenceId}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LogsRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+  const [search, setSearch] = useState("");
+  const [activeFilters, setActiveFilters] =
+    useState<LogEventFilterState>(DEFAULT_LOG_FILTERS);
+
+  const events = snapshot?.activityEvents ?? [];
+  const eventCounts = useMemo(() => activityEventCounts(events), [events]);
+  const activeFiltersCount = useMemo(
+    () => Object.values(activeFilters).filter(Boolean).length,
+    [activeFilters],
+  );
+  const searchValue = search.trim().toLowerCase();
+
+  const visibleEvents = useMemo(() => {
+    if (events.length === 0) {
+      return [];
+    }
+
+    return events.filter((event) => {
+      if (!activeFilters[event.type]) {
+        return false;
+      }
+
+      if (!searchValue) {
+        return true;
+      }
+
+      const text =
+        `${event.title} ${event.details} ${event.source} ${event.referenceId ?? ""}`.toLowerCase();
+
+      return text.includes(searchValue);
+    });
+  }, [events, activeFilters, searchValue]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Diagnostics timeline</CardTitle>
+          <CardDescription>
+            Filtered sync, webhook, export, rule, warning, and error events from
+            the local activity stream.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {(
+              Object.keys(
+                DEFAULT_LOG_FILTERS,
+              ) as readonly LocalActivityEventType[]
+            ).map((type) => (
+              <Button
+                key={type}
+                size="sm"
+                type="button"
+                variant={activeFilters[type] ? "default" : "outline"}
+                onClick={() =>
+                  setActiveFilters((current) => ({
+                    ...current,
+                    [type]: !current[type],
+                  }))
+                }
+              >
+                {LOG_EVENT_TYPE_LABELS[type]}
+                <Badge
+                  className="ml-2"
+                  variant={activeFilters[type] ? "secondary" : "outline"}
+                >
+                  {eventCounts[type]}
+                </Badge>
+              </Button>
+            ))}
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              Search event messages
+            </label>
+            <Input
+              type="search"
+              placeholder="Search by title, details, or reference"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {activeFiltersCount === 0
+              ? "No filters enabled"
+              : `${activeFiltersCount} of ${Object.keys(DEFAULT_LOG_FILTERS).length} filter groups enabled`}
+          </p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Latest local activity</CardTitle>
+          <CardDescription>
+            {events.length === 0
+              ? "No activity events yet"
+              : `${visibleEvents.length} event(s) match current filters`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {events.length === 0 ? (
+            <Alert>
+              <AlertCircleIcon />
+              <AlertTitle>No activity yet</AlertTitle>
+              <AlertDescription>
+                Run sync and webhook reconciliation to seed local diagnostics.
+              </AlertDescription>
+            </Alert>
+          ) : visibleEvents.length === 0 ? (
+            <Alert>
+              <AlertCircleIcon />
+              <AlertTitle>No matching events</AlertTitle>
+              <AlertDescription>
+                Adjust search text or enable filters to show matching events.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="grid gap-3">
+              {visibleEvents.map((event) => (
+                <LogsEventRow event={event} key={event.id} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -5143,6 +5367,7 @@ function RouteContent({
       return <RulesRoute snapshot={snapshot} />;
     case "exports":
     case "logs":
+      return <LogsRoute snapshot={snapshot} />;
     case "settings":
     case "help":
       return <PlaceholderRoute routeId={activeRoute} />;
