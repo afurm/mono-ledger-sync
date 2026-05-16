@@ -524,6 +524,10 @@ const webhookEventResponseSchema = {
     accountId: { type: "string" },
     type: { type: "string" },
     statementItemId: { type: "string" },
+    status: {
+      type: "string",
+      enum: ["pending", "processed", "duplicate", "ignored", "failed"],
+    },
     receivedAt: { type: "string" },
     processedAt: { type: "string" },
   },

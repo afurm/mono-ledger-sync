@@ -2,6 +2,7 @@ import type {
   LocalActivityEvent as DomainLocalActivityEvent,
   LocalActivityEventSeverity as DomainLocalActivityEventSeverity,
   LocalActivityEventType as DomainLocalActivityEventType,
+  WebhookEventStatus as DomainWebhookEventStatus,
 } from "../domain/index.js";
 
 export interface LocalApiHealth {
@@ -141,6 +142,7 @@ export interface WebhookEvent {
   accountId: string;
   type: string;
   statementItemId?: string;
+  status: DomainWebhookEventStatus;
   receivedAt: string;
   processedAt?: string;
 }
@@ -276,6 +278,43 @@ function formatSyncRunTimestamp(run: SyncRun): string {
     : (run.finishedAt ?? run.startedAt);
 }
 
+function webhookDeliveryPending(status: DomainWebhookEventStatus): boolean {
+  return status === "pending";
+}
+
+function webhookDeliverySeverity(
+  status: DomainWebhookEventStatus,
+): LocalActivityEventSeverity {
+  if (status === "failed") {
+    return "error";
+  }
+
+  if (status === "processed") {
+    return "success";
+  }
+
+  if (status === "duplicate") {
+    return "info";
+  }
+
+  return "warning";
+}
+
+function webhookDeliveryLabel(status: DomainWebhookEventStatus): string {
+  switch (status) {
+    case "processed":
+      return "Webhook reconciled";
+    case "pending":
+      return "Webhook not reconciled";
+    case "duplicate":
+      return "Webhook duplicate";
+    case "ignored":
+      return "Webhook ignored";
+    case "failed":
+      return "Webhook failed";
+  }
+}
+
 export function buildLocalActivityEvents(
   syncRuns: readonly SyncRun[],
   webhookEvents: readonly WebhookEvent[],
@@ -326,23 +365,50 @@ export function buildLocalActivityEvents(
   }
 
   for (const event of webhookEvents) {
+    const status = event.status;
     events.push({
       id: `webhook:${event.id}`,
       type: "webhook_delivery",
       title: `Webhook ${event.type}`,
       details: `account ${event.accountId}${event.statementItemId ? ` • statement ${event.statementItemId}` : ""}`,
       timestamp: event.receivedAt,
-      severity: event.processedAt ? "success" : "warning",
+      severity: webhookDeliverySeverity(status),
       source: event.accountId,
       referenceId: event.id,
     });
 
-    if (!event.processedAt) {
+    if (webhookDeliveryPending(status)) {
       events.push({
         id: `webhook:${event.id}:warning`,
         type: "warning",
-        title: "Webhook not reconciled",
+        title: webhookDeliveryLabel(status),
         details: `Pending pull for ${event.accountId} ${event.statementItemId ? `statement ${event.statementItemId}` : ""}`,
+        timestamp: event.receivedAt,
+        severity: "warning",
+        source: event.accountId,
+        referenceId: event.id,
+      });
+    }
+
+    if (status === "failed") {
+      events.push({
+        id: `webhook:${event.id}:error`,
+        type: "error",
+        title: webhookDeliveryLabel(status),
+        details: `Webhook event for ${event.accountId} failed`,
+        timestamp: event.receivedAt,
+        severity: "error",
+        source: event.accountId,
+        referenceId: event.id,
+      });
+    }
+
+    if (status === "ignored") {
+      events.push({
+        id: `webhook:${event.id}:ignored`,
+        type: "warning",
+        title: webhookDeliveryLabel(status),
+        details: `Webhook event for ${event.accountId} was ignored`,
         timestamp: event.receivedAt,
         severity: "warning",
         source: event.accountId,

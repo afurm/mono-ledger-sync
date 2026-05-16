@@ -872,6 +872,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0004_sync_run_stats_columns",
         "0005_webhook_delivery_dedup",
         "0006_categories",
+        "0007_webhook_event_status",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1418,6 +1419,7 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
           type: "StatementItem",
           statementItemId: "fixture-webhook-duplicate-test",
           receivedAt: firstResponse.json().event.receivedAt,
+          status: "pending",
           ...(firstResponse.json().event.processedAt === undefined
             ? {}
             : { processedAt: firstResponse.json().event.processedAt }),
@@ -1428,11 +1430,13 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
         firstResponse.json().event.id,
         "duplicate delivery should not create a new webhook event",
       );
+      assert.equal(secondResponse.json().event.status, "duplicate");
       assert.notEqual(
         thirdResponse.json().event.id,
         firstResponse.json().event.id,
         "different delivery metadata should create separate webhook events",
       );
+      assert.equal(thirdResponse.json().event.status, "pending");
       assert.equal(webhookEventsResponse.statusCode, 200);
       assert.equal(webhookBody.length, 2);
     } finally {
