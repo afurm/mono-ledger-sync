@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { logStructured } from "../logging/index.js";
+
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const apiHost =
   process.env.MONO_LEDGER_SYNC_HOST === "localhost" ? "localhost" : "127.0.0.1";
@@ -78,7 +80,17 @@ apiServer.once("exit", (code) => {
 try {
   await waitForApi();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : error);
+  logStructured(
+    "error",
+    "Local API did not become ready",
+    {
+      apiHealthUrl,
+      error: error instanceof Error ? error.message : String(error),
+    },
+    {
+      secrets: process.env.MONOBANK_TOKEN ? [process.env.MONOBANK_TOKEN] : [],
+    },
+  );
   shutdown(1);
 }
 
