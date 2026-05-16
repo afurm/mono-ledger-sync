@@ -11,12 +11,21 @@ export interface LocalApiHealth {
   };
 }
 
+export interface LocalApiWebhookSettings {
+  enabled: boolean;
+  path: string;
+  host: string;
+  port: number;
+  url: string;
+}
+
 export interface LocalApiAppConfig {
   profile: string;
   source: "fixture" | "monobank";
   dataDir: string;
   databasePath: string;
   localOnly: true;
+  webhook: LocalApiWebhookSettings;
 }
 
 export interface LedgerSummary {

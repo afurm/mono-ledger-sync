@@ -59,6 +59,35 @@ test("serves local API health through Fastify", async () => {
   }
 });
 
+test("exposes local webhook settings in app config", async () => {
+  const server = createLocalApiServer({
+    profile: "demo",
+    source: "fixture",
+    host: "127.0.0.1",
+    port: 55443,
+  });
+
+  try {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/app/config",
+    });
+    const body = response.json();
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.webhook.enabled, true);
+    assert.equal(body.webhook.path, "/api/webhooks/monobank");
+    assert.equal(body.webhook.host, "127.0.0.1");
+    assert.equal(body.webhook.port, 55443);
+    assert.equal(
+      body.webhook.url,
+      "http://127.0.0.1:55443/api/webhooks/monobank",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("serves the built local web UI when available", async () => {
   const server = createLocalApiServer({
     profile: "demo",
