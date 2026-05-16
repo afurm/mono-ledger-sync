@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +20,10 @@ import {
 } from "../dist/monobank/index.js";
 import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
 import { syncLedgerWithMonobank } from "../dist/sync/index.js";
+import {
+  createMonobankMockHttpHandler,
+  withMockMonobankServer,
+} from "./monobank-mock-server.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -108,26 +111,6 @@ async function readFixture(relativePath) {
   const text = await readFile(path.join(fixturesDir, relativePath), "utf8");
 
   return JSON.parse(text);
-}
-
-async function withMockMonobankServer(handler, callback) {
-  const server = createServer(handler);
-
-  try {
-    const port = await new Promise((resolve) => {
-      server.listen(0, "127.0.0.1", () => {
-        const address = server.address();
-
-        resolve(address.port);
-      });
-    });
-
-    return await callback(`http://127.0.0.1:${port}`);
-  } finally {
-    await new Promise((resolve) => {
-      server.close(resolve);
-    });
-  }
 }
 
 async function withTempLedger(callback) {
@@ -587,127 +570,144 @@ test("http adapter integration works against a local mock Monobank server", asyn
     "fixture-account-empty": [],
   };
 
-  await withMockMonobankServer(
-    async (request, response) => {
-      const requestUrl = new URL(request.url, "http://127.0.0.1");
-      const pathname = requestUrl.pathname;
-      const endpoint = `${request.method} ${pathname}`;
+  const handler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+    statementByAccount,
+    onRequest: ({ endpoint, headers }) => {
       recorded.push({
         endpoint,
-        token: request.headers["x-token"],
-        contentType: request.headers["content-type"],
+        token: headers["x-token"],
+        contentType: headers["content-type"],
       });
-
-      if (pathname === "/personal/client-info") {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(clientInfo));
-        return;
-      }
-
-      if (pathname === "/bank/currency") {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(currencyRates));
-        return;
-      }
-
-      if (pathname.startsWith("/personal/statement/")) {
-        const [segmentSource, segmentStatements, accountId, from, to] = pathname
-          .split("/")
-          .filter(Boolean);
-
-        if (
-          segmentSource !== "personal" ||
-          segmentStatements !== "statement" ||
-          !accountId ||
-          !from ||
-          !to
-        ) {
-          response.writeHead(404, { "content-type": "application/json" });
-          response.end('{"message":"not found"}');
-          return;
-        }
-
-        const fromSec = Number(from);
-        const toSec = Number(to);
-        const sourceStatements =
-          statementByAccount[decodeURIComponent(accountId)] ?? [];
-        const filtered = sourceStatements.filter(
-          (statementItem) =>
-            statementItem.time >= fromSec && statementItem.time <= toSec,
-        );
-
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(filtered));
-        return;
-      }
-
-      if (pathname === "/personal/webhook" && request.method === "POST") {
-        response.writeHead(204);
-        response.end();
-        return;
-      }
-
-      response.writeHead(404, { "content-type": "application/json" });
-      response.end('{"message":"not found"}');
     },
-    async (baseUrl) => {
-      const adapter = createMonobankHttpAdapter({
-        token,
-        baseUrl,
-        now: () => now,
-        sleep: async (ms) => {
-          sleepHistory.push(ms);
-          now += ms;
-        },
+  });
+
+  await withMockMonobankServer(handler, async (baseUrl) => {
+    const adapter = createMonobankHttpAdapter({
+      token,
+      baseUrl,
+      now: () => now,
+      sleep: async (ms) => {
+        sleepHistory.push(ms);
+        now += ms;
+      },
+    });
+
+    await withTempLedger(async ({ databasePath }) => {
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "demo",
       });
 
-      await withTempLedger(async ({ databasePath }) => {
-        const db = createSqliteLedgerDb({
-          filePath: databasePath,
+      try {
+        const result = await syncLedgerWithMonobank({
           profile: "demo",
+          source: "monobank",
+          adapter,
+          db,
+          from: 1_775_011_600,
+          to: 1_777_593_599,
         });
+        const summary = await db.getDatabaseInfo("demo");
+        const accounts = await db.listAccounts("demo");
 
-        try {
-          const result = await syncLedgerWithMonobank({
-            profile: "demo",
-            source: "monobank",
-            adapter,
-            db,
-            from: 1_775_011_600,
-            to: 1_777_593_599,
-          });
-          const summary = await db.getDatabaseInfo("demo");
-          const accounts = await db.listAccounts("demo");
+        assert.equal(result.run.status, "success");
+        assert.equal(result.accounts.length, 2);
+        assert.equal(accounts.length, 2);
+        assert.equal(summary.accounts, 2);
+        assert.equal(summary.ledgerEntries, 7);
+        assert.equal(summary.syncRuns, 1);
+        assert.equal(summary.webhookEvents, 0);
+        await adapter.setWebhook("https://localhost.example/webhook");
+      } finally {
+        await db.close();
+      }
+    });
 
-          assert.equal(result.run.status, "success");
-          assert.equal(result.accounts.length, 2);
-          assert.equal(accounts.length, 2);
-          assert.equal(summary.accounts, 2);
-          assert.equal(summary.ledgerEntries, 7);
-          assert.equal(summary.syncRuns, 1);
-          assert.equal(summary.webhookEvents, 0);
-          await adapter.setWebhook("https://localhost.example/webhook");
-        } finally {
-          await db.close();
-        }
-      });
+    assert.equal(recorded.length, 5);
+    assert.deepEqual(
+      recorded.map((request) => request.token),
+      [token, token, token, token, token],
+    );
+    assert.equal(recorded[4].endpoint, "POST /personal/webhook");
+    assert.equal(recorded[4].contentType, "application/json");
+    assert.deepEqual(sleepHistory, [60000, 60000, 60000]);
+    assert.equal(
+      recorded.some(
+        (request) => request.endpoint === "GET /personal/client-info",
+      ),
+      true,
+    );
+  });
+});
 
-      assert.equal(recorded.length, 5);
-      assert.deepEqual(
-        recorded.map((request) => request.token),
-        [token, token, token, token, token],
-      );
-      assert.equal(recorded[4].endpoint, "POST /personal/webhook");
-      assert.equal(recorded[4].contentType, "application/json");
-      assert.deepEqual(sleepHistory, [60000, 60000, 60000]);
-      assert.equal(
-        recorded.some(
-          (request) => request.endpoint === "GET /personal/client-info",
-        ),
-        true,
-      );
+test("monobank mock server helper serves standard fixture endpoints", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const uahStatement = await readFixture("statements/uah-main-2026-04.json");
+  const requestLog = [];
+
+  const handler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+    statementByAccount: {
+      "fixture-account-uah-main": uahStatement,
     },
-  );
+    onRequest: ({ endpoint }) => {
+      requestLog.push(endpoint);
+    },
+  });
+
+  await withMockMonobankServer(handler, async (baseUrl) => {
+    const clientInfoResponse = await fetch(`${baseUrl}/personal/client-info`);
+    const ratesResponse = await fetch(`${baseUrl}/bank/currency`);
+    const statementResponse = await fetch(
+      `${baseUrl}/personal/statement/fixture-account-uah-main/1775001600/1777593599`,
+    );
+    const webhookResponse = await fetch(`${baseUrl}/personal/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "StatementItem",
+        data: {
+          account: "fixture-account-uah-main",
+          statementItem: {
+            id: "fixture-webhook-large-001",
+            time: 1775031300,
+            description: "Webhook deposit",
+            mcc: 4829,
+            originalMcc: 4829,
+            amount: 2500,
+            operationAmount: 2500,
+            currencyCode: 980,
+            commissionRate: 0,
+            cashbackAmount: 0,
+            balance: 10000000,
+            hold: false,
+          },
+        },
+      }),
+    });
+    const missingResponse = await fetch(`${baseUrl}/not-a-real-endpoint`);
+
+    assert.equal(clientInfoResponse.status, 200);
+    assert.equal(ratesResponse.status, 200);
+    assert.equal(statementResponse.status, 200);
+    assert.equal(webhookResponse.status, 204);
+    assert.equal(missingResponse.status, 404);
+    assert.equal(requestLog.includes("GET /personal/client-info"), true);
+    assert.equal(requestLog.includes("GET /bank/currency"), true);
+    assert.equal(
+      requestLog.includes(
+        "GET /personal/statement/fixture-account-uah-main/1775001600/1777593599",
+      ),
+      true,
+    );
+    assert.equal(requestLog.includes("POST /personal/webhook"), true);
+  });
 });
 
 test("http adapter redacts token-bearing API errors", async () => {
