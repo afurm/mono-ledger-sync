@@ -444,6 +444,11 @@ interface RuleTestCheck {
   matched: boolean;
 }
 
+interface RuleConflictPreview {
+  entry: LedgerEntry;
+  rules: readonly BuiltInRuleSummary[];
+}
+
 function getInitialRoute(): RouteId {
   const hashRoute = window.location.hash.replace("#", "");
   const [route] = hashRoute.split("?");
@@ -3942,6 +3947,19 @@ function ledgerEntryMatchesRule(
   return textMatches && amountTypeMatches;
 }
 
+function findRuleConflicts(
+  entries: readonly LedgerEntry[],
+): RuleConflictPreview[] {
+  return entries
+    .map((entry) => ({
+      entry,
+      rules: builtInRuleSummaries.filter((rule) =>
+        ledgerEntryMatchesRule(entry, rule),
+      ),
+    }))
+    .filter((preview) => preview.rules.length > 1);
+}
+
 function RuleHistoryMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
@@ -4046,6 +4064,109 @@ function RuleHistoricalPreviewPanel({
         <Button disabled size="sm" type="button" variant="outline">
           <CheckCheckIcon data-icon="inline-start" />
           Apply previewed changes
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+function RuleConflictDetectionPanel({
+  entries,
+}: {
+  entries: readonly LedgerEntry[];
+}) {
+  const conflicts = useMemo(() => findRuleConflicts(entries), [entries]);
+  const previewConflicts = conflicts.slice(0, 3);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rule conflicts</CardTitle>
+        <CardDescription>
+          Loaded rows that match more than one built-in rule.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary">{conflicts.length} conflicts</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <Alert>
+          <SplitIcon />
+          <AlertTitle>Preview only</AlertTitle>
+          <AlertDescription>
+            Conflict detection uses normalized local history fields available in
+            this view. MCC-only overlaps can be reviewed after raw statement
+            metadata is exposed here.
+          </AlertDescription>
+        </Alert>
+        {entries.length === 0 ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>No transactions loaded</AlertTitle>
+            <AlertDescription>
+              Run sync before checking rule overlap in local history.
+            </AlertDescription>
+          </Alert>
+        ) : previewConflicts.length === 0 ? (
+          <Alert>
+            <CheckCircle2Icon />
+            <AlertTitle>No loaded rule conflicts</AlertTitle>
+            <AlertDescription>
+              The currently loaded rows match at most one built-in rule each.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="grid gap-2">
+            {previewConflicts.map(({ entry, rules }) => (
+              <div
+                className="grid gap-3 rounded-md border border-border px-3 py-2"
+                key={entry.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {entry.merchantName ?? entry.description}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {entry.description}
+                    </div>
+                  </div>
+                  <Badge variant="outline">
+                    {formatMinorAmount(entry.amount, entry.currencyCode)}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span>{formatDateTime(entry.time)}</span>
+                  <span>{transactionCategoryLabel(entry)}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {rules.map((rule) => (
+                    <Badge key={rule.id} variant="secondary">
+                      {rule.label}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <Alert>
+          <ShieldCheckIcon />
+          <AlertTitle>Resolution is disabled</AlertTitle>
+          <AlertDescription>
+            Conflict review is read-only until rule priority and resolution
+            writes are backed by stable local storage.
+          </AlertDescription>
+        </Alert>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2">
+        <Button disabled size="sm" type="button" variant="outline">
+          <EyeIcon data-icon="inline-start" />
+          Review conflicts
+        </Button>
+        <Button disabled size="sm" type="button" variant="outline">
+          <CheckCheckIcon data-icon="inline-start" />
+          Resolve selected
         </Button>
       </CardFooter>
     </Card>
@@ -4392,6 +4513,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 rule={selectedRule}
                 totalRows={snapshot?.transactions.total ?? entries.length}
               />
+              <RuleConflictDetectionPanel entries={entries} />
             </div>
           </div>
         </TabsContent>
