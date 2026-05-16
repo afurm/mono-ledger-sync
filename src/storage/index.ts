@@ -53,6 +53,10 @@ export interface LedgerEntry {
   balance?: number;
   note?: string;
   tags?: readonly string[];
+  splitPlan?: readonly {
+    category: string;
+    amount: number;
+  }[];
   rawStatementItemId: string;
   createdAt?: string;
   updatedAt?: string;
@@ -61,6 +65,13 @@ export interface LedgerEntry {
 export interface LedgerEntryAnnotationUpdate {
   note?: string;
   tags?: readonly string[];
+}
+
+export interface LedgerEntrySplitPlanUpdate {
+  lines?: readonly {
+    category: string;
+    amount: number;
+  }[];
 }
 
 export interface LedgerEntryQuery {
