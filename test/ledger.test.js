@@ -18,6 +18,7 @@ import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
 import {
   categorizeStatementItem,
   createStatementSyncWindows,
+  createLedgerEntryFromStatementItem,
   monobankPersonalStatementWindowMaxSeconds,
   syncLedgerWithMonobank,
 } from "../dist/sync/index.js";
@@ -423,6 +424,103 @@ test("syncs statement items without external IDs using deterministic fingerprint
       assert.equal(secondRun.accounts[0].writeStats.updated, 0);
       assert.equal(secondRun.accounts[0].writeStats.skipped, 1);
       assert.equal(secondEntries.total, 1);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("creates stable raw IDs from deterministic statement-item fingerprinting", () => {
+  const accountId = "fixture-account-uah-main";
+  const baseItem = {
+    time: 1_775_001_600,
+    description: "Test purchase",
+    mcc: 5812,
+    originalMcc: 5812,
+    amount: -1200,
+    operationAmount: -1200,
+    currencyCode: 980,
+    commissionRate: 0,
+    cashbackAmount: 0,
+    balance: 120_000,
+    hold: false,
+    comment: undefined,
+    receiptId: undefined,
+  };
+  const firstEntry = createLedgerEntryFromStatementItem(accountId, {
+    ...baseItem,
+  });
+  const secondEntry = createLedgerEntryFromStatementItem(accountId, {
+    ...baseItem,
+    comment: "",
+    receiptId: "",
+    invoiceId: "",
+    counterName: "",
+    counterEdrpou: "",
+    counterIban: "",
+  });
+
+  assert.match(
+    firstEntry.id,
+    /^fixture-account-uah-main:missing-id:[0-9a-f]{64}$/,
+  );
+  assert.equal(firstEntry.rawStatementItemId, secondEntry.rawStatementItemId);
+  assert.equal(firstEntry.id, secondEntry.id);
+});
+
+test("stores idempotent statement payload writes in raw storage", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: undefined,
+        time: 1_775_001_600,
+        description: "Test purchase",
+        mcc: 5812,
+        originalMcc: 5812,
+        amount: -1200,
+        operationAmount: -1200,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 120_000,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      const firstRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const ledgerItems = await db.listLedgerEntries({
+        profile,
+        limit: 20,
+      });
+
+      assert.equal(firstRun.inserted, 1);
+      assert.equal(firstRun.updated, 0);
+      assert.equal(firstRun.skipped, 0);
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 0);
+      assert.equal(secondRun.skipped, 1);
+      assert.equal(ledgerItems.total, 1);
     } finally {
       await db.close();
     }
