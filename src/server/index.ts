@@ -86,6 +86,7 @@ export interface LocalApiServerOptions {
   dataDir?: string;
   openBrowser?: boolean;
   monobankToken?: string;
+  monobankBaseUrl?: string;
   now?: () => number;
   webhookRateLimitMaxRequests?: number;
   webhookRateLimitWindowMs?: number;
@@ -136,6 +137,10 @@ export interface LocalApiWebhookSettings {
   url: string;
 }
 
+interface LocalApiMonobankTokenStatus {
+  hasToken: boolean;
+}
+
 export interface LocalApiAppConfig {
   profile: string;
   source: LedgerSource;
@@ -143,6 +148,7 @@ export interface LocalApiAppConfig {
   databasePath: string;
   localOnly: true;
   webhook: LocalApiWebhookSettings;
+  token: LocalApiMonobankTokenStatus;
 }
 
 export interface LocalApiFixtureSummary {
@@ -289,6 +295,7 @@ const appConfigResponseSchema = {
     "databasePath",
     "localOnly",
     "webhook",
+    "token",
   ],
   properties: {
     profile: { type: "string" },
@@ -310,6 +317,30 @@ const appConfigResponseSchema = {
         url: { type: "string" },
       },
     },
+    token: {
+      type: "object",
+      required: ["hasToken"],
+      properties: {
+        hasToken: { type: "boolean" },
+      },
+    },
+  },
+} as const;
+
+const monobankTokenBodySchema = {
+  type: "object",
+  required: ["token"],
+  properties: {
+    token: { type: "string" },
+  },
+  additionalProperties: false,
+} as const;
+
+const monobankTokenResponseSchema = {
+  type: "object",
+  required: ["hasToken"],
+  properties: {
+    hasToken: { type: "boolean" },
   },
 } as const;
 
@@ -700,6 +731,16 @@ function resolveMonobankToken(
   return envToken || undefined;
 }
 
+function resolveMonobankBaseUrl(
+  options: LocalApiServerOptions,
+): string | undefined {
+  const envBaseUrl = process.env.MONOBANK_BASE_URL?.trim();
+  const normalizedEnv = envBaseUrl || undefined;
+  const normalizedOption = options.monobankBaseUrl?.trim();
+
+  return normalizedOption || normalizedEnv;
+}
+
 function createMissingMonobankTokenAdapter(): MonobankAdapter {
   const createError = (): DomainError =>
     new DomainError(
@@ -744,20 +785,22 @@ export function resolveLocalLedgerDatabasePath(
 
 async function createServices(
   options: LocalApiServerOptions,
+  monobankToken: string | undefined,
+  monobankBaseUrl: string | undefined,
 ): Promise<LocalAppServices> {
   const profile = resolveProfile(options);
   const source = resolveSource(options);
   const dataDir = resolveDataDir(options);
   const databasePath = resolveLocalLedgerDatabasePath(options);
-  const token = resolveMonobankToken(options);
   const adapter =
     source === "fixture"
-      ? await createBundledFixtureMonobankAdapter()
-      : token === undefined
-        ? createMissingMonobankTokenAdapter()
-        : createMonobankHttpAdapter({
-            token,
-          });
+        ? await createBundledFixtureMonobankAdapter()
+        : monobankToken === undefined
+          ? createMissingMonobankTokenAdapter()
+          : createMonobankHttpAdapter({
+              token: monobankToken,
+              ...(monobankBaseUrl === undefined ? {} : { baseUrl: monobankBaseUrl }),
+            });
   const db = createSqliteLedgerDb({
     filePath: databasePath,
     profile,
@@ -1487,6 +1530,9 @@ function registerLocalApiRoutes(
   app: FastifyInstance,
   options: LocalApiServerOptions,
   getServices: () => Promise<LocalAppServices>,
+  getMonobankToken: () => string | undefined,
+  saveMonobankToken: (token: string) => Promise<LocalApiMonobankTokenStatus>,
+  removeMonobankToken: () => Promise<LocalApiMonobankTokenStatus>,
   localWebhookRoutePath: LocalWebhookRoutePath,
   resolveWebhookSettings: () => Omit<
     LocalApiWebhookSettings,
@@ -1633,6 +1679,7 @@ function registerLocalApiRoutes(
     },
     async (): Promise<LocalApiAppConfig> => {
       const services = await getServices();
+      const monobankToken = getMonobankToken();
 
       return {
         profile: services.profile,
@@ -1640,6 +1687,9 @@ function registerLocalApiRoutes(
         dataDir: services.dataDir,
         databasePath: services.databasePath,
         localOnly: true,
+        token: {
+          hasToken: monobankToken !== undefined,
+        },
         webhook: {
           enabled: true,
           path: localWebhookRoutePath,
@@ -1647,6 +1697,49 @@ function registerLocalApiRoutes(
         },
       };
     },
+  );
+
+  app.post(
+    `${localApiRoutePrefix}/app/token`,
+    {
+      schema: {
+        body: monobankTokenBodySchema,
+        response: {
+          200: monobankTokenResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<LocalApiMonobankTokenStatus | { error: string; message: string }> => {
+      const body = request.body as { token: string } | undefined;
+      const token = body?.token?.trim();
+
+      if (token === undefined || token.length === 0) {
+        reply.code(400);
+
+        return {
+          error: "invalid_token",
+          message: "Monobank token must be a non-empty string.",
+        };
+      }
+
+      return saveMonobankToken(token);
+    },
+  );
+
+  app.delete(
+    `${localApiRoutePrefix}/app/token`,
+    {
+      schema: {
+        response: {
+          200: monobankTokenResponseSchema,
+        },
+      },
+    },
+    async (): Promise<LocalApiMonobankTokenStatus> => removeMonobankToken(),
   );
 
   app.get(
@@ -1871,9 +1964,11 @@ function registerLocalApiRoutes(
       _request,
       reply,
     ): Promise<SyncLedgerResult | { error: string; message: string }> => {
+      const monobankToken = getMonobankToken();
+
       if (
         resolveSource(options) === "monobank" &&
-        !resolveMonobankToken(options)
+        monobankToken === undefined
       ) {
         reply.code(400);
 
@@ -2154,6 +2249,8 @@ export function createLocalApiServer(
   });
   let url: string | undefined;
   let servicesPromise: Promise<LocalAppServices> | undefined;
+  let monobankToken = resolveMonobankToken(options);
+  const monobankBaseUrl = resolveMonobankBaseUrl(options);
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
   let webhookHost: NonNullable<LocalApiServerOptions["host"]> =
@@ -2192,15 +2289,50 @@ export function createLocalApiServer(
   }
 
   function getServices(): Promise<LocalAppServices> {
-    servicesPromise ??= createServices(options);
+    servicesPromise ??= createServices(options, monobankToken, monobankBaseUrl);
 
     return servicesPromise;
+  }
+
+  function getMonobankToken(): string | undefined {
+    return monobankToken;
+  }
+
+  async function removeMonobankToken(): Promise<LocalApiMonobankTokenStatus> {
+    monobankToken = undefined;
+    await rebuildServices();
+
+    return {
+      hasToken: false,
+    };
+  }
+
+  async function saveMonobankToken(token: string): Promise<LocalApiMonobankTokenStatus> {
+    monobankToken = token;
+    await rebuildServices();
+
+    return {
+      hasToken: true,
+    };
+  }
+
+  async function rebuildServices(): Promise<void> {
+    if (servicesPromise === undefined) {
+      return;
+    }
+
+    const services = await servicesPromise;
+    await services.db.close();
+    servicesPromise = undefined;
   }
 
   registerLocalApiRoutes(
     app,
     options,
     getServices,
+    getMonobankToken,
+    saveMonobankToken,
+    removeMonobankToken,
     localWebhookRoutePath,
     resolveWebhookSettings,
   );
