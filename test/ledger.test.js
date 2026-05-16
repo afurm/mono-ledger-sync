@@ -1308,7 +1308,73 @@ test("local API validates query strings and webhook payloads", async () => {
       assert.equal(webhookEventsBody[0].accountId, "fixture-account-uah-main");
       assert.equal(webhookEventsBody[0].type, "StatementItem");
       assert.equal(invalidWebhookResponse.statusCode, 400);
-      assert.match(invalidWebhookResponse.body, /hold/);
+      assert.deepEqual(invalidWebhookResponse.json(), {
+        error: "invalid_webhook_payload",
+        message: "Webhook payload is malformed.",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("local API does not log raw webhook payloads", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const logs = [];
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+      logSink: (value) => {
+        logs.push(value);
+      },
+    });
+    const invalidWebhook = {
+      type: "StatementItem",
+      data: {
+        account: "fixture-account-uah-main",
+        statementItem: {
+          id: "fixture-webhook-validation-test",
+          time: 1775031300,
+          description: "Validation test transfer",
+          mcc: 4829,
+          originalMcc: 4829,
+          amount: -2500,
+          operationAmount: -2500,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97000,
+          hold: "bad-hold",
+        },
+      },
+    };
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/webhooks/monobank",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(invalidWebhook),
+      });
+
+      assert.equal(response.statusCode, 400);
+      assert.deepEqual(response.json(), {
+        error: "invalid_webhook_payload",
+        message: "Webhook payload is malformed.",
+      });
+      assert.equal(
+        logs.length,
+        1,
+        "malformed webhook payload should be logged once",
+      );
+      assert.match(logs[0], /Rejected malformed webhook payload/);
+      assert.match(logs[0], /request.body/);
+      assert.equal(logs[0].includes("Validation test transfer"), false);
+      assert.equal(logs[0].includes("1775031300"), false);
+      assert.equal(logs[0].includes("fixture-webhook-validation-test"), false);
     } finally {
       await server.close();
     }

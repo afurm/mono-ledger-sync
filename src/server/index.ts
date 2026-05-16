@@ -22,12 +22,14 @@ import {
 import { DomainError } from "../domain/index.js";
 import {
   assertMonobankPersonalWebhookEvent,
+  MonobankValidationError,
   createBundledFixtureMonobankAdapter,
   createMonobankHttpAdapter,
   loadMonobankFixtureSet,
   type MonobankAdapter,
   type MonobankClientInfo,
   type MonobankFixtureSet,
+  type MonobankPersonalWebhookEvent,
   type MonobankStatementItem,
 } from "../monobank/index.js";
 import { createSqliteLedgerDb, type SqliteLedgerDb } from "../sqlite/index.js";
@@ -49,6 +51,7 @@ import type {
   SyncRun,
 } from "../storage/index.js";
 import type { SyncLedgerResult } from "../sync/index.js";
+import { logStructured } from "../logging/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
@@ -68,6 +71,7 @@ export interface LocalApiServerOptions {
   now?: () => number;
   webhookRateLimitMaxRequests?: number;
   webhookRateLimitWindowMs?: number;
+  logSink?: (line: string) => void;
 }
 
 export interface LocalApiServer {
@@ -495,60 +499,6 @@ const webhookAcceptedResponseSchema = {
 
 const webhookValidationResponseSchema = {
   type: "string",
-} as const;
-
-const monobankStatementItemBodySchema = {
-  type: "object",
-  required: [
-    "time",
-    "description",
-    "mcc",
-    "originalMcc",
-    "amount",
-    "operationAmount",
-    "currencyCode",
-    "commissionRate",
-    "cashbackAmount",
-    "balance",
-    "hold",
-  ],
-  additionalProperties: true,
-  properties: {
-    id: { type: "string" },
-    time: { type: "number" },
-    description: { type: "string" },
-    mcc: { type: "number" },
-    originalMcc: { type: "number" },
-    amount: { type: "number" },
-    operationAmount: { type: "number" },
-    currencyCode: { type: "number" },
-    commissionRate: { type: "number" },
-    cashbackAmount: { type: "number" },
-    balance: { type: "number" },
-    hold: { type: "boolean" },
-    comment: { type: "string" },
-    receiptId: { type: "string" },
-    invoiceId: { type: "string" },
-    counterEdrpou: { type: "string" },
-    counterIban: { type: "string" },
-    counterName: { type: "string" },
-  },
-} as const;
-
-const monobankWebhookBodySchema = {
-  type: "object",
-  required: ["type", "data"],
-  properties: {
-    type: { const: "StatementItem" },
-    data: {
-      type: "object",
-      required: ["account", "statementItem"],
-      properties: {
-        account: { type: "string" },
-        statementItem: monobankStatementItemBodySchema,
-      },
-    },
-  },
 } as const;
 
 const ledgerEntriesQuerySchema = {
@@ -1896,9 +1846,9 @@ function registerLocalApiRoutes(
     `${localApiRoutePrefix}/webhooks/monobank`,
     {
       schema: {
-        body: monobankWebhookBodySchema,
         response: {
           200: webhookAcceptedResponseSchema,
+          400: localApiErrorResponseSchema,
           429: localApiErrorResponseSchema,
         },
       },
@@ -1915,9 +1865,42 @@ function registerLocalApiRoutes(
       | { error: string; message: string }
     > => {
       const services = await getServices();
-      const webhookEvent = request.body as { data: { account: string } };
+      const webhookEvent = request.body;
 
-      if (isWebhookRateLimited(services.profile, webhookEvent.data.account)) {
+      try {
+        assertMonobankPersonalWebhookEvent(webhookEvent, "request.body");
+      } catch (error) {
+        if (error instanceof MonobankValidationError) {
+          const logOptions =
+            options.logSink === undefined ? {} : { logger: options.logSink };
+
+          logStructured(
+            "warn",
+            "Rejected malformed webhook payload",
+            {
+              route: `${localApiRoutePrefix}/webhooks/monobank`,
+              path: error.path,
+              expected: error.expected,
+            },
+            logOptions,
+          );
+
+          reply.code(400);
+
+          return {
+            error: "invalid_webhook_payload",
+            message: "Webhook payload is malformed.",
+          };
+        }
+
+        throw error;
+      }
+
+      const typedWebhookEvent = webhookEvent as MonobankPersonalWebhookEvent;
+
+      if (
+        isWebhookRateLimited(services.profile, typedWebhookEvent.data.account)
+      ) {
         reply.code(429);
 
         return {
@@ -1927,8 +1910,7 @@ function registerLocalApiRoutes(
         };
       }
 
-      assertMonobankPersonalWebhookEvent(webhookEvent, "request.body");
-      const event = await services.db.recordWebhookEvent(webhookEvent);
+      const event = await services.db.recordWebhookEvent(typedWebhookEvent);
 
       return {
         accepted: true,
