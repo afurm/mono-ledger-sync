@@ -1440,7 +1440,18 @@ function webhookDeliveryKey(event: WebhookEvent): string {
 }
 
 function webhookDeliveryStatus(event: WebhookEvent): string {
-  return event.processedAt ? "reconciled" : "pull required";
+  switch (event.status) {
+    case "processed":
+      return "reconciled";
+    case "pending":
+      return "pending reconcile";
+    case "duplicate":
+      return "duplicate";
+    case "ignored":
+      return "ignored";
+    case "failed":
+      return "failed";
+  }
 }
 
 function webhookEventLabel(event: WebhookEvent): string {
@@ -1524,7 +1535,17 @@ function RecentWebhookDeliveriesCard({
                       {event.statementItemId ?? event.id}
                     </p>
                   </div>
-                  <Badge variant={event.processedAt ? "default" : "secondary"}>
+                  <Badge
+                    variant={
+                      event.status === "failed"
+                        ? "destructive"
+                        : event.status === "processed"
+                          ? "default"
+                          : event.status === "duplicate"
+                            ? "outline"
+                            : "secondary"
+                    }
+                  >
                     {webhookDeliveryStatus(event)}
                   </Badge>
                 </div>
@@ -2593,9 +2614,16 @@ function webhookHintSummary(event: WebhookEvent | undefined): string {
     return "No matching webhook hint recorded";
   }
 
-  const processed = event.processedAt
-    ? `processed ${formatDateTime(event.processedAt)}`
-    : "pending reconcile";
+  const processed =
+    event.status === "processed"
+      ? `processed ${formatDateTime(event.processedAt ?? event.receivedAt)}`
+      : event.status === "failed"
+        ? `failed ${formatDateTime(event.receivedAt)}`
+        : event.status === "duplicate"
+          ? "duplicate ignored"
+          : event.status === "ignored"
+            ? "ignored"
+            : "pending reconcile";
 
   return `${event.type} received ${formatDateTime(event.receivedAt)}; ${processed}`;
 }

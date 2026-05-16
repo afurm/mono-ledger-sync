@@ -13,6 +13,7 @@ import type {
   SyncRun,
   SyncRunStatus,
   StoredWebhookEvent,
+  WebhookEventStatus,
   ledgerEntrySortDirections,
   ledgerEntrySortFields,
 } from "../domain/index.js";
@@ -32,6 +33,7 @@ export type {
   SyncRunStatus,
   StoredWebhookEvent,
   LedgerWriteStats,
+  WebhookEventStatus,
 } from "../domain/index.js";
 
 import type {

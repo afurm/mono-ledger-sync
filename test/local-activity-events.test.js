@@ -58,6 +58,7 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
         accountId: "fixture-account-uah-main",
         type: "StatementItem",
         statementItemId: "fixture-stmt-1",
+        status: "pending",
         receivedAt: "2026-06-01T13:00:00Z",
       },
       {
@@ -66,6 +67,7 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
         accountId: "fixture-account-uah-main",
         type: "StatementItem",
         statementItemId: "fixture-stmt-2",
+        status: "processed",
         receivedAt: "2026-06-01T10:00:00Z",
         processedAt: "2026-06-01T10:20:00Z",
       },
@@ -155,5 +157,83 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
   assert.equal(
     events.find((event) => event.id === "sync-run:run-success")?.severity,
     "success",
+  );
+});
+
+test("buildLocalActivityEvents maps webhook status-specific activity variants", () => {
+  const events = buildLocalActivityEvents(
+    [],
+    [
+      {
+        id: "webhook-pending",
+        profile: "demo",
+        accountId: "fixture-account-uah-main",
+        type: "StatementItem",
+        statementItemId: "fixture-stmt-pending",
+        status: "pending",
+        receivedAt: "2026-06-02T10:00:00Z",
+      },
+      {
+        id: "webhook-duplicate",
+        profile: "demo",
+        accountId: "fixture-account-uah-main",
+        type: "StatementItem",
+        statementItemId: "fixture-stmt-duplicate",
+        status: "duplicate",
+        receivedAt: "2026-06-02T09:00:00Z",
+      },
+      {
+        id: "webhook-ignored",
+        profile: "demo",
+        accountId: "fixture-account-uah-main",
+        type: "StatementItem",
+        statementItemId: "fixture-stmt-ignored",
+        status: "ignored",
+        receivedAt: "2026-06-02T08:00:00Z",
+      },
+      {
+        id: "webhook-failed",
+        profile: "demo",
+        accountId: "fixture-account-uah-main",
+        type: "StatementItem",
+        statementItemId: "fixture-stmt-failed",
+        status: "failed",
+        receivedAt: "2026-06-02T07:00:00Z",
+        processedAt: "2026-06-02T07:30:00Z",
+      },
+    ],
+  );
+
+  assert.equal(events.length, 7);
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-pending")?.severity,
+    "warning",
+  );
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-pending:warning")
+      ?.severity,
+    "warning",
+  );
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-duplicate")?.severity,
+    "info",
+  );
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-ignored")?.severity,
+    "warning",
+  );
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-ignored:ignored")
+      ?.severity,
+    "warning",
+  );
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-failed")?.severity,
+    "error",
+  );
+  assert.equal(
+    events.find((event) => event.id === "webhook:webhook-failed:error")
+      ?.severity,
+    "error",
   );
 });

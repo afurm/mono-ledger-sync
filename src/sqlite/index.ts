@@ -16,6 +16,7 @@ import type {
 import type {
   AccountBalance,
   LedgerAccount,
+  WebhookEventStatus,
   Category,
   LedgerDb,
   LedgerDbTransaction,
@@ -184,6 +185,7 @@ interface SqliteWebhookEventRow {
   statement_item_id: string | null;
   received_at: string;
   processed_at: string | null;
+  status: string;
   payload_hash?: string;
   delivery_fingerprint?: string;
 }
@@ -465,6 +467,21 @@ const migrations: readonly SqliteMigration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_categories_profile
         ON categories(profile, id);
+    `,
+  },
+  {
+    id: "0007_webhook_event_status",
+    description: "Track webhook event status",
+    sql: `
+      ALTER TABLE webhook_events
+        ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
+
+      UPDATE webhook_events
+        SET status = 'pending'
+        WHERE status IS NULL OR status = '';
+
+      CREATE INDEX IF NOT EXISTS idx_webhook_events_status
+        ON webhook_events(profile, status);
     `,
   },
 ];
@@ -793,12 +810,34 @@ function mapSyncRunRow(row: SqliteSyncRunRow): SyncRun {
   return run;
 }
 
+function resolveWebhookEventStatus(
+  value: string | undefined,
+  processedAt: string | null,
+): WebhookEventStatus {
+  if (
+    value === "pending" ||
+    value === "processed" ||
+    value === "duplicate" ||
+    value === "ignored" ||
+    value === "failed"
+  ) {
+    return value;
+  }
+
+  if (processedAt !== null) {
+    return "processed";
+  }
+
+  return "pending";
+}
+
 function mapWebhookEventRow(row: SqliteWebhookEventRow): StoredWebhookEvent {
   const event: StoredWebhookEvent = {
     id: row.id,
     profile: row.profile,
     accountId: row.account_id,
     type: row.type,
+    status: resolveWebhookEventStatus(row.status, row.processed_at),
     receivedAt: row.received_at,
   };
 
@@ -1552,7 +1591,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `
           SELECT
             id, profile, account_id, type, statement_item_id,
-            received_at, processed_at
+            status, received_at, processed_at
           FROM webhook_events
           WHERE profile = ?
           ORDER BY received_at DESC
@@ -1577,20 +1616,21 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       profile: this.profile,
       accountId: event.data.account,
       type: event.type,
+      status: "pending",
       receivedAt,
       ...(statementItemId === undefined ? {} : { statementItemId }),
     };
 
-    this.#database
+    const insertResult = this.#database
       .prepare(
         `
           INSERT INTO webhook_events (
-            id, profile, account_id, type, statement_item_id, payload_hash,
-            delivery_fingerprint, received_at, processed_at, payload_json
+            id, profile, account_id, type, statement_item_id, status,
+            payload_hash, delivery_fingerprint, received_at, processed_at, payload_json
           )
           VALUES (
-            @id, @profile, @accountId, @type, @statementItemId, @payloadHash,
-            @deliveryFingerprint, @receivedAt, @processedAt, @payloadJson
+            @id, @profile, @accountId, @type, @statementItemId, @status,
+            @payloadHash, @deliveryFingerprint, @receivedAt, @processedAt, @payloadJson
           )
           ON CONFLICT(profile, payload_hash, delivery_fingerprint) DO NOTHING
         `,
@@ -1601,6 +1641,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         accountId: storedEvent.accountId,
         type: storedEvent.type,
         statementItemId: storedEvent.statementItemId,
+        status: storedEvent.status,
         payloadHash,
         deliveryFingerprint,
         receivedAt: storedEvent.receivedAt,
@@ -1612,7 +1653,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .prepare(
         `
           SELECT
-            id, profile, account_id, type, statement_item_id,
+            id, profile, account_id, type, statement_item_id, status,
             received_at, processed_at
           FROM webhook_events
           WHERE profile = @profile
@@ -1628,7 +1669,18 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         deliveryFingerprint,
       }) as SqliteWebhookEventRow | undefined;
 
-    return row ? mapWebhookEventRow(row) : storedEvent;
+    if (!row) {
+      return storedEvent;
+    }
+
+    if (insertResult.changes === 0) {
+      return {
+        ...mapWebhookEventRow(row),
+        status: "duplicate",
+      };
+    }
+
+    return mapWebhookEventRow(row);
   }
 
   async getDatabaseInfo(profile = this.profile): Promise<SqliteDatabaseInfo> {

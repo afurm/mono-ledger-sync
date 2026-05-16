@@ -96,6 +96,16 @@ export const localActivityEventSeverities = [
 export type LocalActivityEventSeverity =
   (typeof localActivityEventSeverities)[number];
 
+export const webhookEventStatuses = [
+  "pending",
+  "processed",
+  "duplicate",
+  "ignored",
+  "failed",
+] as const;
+
+export type WebhookEventStatus = (typeof webhookEventStatuses)[number];
+
 export interface LocalActivityEvent {
   id: string;
   profile?: string;
@@ -347,6 +357,7 @@ export interface StoredWebhookEvent {
   type: string;
   statementItemId?: string;
   receivedAt: string;
+  status: WebhookEventStatus;
   processedAt?: string;
 }
 
