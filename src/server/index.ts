@@ -353,10 +353,13 @@ const syncRunResponseSchema = {
     "source",
     "status",
     "startedAt",
+    "apiCalls",
+    "windowsFetched",
     "itemsSeen",
     "itemsInserted",
     "itemsUpdated",
     "itemsSkipped",
+    "rateLimited",
   ],
   properties: {
     id: { type: "string" },
@@ -367,10 +370,13 @@ const syncRunResponseSchema = {
     },
     startedAt: { type: "string" },
     finishedAt: { type: "string" },
+    apiCalls: { type: "number" },
+    windowsFetched: { type: "number" },
     itemsSeen: { type: "number" },
     itemsInserted: { type: "number" },
     itemsUpdated: { type: "number" },
     itemsSkipped: { type: "number" },
+    rateLimited: { type: "number" },
   },
 } as const;
 

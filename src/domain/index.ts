@@ -288,10 +288,13 @@ export interface SyncRun {
   status: SyncRunStatus;
   startedAt: string;
   finishedAt?: string;
+  apiCalls: number;
+  windowsFetched: number;
   itemsSeen: number;
   itemsInserted: number;
   itemsUpdated: number;
   itemsSkipped: number;
+  rateLimited: number;
 }
 
 export interface LedgerWriteStats {

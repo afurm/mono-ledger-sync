@@ -11,6 +11,7 @@ import type {
   LedgerWriteStats,
   SyncRun,
 } from "../storage/index.js";
+import { DomainError } from "../domain/index.js";
 
 export interface LedgerCategoryMatch {
   categoryId: string;
@@ -272,6 +273,34 @@ function throwIfAborted(signal?: AbortSignal): void {
   throw new DOMException("Sync was interrupted", "AbortError");
 }
 
+async function callAdapter<T>(
+  stats: { current: SyncLedgerStats },
+  adapterCall: () => Promise<T>,
+): Promise<T> {
+  const nextStats = {
+    ...stats.current,
+    apiCalls: stats.current.apiCalls + 1,
+  };
+  stats.current = nextStats;
+
+  try {
+    return await adapterCall();
+  } catch (error) {
+    let resultStats = stats.current;
+
+    if (error instanceof DomainError && error.category === "rate_limit") {
+      resultStats = {
+        ...nextStats,
+        rateLimited: nextStats.rateLimited + 1,
+      };
+
+      stats.current = resultStats;
+    }
+
+    throw error;
+  }
+}
+
 function shouldFetchAccount(
   accountId: string,
   accountIds: readonly string[] | undefined,
@@ -293,35 +322,32 @@ export async function syncLedgerWithMonobank(
     source: options.source,
     status: "running",
     startedAt,
+    apiCalls: 0,
+    windowsFetched: 0,
     itemsSeen: 0,
     itemsInserted: 0,
     itemsUpdated: 0,
     itemsSkipped: 0,
+    rateLimited: 0,
   };
 
   if (!options.dryRun) {
     await options.db.recordSyncRun(run);
   }
 
-  let stats = emptySyncStats();
+  const statsState = {
+    current: emptySyncStats(),
+  };
 
   try {
-    const clientInfo = await options.adapter.getClientInfo();
+    const clientInfo = await callAdapter(statsState, () =>
+      options.adapter.getClientInfo(),
+    );
     throwIfAborted(options.signal);
 
-    stats = {
-      ...stats,
-      apiCalls: stats.apiCalls + 1,
-    };
-
-    const currencyRates = await options.adapter.getCurrency();
-
-    stats = {
-      ...stats,
-      apiCalls: stats.apiCalls + 1,
-    };
-
-    let aggregateStats = emptyWriteStats();
+    const currencyRates = await callAdapter(statsState, () =>
+      options.adapter.getCurrency(),
+    );
 
     if (!options.dryRun) {
       await options.db.upsertAccounts(clientInfo.accounts);
@@ -355,17 +381,20 @@ export async function syncLedgerWithMonobank(
       for (const window of windows) {
         throwIfAborted(options.signal);
 
-        const statementItems = await options.adapter.getStatement({
-          accountId: account.id,
-          from: window.from,
-          to: window.to,
-        });
-        stats = {
-          ...stats,
-          apiCalls: stats.apiCalls + 1,
-          windowsFetched: stats.windowsFetched + 1,
-          itemsSeen: stats.itemsSeen + statementItems.length,
+        const statementItems = await callAdapter(statsState, () =>
+          options.adapter.getStatement({
+            accountId: account.id,
+            from: window.from,
+            to: window.to,
+          }),
+        );
+        const updatedStats = {
+          ...statsState.current,
+          windowsFetched: statsState.current.windowsFetched + 1,
+          itemsSeen: statsState.current.itemsSeen + statementItems.length,
         };
+
+        statsState.current = updatedStats;
         const entries = statementItems.map((item) => {
           return createLedgerEntryFromStatementItem(account.id, item);
         });
@@ -387,10 +416,12 @@ export async function syncLedgerWithMonobank(
 
         accountItemsSeen += statementItems.length;
         accountStats = addWriteStats(accountStats, writeStats);
-        stats = statsFromWriteStats(stats, writeStats);
+        statsState.current = statsFromWriteStats(
+          statsState.current,
+          writeStats,
+        );
       }
 
-      aggregateStats = addWriteStats(aggregateStats, accountStats);
       if (
         !options.dryRun &&
         accountCompletedWindow !== undefined &&
@@ -425,10 +456,8 @@ export async function syncLedgerWithMonobank(
       ...run,
       status: "success",
       finishedAt: nowIso(),
+      ...statsState.current,
       itemsSeen,
-      itemsInserted: aggregateStats.inserted,
-      itemsUpdated: aggregateStats.updated,
-      itemsSkipped: aggregateStats.skipped,
     };
 
     if (!options.dryRun) {
@@ -439,18 +468,16 @@ export async function syncLedgerWithMonobank(
       run: finishedRun,
       accounts: accountResults,
       dryRun: options.dryRun ?? false,
-      stats,
+      stats: statsState.current,
       summary: await options.db.getLedgerSummary(options.profile),
     };
   } catch (error) {
+    const stats = statsState.current;
     const failedRun: SyncRun = {
       ...run,
       status: options.signal?.aborted ? "partial" : "failed",
       finishedAt: nowIso(),
-      itemsSeen: stats.itemsSeen,
-      itemsInserted: stats.itemsInserted,
-      itemsUpdated: stats.itemsUpdated,
-      itemsSkipped: stats.itemsSkipped,
+      ...stats,
     };
 
     if (!options.dryRun) {
