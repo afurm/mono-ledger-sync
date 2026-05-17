@@ -11,6 +11,7 @@ export {
 } from "./core/index.js";
 export {
   type AccountBalance,
+  type BudgetProgress,
   type LedgerAccount,
   type LedgerEntry,
   type LedgerEntryPage,
@@ -35,6 +36,7 @@ export {
   type AccountBalance as DomainAccountBalance,
   type Category,
   type Budget,
+  type BudgetProgress as DomainBudgetProgress,
   type LedgerAccount as DomainLedgerAccount,
   type LedgerEntry as DomainLedgerEntry,
   type MonobankRawEvent,

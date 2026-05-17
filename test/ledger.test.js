@@ -2087,6 +2087,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/category-spending",
       });
+      const budgetProgressResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/budget-progress",
+      });
       const upcomingRecurringPaymentsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/upcoming-recurring-payments",
@@ -2223,6 +2227,8 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           ["transport", 980, 1500],
         ],
       );
+      assert.equal(budgetProgressResponse.statusCode, 200);
+      assert.deepEqual(budgetProgressResponse.json(), []);
       assert.equal(upcomingRecurringPaymentsResponse.statusCode, 200);
       assert.deepEqual(upcomingRecurringPaymentsResponse.json(), []);
       assert.equal(jarsResponse.statusCode, 200);

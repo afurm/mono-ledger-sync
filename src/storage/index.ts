@@ -1,5 +1,6 @@
 import type {
   AccountBalance,
+  BudgetProgress,
   Budget,
   BudgetPeriod,
   LedgerAccount,
@@ -31,6 +32,7 @@ import type {
 
 export type {
   AccountBalance,
+  BudgetProgress,
   LedgerAccount,
   LedgerCategorySpending,
   LedgerJar,

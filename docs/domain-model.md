@@ -42,6 +42,8 @@ configuration, and direct filesystem behavior.
   budget storage and UI are enabled.
 - `BudgetPeriod` defines per-period budget tracking rows before monthly close
   and reopen workflows are enabled.
+- `BudgetProgress` defines the current budget-period progress row used for
+  overspend warnings.
 - `RecurringItem` defines the recurring transaction detection contract before
   recurring calendars and alerts are enabled.
 - `UpcomingRecurringPayment` defines the projected recurring payment row used by
