@@ -29,6 +29,7 @@ import type {
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySortField,
+  LedgerCategorySpending,
   LedgerJar,
   LedgerSummary,
   LedgerWriteStats,
@@ -115,6 +116,9 @@ export interface SqliteLedgerDb extends LedgerDb {
   ): Promise<LedgerWriteStats>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
   listJars(profile?: string): Promise<readonly LedgerJar[]>;
+  listCategorySpending(
+    profile?: string,
+  ): Promise<readonly LedgerCategorySpending[]>;
   listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage>;
   updateLedgerEntryAnnotation(
     profile: string,
@@ -293,6 +297,14 @@ interface SqliteCategoryRow {
   is_system: number;
   created_at: string;
   updated_at: string;
+}
+
+interface SqliteCategorySpendingRow {
+  category_id: string | null;
+  category_name: string | null;
+  currency_code: number;
+  amount: number;
+  transaction_count: number;
 }
 
 interface SqliteCategoryRuleRow {
@@ -1302,6 +1314,24 @@ function mapCategoryRow(row: SqliteCategoryRow): Category {
   return category;
 }
 
+function mapCategorySpendingRow(
+  row: SqliteCategorySpendingRow,
+): LedgerCategorySpending {
+  const categoryId = row.category_id ?? "uncategorized";
+  const categoryName =
+    row.category_name && row.category_name.trim() !== ""
+      ? row.category_name
+      : "Uncategorized";
+
+  return {
+    categoryId,
+    categoryName,
+    currencyCode: row.currency_code,
+    amount: row.amount,
+    transactionCount: row.transaction_count,
+  };
+}
+
 function mapCategoryRuleRow(row: SqliteCategoryRuleRow): CategoryRule {
   const rule: CategoryRule = {
     id: row.id,
@@ -2172,6 +2202,33 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteCategoryRow[];
 
     return rows.map(mapCategoryRow);
+  }
+
+  async listCategorySpending(
+    profile = this.profile,
+  ): Promise<readonly LedgerCategorySpending[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            COALESCE(category_id, 'uncategorized') AS category_id,
+            COALESCE(NULLIF(category_name, ''), 'Uncategorized') AS category_name,
+            currency_code,
+            SUM(-amount) AS amount,
+            COUNT(*) AS transaction_count
+          FROM ledger_entries
+          WHERE profile = ?
+            AND amount < 0
+          GROUP BY
+            COALESCE(category_id, 'uncategorized'),
+            COALESCE(NULLIF(category_name, ''), 'Uncategorized'),
+            currency_code
+          ORDER BY amount DESC, category_name, currency_code
+        `,
+      )
+      .all(profile) as SqliteCategorySpendingRow[];
+
+    return rows.map(mapCategorySpendingRow);
   }
 
   async listCategoryRules(

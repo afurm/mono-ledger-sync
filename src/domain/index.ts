@@ -300,6 +300,14 @@ export interface LedgerCashflowSummary {
   net: number;
 }
 
+export interface LedgerCategorySpending {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
 export interface LedgerJar {
   id: string;
   title: string;

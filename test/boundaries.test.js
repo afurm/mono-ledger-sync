@@ -163,6 +163,10 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(apiSource, /readCachedLocalAppSnapshot/);
   assert.match(apiSource, /normalizeCachedLocalAppSnapshot/);
   assert.match(apiSource, /jars: snapshot\.jars \?\? \[\]/);
+  assert.match(
+    apiSource,
+    /categorySpending: snapshot\.categorySpending \?\? \[\]/,
+  );
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
@@ -175,6 +179,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Browsing last local snapshot/);
   assert.match(appSource, /snapshot\?\.offline\?\.reason/);
   assert.match(appSource, /MTD net cashflow/);
+  assert.match(appSource, /Spending by category/);
 });
 
 test("serves local API health through Fastify", async () => {
