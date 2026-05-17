@@ -149,6 +149,30 @@ test("local web UI exposes a privacy onboarding screen", async () => {
   assert.match(appSource, /Review privacy settings/);
 });
 
+test("web client caches local snapshots for offline browsing", async () => {
+  const apiSource = await readFile("src/web/api.ts", "utf8");
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(apiSource, /LOCAL_APP_SNAPSHOT_CACHE_PREFIX/);
+  assert.match(apiSource, /LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY/);
+  assert.match(apiSource, /function snapshotCacheKey/);
+  assert.match(apiSource, /encodeURIComponent\(\s*profile,/);
+  assert.match(apiSource, /encodeURIComponent\(databasePath\)/);
+  assert.match(apiSource, /readCachedActiveSnapshotKey/);
+  assert.match(apiSource, /writeCachedLocalAppSnapshot/);
+  assert.match(apiSource, /readCachedLocalAppSnapshot/);
+  assert.match(apiSource, /try \{\s*return \(globalThis as/);
+  assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
+  assert.doesNotMatch(apiSource, /LEDGER_TRANSACTION_CACHE_PREFIX/);
+  assert.match(apiSource, /offline: \{/);
+  assert.match(appSource, /OVERVIEW_TRANSACTION_LIMIT = 8/);
+  assert.match(appSource, /canUseSnapshotTransactionFallback/);
+  assert.match(appSource, /snapshotTransactionFallbackPage/);
+  assert.match(appSource, /total: snapshot\.transactions\.entries\.length/);
+  assert.match(appSource, /Browsing last local snapshot/);
+  assert.match(appSource, /snapshot\?\.offline\?\.reason/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 
