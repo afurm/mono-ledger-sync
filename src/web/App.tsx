@@ -145,6 +145,7 @@ import {
   setMonobankSource,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
+  updateLedgerTransactionsBulk,
 } from "./api";
 import {
   currencyLabel,
@@ -624,6 +625,7 @@ const ruleEditorDateOptions = ["Any date", "Current statement window"];
 
 type CategoryRuleSummary = {
   id: string;
+  categoryId: string;
   label: string;
   priority: number;
   matchType: "condition" | "fallback";
@@ -651,6 +653,7 @@ type RuleMatchSummary = {
 
 const fallbackCategoryRuleSummary: CategoryRuleSummary = {
   id: "income",
+  categoryId: "income",
   label: "Income",
   priority: 10,
   matchType: "condition",
@@ -710,6 +713,7 @@ function categoryRuleSummariesFromSnapshot(
   if (!snapshot?.categoryRules.length) {
     return builtInRuleSummaries.map((rule) => ({
       ...rule,
+      categoryId: rule.id,
       matchType: "condition",
       isEnabled: true,
       isSystem: true,
@@ -725,6 +729,7 @@ function categoryRuleSummariesFromSnapshot(
 
     return {
       id: rule.id,
+      categoryId: rule.categoryId,
       label: rule.name,
       priority: rule.priority,
       matchType: rule.matchType,
@@ -6432,26 +6437,59 @@ function RuleHistoryMetric({ label, value }: { label: string; value: string }) {
 
 function RuleHistoricalPreviewPanel({
   entries,
+  onApplied,
   rule,
   rules,
   totalRows,
 }: {
   entries: readonly LedgerEntry[];
+  onApplied: () => Promise<void>;
   rule: CategoryRuleSummary;
   rules: readonly CategoryRuleSummary[];
   totalRows: number;
 }) {
+  const [applyState, setApplyState] = useState<
+    "idle" | "applying" | "applied" | "error"
+  >("idle");
   const matchedEntries = useMemo(
     () => findRuleHistoricalMatches(entries, rule, rules),
     [entries, rule, rules],
   );
   const mccOnlyPreviewUnavailable = ruleHasMccOnlyHistoryConstraint(rule);
   const previewEntries = matchedEntries.slice(0, 3);
+  const applyDisabled =
+    applyState === "applying" ||
+    mccOnlyPreviewUnavailable ||
+    !rule.isEnabled ||
+    matchedEntries.length === 0;
   const previewDescription = mccOnlyPreviewUnavailable
     ? "MCC-only impact needs raw statement metadata that is not available in loaded ledger rows."
     : rule.matchType === "fallback"
       ? "Fallback estimate for rows that do not match earlier active rules."
       : "Read-only impact estimate against loaded local rows.";
+
+  useEffect(() => {
+    setApplyState("idle");
+  }, [rule.id, matchedEntries.length]);
+
+  async function applyPreviewedChanges(): Promise<void> {
+    if (applyDisabled) {
+      return;
+    }
+
+    setApplyState("applying");
+
+    try {
+      await updateLedgerTransactionsBulk({
+        ids: matchedEntries.map((entry) => entry.id),
+        categoryId: rule.categoryId,
+      });
+      await onApplied();
+      setApplyState("applied");
+    } catch {
+      setApplyState("error");
+    }
+  }
 
   return (
     <Card>
@@ -6476,13 +6514,30 @@ function RuleHistoricalPreviewPanel({
         </div>
         <Alert>
           <FileClockIcon />
-          <AlertTitle>Preview only</AlertTitle>
+          <AlertTitle>Preview before applying</AlertTitle>
           <AlertDescription>
-            MCC matching is not available on normalized local history rows yet.
-            This estimate uses merchant text, description text, and amount
-            direction.
+            Review the affected local rows before applying this rule to loaded
+            history. MCC matching is not available on normalized history rows
+            yet, so MCC-only rules cannot be applied from this preview.
           </AlertDescription>
         </Alert>
+        {applyState === "applied" ? (
+          <Alert>
+            <CheckCircle2Icon />
+            <AlertTitle>Previewed changes applied</AlertTitle>
+            <AlertDescription>
+              The matched loaded rows were updated to {rule.label}.
+            </AlertDescription>
+          </Alert>
+        ) : applyState === "error" ? (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertTitle>Could not apply previewed changes</AlertTitle>
+            <AlertDescription>
+              Refresh the local data and try the preview again.
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {mccOnlyPreviewUnavailable ? (
           <Alert>
             <AlertCircleIcon />
@@ -6542,9 +6597,19 @@ function RuleHistoricalPreviewPanel({
           <SearchIcon data-icon="inline-start" />
           Refresh preview
         </Button>
-        <Button disabled size="sm" type="button" variant="outline">
+        <Button
+          disabled={applyDisabled}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => {
+            void applyPreviewedChanges();
+          }}
+        >
           <CheckCheckIcon data-icon="inline-start" />
-          Apply previewed changes
+          {applyState === "applying"
+            ? "Applying preview"
+            : "Apply previewed changes"}
         </Button>
       </CardFooter>
     </Card>
@@ -6691,7 +6756,13 @@ function reviewCandidateBadgeVariant(
   }
 }
 
-function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+function RulesRoute({
+  onRefresh,
+  snapshot,
+}: {
+  onRefresh: () => Promise<void>;
+  snapshot: LocalAppSnapshot | undefined;
+}) {
   const [rulesSearch, setRulesSearch] = useState("");
   const [selectedRuleId, setSelectedRuleId] = useState<string>("income");
   const entries = snapshot?.transactions.entries ?? [];
@@ -6948,12 +7019,13 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 <Alert>
                   <ShieldCheckIcon />
                   <AlertTitle>
-                    Manual rule writes are not enabled yet
+                    Manual rule editing is not enabled yet
                   </AlertTitle>
                   <AlertDescription>
-                    This route shows current local rule coverage first. Editing,
-                    preview, and historical apply controls stay disabled until
-                    storage write flows are stable.
+                    This route shows current local rule coverage and can apply
+                    previewed matches to loaded history. Creating and editing
+                    rule definitions stays disabled until storage write flows
+                    are stable.
                   </AlertDescription>
                 </Alert>
               </CardContent>
@@ -7039,6 +7111,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               <RuleTestPanel account={ruleTestAccount} rule={selectedRule} />
               <RuleHistoricalPreviewPanel
                 entries={entries}
+                onApplied={onRefresh}
                 rule={selectedRule}
                 rules={categoryRuleSummaries}
                 totalRows={snapshot?.transactions.total ?? entries.length}
@@ -7305,7 +7378,7 @@ function RouteContent({
     case "accounts":
       return <AccountsRoute snapshot={snapshot} />;
     case "rules":
-      return <RulesRoute snapshot={snapshot} />;
+      return <RulesRoute snapshot={snapshot} onRefresh={onRefresh} />;
     case "exports":
     case "logs":
       return <LogsRoute snapshot={snapshot} />;

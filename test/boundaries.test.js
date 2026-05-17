@@ -157,6 +157,10 @@ test("rules UI keeps current rule previews and conflicts aligned", async () => {
 
   assert.match(appSource, /matchType: CategoryRuleSummary\["matchType"\]/);
   assert.match(appSource, /function findRuleHistoricalMatches/);
+  assert.match(appSource, /updateLedgerTransactionsBulk/);
+  assert.match(appSource, /function applyPreviewedChanges/);
+  assert.match(appSource, /categoryId: rule\.categoryId/);
+  assert.match(appSource, /Preview before applying/);
   assert.match(appSource, /rule\.matchType !== "fallback"/);
   assert.match(appSource, /function ruleHasMccOnlyHistoryConstraint/);
   assert.match(appSource, /MCC-only preview unavailable/);
@@ -178,6 +182,7 @@ test("rules UI keeps current rule previews and conflicts aligned", async () => {
     appSource,
     /builtInRuleSummaries\.filter\(\(rule\) =>\s*ledgerEntryMatchesRule/,
   );
+  assert.doesNotMatch(appSource, /historical apply controls stay disabled/);
 });
 
 test("web client caches local snapshots for offline browsing", async () => {
