@@ -75,6 +75,16 @@ export {
 export interface LedgerDbTransaction {
   upsertLedgerEntries(entries: readonly LedgerEntry[]): Promise<void>;
   setSyncCursor(cursor: SyncCursor): Promise<void>;
+  updateLedgerEntryAnnotation(
+    profile: string,
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+  ): Promise<LedgerEntry | undefined>;
+  updateLedgerEntrySplitPlan(
+    profile: string,
+    id: string,
+    update: LedgerEntrySplitPlanUpdate,
+  ): Promise<LedgerEntry | undefined>;
 }
 
 export interface LedgerDb {

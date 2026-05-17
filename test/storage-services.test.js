@@ -168,6 +168,90 @@ test("write service delegates annotation and split-plan updates", async () => {
   });
 });
 
+test("write service runs transaction edits inside explicit boundaries", async () => {
+  const calls = [];
+  const db = {
+    async transaction(callback) {
+      calls.push({ type: "begin" });
+
+      const result = await callback({
+        async updateLedgerEntryAnnotation(profile, id, update) {
+          calls.push({ type: "annotation", profile, id, update });
+          return {
+            id,
+            accountId: "account",
+            time: 1,
+            description: "entry",
+            amount: 1,
+            currencyCode: 980,
+            rawStatementItemId: "raw",
+          };
+        },
+        async updateLedgerEntrySplitPlan(profile, id, update) {
+          calls.push({ type: "split", profile, id, update });
+          return {
+            id,
+            accountId: "account",
+            time: 1,
+            description: "entry",
+            amount: 1,
+            currencyCode: 980,
+            rawStatementItemId: "raw",
+          };
+        },
+        async upsertLedgerEntries() {},
+        async setSyncCursor() {},
+      });
+
+      calls.push({ type: "commit" });
+      return result;
+    },
+  };
+  const writeService = createLedgerWriteService({
+    db,
+    defaultProfile: "demo",
+  });
+
+  await writeService.updateTransactionNote("entry-1", "Reviewed");
+  await writeService.updateTransactionTags("entry-1", ["reviewed"], " ");
+  await writeService.updateTransactionSplitPlan("entry-1", {
+    lines: [{ category: "Groceries", amount: 100 }],
+  });
+
+  assert.deepEqual(
+    calls.map((call) => call.type),
+    [
+      "begin",
+      "annotation",
+      "commit",
+      "begin",
+      "annotation",
+      "commit",
+      "begin",
+      "split",
+      "commit",
+    ],
+  );
+  assert.deepEqual(calls[1], {
+    type: "annotation",
+    profile: "demo",
+    id: "entry-1",
+    update: { note: "Reviewed" },
+  });
+  assert.deepEqual(calls[4], {
+    type: "annotation",
+    profile: "demo",
+    id: "entry-1",
+    update: { tags: ["reviewed"] },
+  });
+  assert.deepEqual(calls[7], {
+    type: "split",
+    profile: "demo",
+    id: "entry-1",
+    update: { lines: [{ category: "Groceries", amount: 100 }] },
+  });
+});
+
 test("ledger services factory returns both query and write surfaces", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const db = createSqliteLedgerDb({

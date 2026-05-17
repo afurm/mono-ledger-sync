@@ -1016,6 +1016,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       setSyncCursor: async (cursor) => {
         this.setSyncCursorSync(cursor);
       },
+      updateLedgerEntryAnnotation: (profile, id, update) =>
+        this.updateLedgerEntryAnnotation(profile, id, update),
+      updateLedgerEntrySplitPlan: (profile, id, update) =>
+        this.updateLedgerEntrySplitPlan(profile, id, update),
     };
 
     try {
