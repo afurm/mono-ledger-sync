@@ -38,6 +38,14 @@ Stop the local app before replacing or restoring a database. Remove stale
 SQLite WAL/SHM sidecar files next to the database before copying the selected
 database into place.
 
+## Removing local account data
+
+Removing a local workspace must include credential cleanup. Delete the saved
+Monobank token for the active profile from **Settings -> Monobank token** or
+`DELETE /api/app/token` before removing the profile database, SQLite sidecar
+files, backups, and generated exports. Token deletion is profile-scoped, so
+removing one local profile must not clear credentials for another profile.
+
 ## Stronger local privacy
 
 For stricter local privacy, place the data directory on an encrypted volume or encrypted folder before running the app:

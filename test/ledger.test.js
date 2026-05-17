@@ -2274,6 +2274,8 @@ test("local API token endpoint saves and deletes monobank token state", async ()
     });
 
     try {
+      await monobankTokenStore.setToken("other", "other-profile-token");
+
       const noTokenConfig = await server.inject({
         method: "GET",
         url: "/api/app/config",
@@ -2388,6 +2390,10 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       assert.equal(deletedTokenConfig.statusCode, 200);
       assert.equal(deletedTokenConfig.json().token.profile, "demo");
       assert.equal(deletedTokenConfig.json().token.hasToken, false);
+      assert.equal(
+        await monobankTokenStore.getToken("other"),
+        "other-profile-token",
+      );
       assert.equal(deletedTokenSync.statusCode, 400);
       assert.deepEqual(deletedTokenSync.json(), {
         error: "auth_required",
