@@ -9,9 +9,11 @@ import type inject from "light-my-request";
 
 import {
   createLedgerExport,
+  createLocalConfigurationExport,
   exportPresetNames,
   isExportFormat,
   isExportPreset,
+  parseLocalConfigurationImport,
   type ExportFormat,
   type ExportPreset,
 } from "../exports/index.js";
@@ -129,6 +131,7 @@ export interface LocalApiTestRequest {
 
 export interface LocalApiTestResponse {
   statusCode: number;
+  headers: Record<string, string | string[] | number | undefined>;
   body: string;
   json(): unknown;
 }
@@ -663,6 +666,35 @@ const ledgerExportQuerySchema = {
     accountId: { type: "string" },
     categoryId: { type: "string" },
     tag: { type: "string" },
+  },
+} as const;
+
+const localConfigurationImportBodySchema = {
+  type: "object",
+  additionalProperties: true,
+} as const;
+
+const localConfigurationImportResponseSchema = {
+  type: "object",
+  required: ["imported"],
+  properties: {
+    imported: {
+      type: "object",
+      required: [
+        "categories",
+        "categoryRules",
+        "budgets",
+        "budgetPeriods",
+        "tags",
+      ],
+      properties: {
+        categories: { type: "number" },
+        categoryRules: { type: "number" },
+        budgets: { type: "number" },
+        budgetPeriods: { type: "number" },
+        tags: { type: "number" },
+      },
+    },
   },
 } as const;
 
@@ -2391,6 +2423,68 @@ function registerLocalApiRoutes(
   );
 
   app.get(
+    `${localApiRoutePrefix}/exports/local-configuration`,
+    {
+      schema: {
+        response: {
+          200: { type: "string" },
+        },
+      },
+    },
+    async (_request, reply) => {
+      const services = await getServices();
+      const configurationExport = await createLocalConfigurationExport(
+        services.db,
+        {
+          profile: services.profile,
+        },
+      );
+
+      reply.header("content-type", configurationExport.contentType);
+      reply.header(
+        "content-disposition",
+        `attachment; filename="${configurationExport.fileName}"`,
+      );
+
+      return configurationExport.body;
+    },
+  );
+
+  app.post(
+    `${localApiRoutePrefix}/imports/local-configuration`,
+    {
+      schema: {
+        body: localConfigurationImportBodySchema,
+        response: {
+          200: localConfigurationImportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const services = await getServices();
+
+      try {
+        const configuration = parseLocalConfigurationImport(request.body);
+        const imported = await services.db.importLocalConfiguration(
+          services.profile,
+          configuration,
+        );
+
+        return {
+          imported,
+        };
+      } catch (error) {
+        reply.code(400);
+        return {
+          error: "invalid_local_configuration_import",
+          message: error instanceof Error ? error.message : "Invalid import",
+        };
+      }
+    },
+  );
+
+  app.get(
     `${localApiRoutePrefix}/fixtures/summary`,
     {
       schema: {
@@ -2718,6 +2812,7 @@ export function createLocalApiServer(
 
       return {
         statusCode: response.statusCode,
+        headers: response.headers,
         body: response.body,
         json: () => response.json(),
       };
