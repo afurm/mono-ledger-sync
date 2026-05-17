@@ -11,13 +11,15 @@ function entry(overrides) {
     description: overrides.description ?? overrides.merchantName,
     amount: overrides.amount,
     currencyCode: 980,
-    categoryId: overrides.categoryId,
+    categoryId: overrides.categoryId ?? "groceries",
     merchantName: overrides.merchantName,
+    hold: overrides.hold ?? false,
+    tags: overrides.tags,
     rawStatementItemId: overrides.id,
   };
 }
 
-test("detects duplicate, transfer, reversal, and refund ledger review candidates", () => {
+test("detects duplicate, transfer, reversal, refund, and needs-review candidates", () => {
   const candidates = findLedgerEntryReviewCandidates([
     entry({
       id: "duplicate-a",
@@ -71,11 +73,40 @@ test("detects duplicate, transfer, reversal, and refund ledger review candidates
       amount: 10_000,
       time: 1_777_766_400,
     }),
+    entry({
+      id: "uncategorized",
+      merchantName: "Unknown Counterparty",
+      categoryId: "uncategorized",
+      amount: -3400,
+      time: 1_777_800_000,
+    }),
+    entry({
+      id: "hold",
+      merchantName: "Pending Hotel",
+      amount: -100_000,
+      hold: true,
+      time: 1_777_900_000,
+    }),
+    entry({
+      id: "reviewed-uncategorized",
+      merchantName: "Reviewed Unknown",
+      categoryId: "uncategorized",
+      amount: -1200,
+      tags: ["reviewed"],
+      time: 1_777_950_000,
+    }),
   ]);
 
   assert.deepEqual(
     candidates.map((candidate) => candidate.kind),
-    ["duplicate", "reversal", "transfer", "refund"],
+    [
+      "duplicate",
+      "reversal",
+      "transfer",
+      "refund",
+      "needs_review",
+      "needs_review",
+    ],
   );
   assert.deepEqual(
     candidates.map((candidate) => candidate.entries.map((item) => item.id)),
@@ -84,6 +115,17 @@ test("detects duplicate, transfer, reversal, and refund ledger review candidates
       ["charge", "reversal"],
       ["transfer-out", "transfer-in"],
       ["purchase", "refund"],
+      ["uncategorized"],
+      ["hold"],
+    ],
+  );
+  assert.deepEqual(
+    candidates
+      .filter((candidate) => candidate.kind === "needs_review")
+      .map((candidate) => candidate.reason),
+    [
+      "Uncategorized transaction needs a category review.",
+      "Pending hold transaction should be reviewed before month close.",
     ],
   );
 });
