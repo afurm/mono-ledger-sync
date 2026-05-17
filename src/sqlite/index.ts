@@ -81,6 +81,22 @@ export interface SqliteDatabaseInfo {
   webhookEvents: number;
 }
 
+export interface SqliteLocalConfigurationImport {
+  categories?: readonly Category[];
+  categoryRules?: readonly CategoryRule[];
+  budgets?: readonly Budget[];
+  budgetPeriods?: readonly BudgetPeriod[];
+  tags?: readonly Tag[];
+}
+
+export interface SqliteLocalConfigurationImportStats {
+  categories: number;
+  categoryRules: number;
+  budgets: number;
+  budgetPeriods: number;
+  tags: number;
+}
+
 export interface SqliteLedgerDb extends LedgerDb {
   readonly filePath: string;
   readonly profile: string;
@@ -121,6 +137,10 @@ export interface SqliteLedgerDb extends LedgerDb {
     profile?: string,
     limit?: number,
   ): Promise<readonly StoredWebhookEvent[]>;
+  importLocalConfiguration(
+    profile: string,
+    configuration: SqliteLocalConfigurationImport,
+  ): Promise<SqliteLocalConfigurationImportStats>;
   recordWebhookEvent(
     event: MonobankPersonalWebhookEvent,
     receivedAt?: string,
@@ -1257,9 +1277,7 @@ function mapCategoryRuleRow(row: SqliteCategoryRuleRow): CategoryRule {
     rule.isSystem = true;
   }
 
-  if (row.is_enabled === 1) {
-    rule.isEnabled = true;
-  }
+  rule.isEnabled = row.is_enabled === 1;
 
   if (row.updated_at !== row.created_at) {
     rule.updatedAt = row.updated_at;
@@ -2469,6 +2487,277 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     return rows.map(mapWebhookEventRow);
   }
 
+  async importLocalConfiguration(
+    profile: string,
+    configuration: SqliteLocalConfigurationImport,
+  ): Promise<SqliteLocalConfigurationImportStats> {
+    const normalizedProfile = profile.trim() || this.profile;
+    const insertCategory = this.#database.prepare(
+      `
+        INSERT INTO categories (
+          profile, id, name, color, description, is_system, created_at, updated_at
+        )
+        VALUES (
+          @profile, @id, @name, @color, @description, @isSystem, @createdAt, @updatedAt
+        )
+        ON CONFLICT(profile, id) DO UPDATE SET
+          name = excluded.name,
+          color = excluded.color,
+          description = excluded.description,
+          is_system = excluded.is_system,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const insertCategoryRule = this.#database.prepare(
+      `
+        INSERT INTO category_rules (
+          profile,
+          id,
+          category_id,
+          name,
+          priority,
+          match_type,
+          merchant_contains,
+          description_contains,
+          mcc,
+          amount_direction,
+          is_system,
+          is_enabled,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @categoryId,
+          @name,
+          @priority,
+          @matchType,
+          @merchantContains,
+          @descriptionContains,
+          @mcc,
+          @amountDirection,
+          @isSystem,
+          @isEnabled,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, id) DO UPDATE SET
+          category_id = excluded.category_id,
+          name = excluded.name,
+          priority = excluded.priority,
+          match_type = excluded.match_type,
+          merchant_contains = excluded.merchant_contains,
+          description_contains = excluded.description_contains,
+          mcc = excluded.mcc,
+          amount_direction = excluded.amount_direction,
+          is_system = excluded.is_system,
+          is_enabled = excluded.is_enabled,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const insertBudget = this.#database.prepare(
+      `
+        INSERT INTO budgets (
+          profile,
+          id,
+          category_id,
+          currency_code,
+          period_start,
+          period_end,
+          amount_limit,
+          rollover,
+          include_inflows,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @categoryId,
+          @currencyCode,
+          @periodStart,
+          @periodEnd,
+          @amountLimit,
+          @rollover,
+          @includeInflows,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, id) DO UPDATE SET
+          category_id = excluded.category_id,
+          currency_code = excluded.currency_code,
+          period_start = excluded.period_start,
+          period_end = excluded.period_end,
+          amount_limit = excluded.amount_limit,
+          rollover = excluded.rollover,
+          include_inflows = excluded.include_inflows,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const insertBudgetPeriod = this.#database.prepare(
+      `
+        INSERT INTO budget_periods (
+          profile,
+          id,
+          budget_id,
+          period_start,
+          period_end,
+          planned_amount,
+          actual_amount,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @budgetId,
+          @periodStart,
+          @periodEnd,
+          @plannedAmount,
+          @actualAmount,
+          @status,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, id) DO UPDATE SET
+          budget_id = excluded.budget_id,
+          period_start = excluded.period_start,
+          period_end = excluded.period_end,
+          planned_amount = excluded.planned_amount,
+          actual_amount = excluded.actual_amount,
+          status = excluded.status,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const insertTag = this.#database.prepare(
+      `
+        INSERT INTO tags (
+          profile,
+          id,
+          name,
+          normalized_name,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @name,
+          @normalizedName,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, normalized_name) DO UPDATE SET
+          name = excluded.name,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const stats: SqliteLocalConfigurationImportStats = {
+      categories: 0,
+      categoryRules: 0,
+      budgets: 0,
+      budgetPeriods: 0,
+      tags: 0,
+    };
+
+    this.#database.transaction(() => {
+      this.ensureProfileName(normalizedProfile);
+
+      for (const category of configuration.categories ?? []) {
+        const updatedAt = category.updatedAt ?? category.createdAt;
+        insertCategory.run({
+          profile: normalizedProfile,
+          id: category.id,
+          name: category.name,
+          color: category.color ?? null,
+          description: category.description ?? "",
+          isSystem: category.isSystem ? 1 : 0,
+          createdAt: category.createdAt,
+          updatedAt,
+        });
+        stats.categories += 1;
+      }
+
+      for (const rule of configuration.categoryRules ?? []) {
+        const updatedAt = rule.updatedAt ?? rule.createdAt;
+        insertCategoryRule.run({
+          profile: normalizedProfile,
+          id: rule.id,
+          categoryId: rule.categoryId,
+          name: rule.name,
+          priority: rule.priority,
+          matchType: rule.matchType,
+          merchantContains: rule.merchantContains ?? null,
+          descriptionContains: rule.descriptionContains ?? null,
+          mcc: rule.mcc ?? null,
+          amountDirection: rule.amountDirection ?? null,
+          isSystem: rule.isSystem ? 1 : 0,
+          isEnabled: rule.isEnabled === false ? 0 : 1,
+          createdAt: rule.createdAt,
+          updatedAt,
+        });
+        stats.categoryRules += 1;
+      }
+
+      for (const budget of configuration.budgets ?? []) {
+        insertBudget.run({
+          profile: normalizedProfile,
+          id: budget.id,
+          categoryId: budget.categoryId,
+          currencyCode: budget.currencyCode,
+          periodStart: budget.periodStart,
+          periodEnd: budget.periodEnd,
+          amountLimit: budget.amountLimit,
+          rollover: budget.rollover ? 1 : 0,
+          includeInflows: budget.includeInflows ? 1 : 0,
+          createdAt: budget.createdAt,
+          updatedAt: budget.updatedAt,
+        });
+        stats.budgets += 1;
+      }
+
+      for (const period of configuration.budgetPeriods ?? []) {
+        insertBudgetPeriod.run({
+          profile: normalizedProfile,
+          id: period.id,
+          budgetId: period.budgetId,
+          periodStart: period.periodStart,
+          periodEnd: period.periodEnd,
+          plannedAmount: period.plannedAmount,
+          actualAmount: period.actualAmount ?? null,
+          status: period.status,
+          createdAt: period.createdAt,
+          updatedAt: period.updatedAt,
+        });
+        stats.budgetPeriods += 1;
+      }
+
+      for (const tag of configuration.tags ?? []) {
+        const normalizedName =
+          tag.normalizedName.trim() || normalizeTagName(tag.name);
+        const updatedAt = tag.updatedAt ?? tag.createdAt;
+
+        if (!normalizedName) {
+          continue;
+        }
+
+        insertTag.run({
+          profile: normalizedProfile,
+          id: tag.id || tagIdForName(normalizedName),
+          name: tag.name,
+          normalizedName,
+          createdAt: tag.createdAt,
+          updatedAt,
+        });
+        stats.tags += 1;
+      }
+    })();
+
+    return stats;
+  }
+
   async recordWebhookEvent(
     event: MonobankPersonalWebhookEvent,
     receivedAt = nowIso(),
@@ -2785,6 +3074,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   }
 
   private ensureProfile(): void {
+    this.ensureProfileName(this.profile);
+  }
+
+  private ensureProfileName(profile: string): void {
     this.#database
       .prepare(
         `
@@ -2793,7 +3086,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           ON CONFLICT(name) DO NOTHING
         `,
       )
-      .run(this.profile, nowIso());
+      .run(profile, nowIso());
   }
 
   private seedDefaultCategories(): void {

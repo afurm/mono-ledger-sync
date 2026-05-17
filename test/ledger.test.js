@@ -9,6 +9,7 @@ import test from "node:test";
 
 import {
   createLedgerExport,
+  createLocalConfigurationExport,
   exportPresetDefinitions,
 } from "../dist/exports/index.js";
 import {
@@ -1878,6 +1879,177 @@ test("exports synced ledger entries as CSV and JSON", async () => {
       );
     } finally {
       await db.close();
+    }
+  });
+});
+
+test("exports and imports local ledger configuration", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const targetServer = createLocalApiServer({
+      profile: "restored",
+      source: "fixture",
+      dataDir: path.join(tempRoot, "target"),
+    });
+
+    try {
+      const payload = {
+        format: "local-configuration",
+        schemaVersion: 1,
+        categories: [
+          {
+            id: "utilities",
+            name: "Utilities",
+            color: "#0891b2",
+            description: "Bills and household services",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+        categoryRules: [
+          {
+            id: "utilities-provider-rule",
+            categoryId: "utilities",
+            name: "Utilities providers",
+            priority: 10,
+            matchType: "condition",
+            merchantContains: "Utility Co",
+            amountDirection: "expense",
+            isEnabled: false,
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+        budgets: [
+          {
+            id: "utilities-monthly",
+            profile: "demo",
+            categoryId: "utilities",
+            currencyCode: 980,
+            periodStart: "2026-05-01",
+            periodEnd: "2026-05-31",
+            amountLimit: 250000,
+            rollover: false,
+            includeInflows: false,
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+        budgetPeriods: [
+          {
+            id: "utilities-monthly-2026-05",
+            profile: "demo",
+            budgetId: "utilities-monthly",
+            periodStart: "2026-05-01",
+            periodEnd: "2026-05-31",
+            plannedAmount: 250000,
+            actualAmount: 125000,
+            status: "open",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+        tags: [
+          {
+            id: "tag-monthly-review",
+            name: "Monthly Review",
+            normalizedName: "monthly review",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+      };
+
+      const importResponse = await targetServer.inject({
+        method: "POST",
+        url: "/api/imports/local-configuration",
+        body: payload,
+      });
+      const exportResponse = await targetServer.inject({
+        method: "GET",
+        url: "/api/exports/local-configuration",
+      });
+      const invalidImportResponse = await targetServer.inject({
+        method: "POST",
+        url: "/api/imports/local-configuration",
+        body: {
+          format: "unsupported",
+          categories: [],
+        },
+      });
+      const sourceDb = createSqliteLedgerDb({
+        filePath: path.join(tempRoot, "source-helper.sqlite"),
+        profile: "demo",
+      });
+
+      try {
+        await sourceDb.migrate();
+        const helperExport = await createLocalConfigurationExport(sourceDb, {
+          profile: "demo",
+        });
+
+        assert.match(
+          helperExport.fileName,
+          /^mono-ledger-demo-local-configuration\.json$/,
+        );
+        assert.equal(
+          helperExport.contentType,
+          "application/json; charset=utf-8",
+        );
+        assert.equal(JSON.parse(helperExport.body).exportedAt, undefined);
+      } finally {
+        await sourceDb.close();
+      }
+
+      const exported = exportResponse.json();
+
+      assert.equal(importResponse.statusCode, 200);
+      assert.deepEqual(importResponse.json().imported, {
+        categories: 1,
+        categoryRules: 1,
+        budgets: 1,
+        budgetPeriods: 1,
+        tags: 1,
+      });
+      assert.equal(exportResponse.statusCode, 200);
+      assert.match(
+        exportResponse.headers["content-disposition"],
+        /mono-ledger-restored-local-configuration\.json/,
+      );
+      assert.equal(exported.profile, "restored");
+      assert.equal(exported.format, "local-configuration");
+      assert.equal(exported.schemaVersion, 1);
+      assert.equal(exported.totals.budgets, 1);
+      assert.equal(
+        exported.categories.some((entry) => entry.id === "utilities"),
+        true,
+      );
+      assert.equal(
+        exported.categoryRules.some(
+          (entry) =>
+            entry.id === "utilities-provider-rule" && entry.isEnabled === false,
+        ),
+        true,
+      );
+      assert.deepEqual(exported.budgets[0], {
+        id: "utilities-monthly",
+        profile: "restored",
+        categoryId: "utilities",
+        currencyCode: 980,
+        periodStart: "2026-05-01",
+        periodEnd: "2026-05-31",
+        amountLimit: 250000,
+        rollover: false,
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-02T00:00:00.000Z",
+      });
+      assert.equal(exported.tags[0].normalizedName, "monthly review");
+      assert.equal(invalidImportResponse.statusCode, 400);
+      assert.equal(
+        invalidImportResponse.json().error,
+        "invalid_local_configuration_import",
+      );
+    } finally {
+      await targetServer.close();
     }
   });
 });

@@ -1,5 +1,13 @@
 import type { SqliteLedgerDb } from "../sqlite/index.js";
-import type { LedgerEntry, LedgerEntryQuery } from "../storage/index.js";
+import type {
+  Budget,
+  BudgetPeriod,
+  Category,
+  CategoryRule,
+  LedgerEntry,
+  LedgerEntryQuery,
+  Tag,
+} from "../storage/index.js";
 
 export type ExportFormat = "csv" | "json" | "jsonl" | "journal-csv" | "sqlite";
 export type ExportPreset =
@@ -25,6 +33,33 @@ export interface LedgerExport {
   contentType: string;
   body: string;
 }
+
+export interface LocalConfigurationExportRequest {
+  profile: string;
+}
+
+export interface LocalConfigurationExportBody {
+  profile: string;
+  format: "local-configuration";
+  schemaVersion: 1;
+  categories: readonly Category[];
+  categoryRules: readonly CategoryRule[];
+  budgets: readonly Budget[];
+  budgetPeriods: readonly BudgetPeriod[];
+  tags: readonly Tag[];
+  totals: {
+    categories: number;
+    categoryRules: number;
+    budgets: number;
+    budgetPeriods: number;
+    tags: number;
+  };
+}
+
+export type LocalConfigurationImportBody = Omit<
+  LocalConfigurationExportBody,
+  "profile" | "format" | "schemaVersion" | "totals"
+>;
 
 export const exportPresetDefinitions: Readonly<
   Record<
@@ -153,6 +188,12 @@ function createExportFileName(
   }
 
   return `${parts.join("-")}.${fileExtension(format)}`;
+}
+
+function createLocalConfigurationFileName(
+  request: LocalConfigurationExportRequest,
+): string {
+  return `mono-ledger-${safeFileSegment(request.profile) || "default"}-local-configuration.json`;
 }
 
 function createEntryQuery(request: ExportRequest): LedgerEntryQuery {
@@ -326,6 +367,282 @@ function renderJournalCsv(entries: readonly LedgerEntry[]): string {
   return [headers.join(","), ...rows].join("\n");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readRequiredString(
+  record: Record<string, unknown>,
+  property: string,
+): string {
+  const value = record[property];
+
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Invalid local configuration: ${property} is required`);
+  }
+
+  return value;
+}
+
+function readOptionalString(
+  record: Record<string, unknown>,
+  property: string,
+): string | undefined {
+  const value = record[property];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(
+      `Invalid local configuration: ${property} must be a string`,
+    );
+  }
+
+  return value;
+}
+
+function readRequiredNumber(
+  record: Record<string, unknown>,
+  property: string,
+): number {
+  const value = record[property];
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid local configuration: ${property} is required`);
+  }
+
+  return value;
+}
+
+function readOptionalNumber(
+  record: Record<string, unknown>,
+  property: string,
+): number | undefined {
+  const value = record[property];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(
+      `Invalid local configuration: ${property} must be a number`,
+    );
+  }
+
+  return value;
+}
+
+function readOptionalBoolean(
+  record: Record<string, unknown>,
+  property: string,
+): boolean | undefined {
+  const value = record[property];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new Error(
+      `Invalid local configuration: ${property} must be a boolean`,
+    );
+  }
+
+  return value;
+}
+
+function readArray(
+  record: Record<string, unknown>,
+  property: keyof LocalConfigurationImportBody,
+): readonly Record<string, unknown>[] {
+  const value = record[property];
+
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value) || !value.every(isRecord)) {
+    throw new Error(
+      `Invalid local configuration: ${property} must be an array`,
+    );
+  }
+
+  return value;
+}
+
+function parseCategory(record: Record<string, unknown>): Category {
+  const category: Category = {
+    id: readRequiredString(record, "id"),
+    name: readRequiredString(record, "name"),
+    createdAt: readRequiredString(record, "createdAt"),
+  };
+  const color = readOptionalString(record, "color");
+  const description = readOptionalString(record, "description");
+  const isSystem = readOptionalBoolean(record, "isSystem");
+  const updatedAt = readOptionalString(record, "updatedAt");
+
+  if (color !== undefined) {
+    category.color = color;
+  }
+  if (description !== undefined) {
+    category.description = description;
+  }
+  if (isSystem !== undefined) {
+    category.isSystem = isSystem;
+  }
+  if (updatedAt !== undefined) {
+    category.updatedAt = updatedAt;
+  }
+
+  return category;
+}
+
+function parseCategoryRule(record: Record<string, unknown>): CategoryRule {
+  const matchType = readRequiredString(record, "matchType");
+  const amountDirection = readOptionalString(record, "amountDirection");
+
+  if (matchType !== "condition" && matchType !== "fallback") {
+    throw new Error("Invalid local configuration: matchType is unsupported");
+  }
+  if (
+    amountDirection !== undefined &&
+    amountDirection !== "income" &&
+    amountDirection !== "expense" &&
+    amountDirection !== "any"
+  ) {
+    throw new Error(
+      "Invalid local configuration: amountDirection is unsupported",
+    );
+  }
+
+  const rule: CategoryRule = {
+    id: readRequiredString(record, "id"),
+    categoryId: readRequiredString(record, "categoryId"),
+    name: readRequiredString(record, "name"),
+    priority: readRequiredNumber(record, "priority"),
+    matchType,
+    createdAt: readRequiredString(record, "createdAt"),
+  };
+  const merchantContains = readOptionalString(record, "merchantContains");
+  const descriptionContains = readOptionalString(record, "descriptionContains");
+  const mcc = readOptionalNumber(record, "mcc");
+  const isSystem = readOptionalBoolean(record, "isSystem");
+  const isEnabled = readOptionalBoolean(record, "isEnabled");
+  const updatedAt = readOptionalString(record, "updatedAt");
+
+  if (merchantContains !== undefined) {
+    rule.merchantContains = merchantContains;
+  }
+  if (descriptionContains !== undefined) {
+    rule.descriptionContains = descriptionContains;
+  }
+  if (mcc !== undefined) {
+    rule.mcc = mcc;
+  }
+  if (amountDirection !== undefined) {
+    rule.amountDirection = amountDirection;
+  }
+  if (isSystem !== undefined) {
+    rule.isSystem = isSystem;
+  }
+  if (isEnabled !== undefined) {
+    rule.isEnabled = isEnabled;
+  }
+  if (updatedAt !== undefined) {
+    rule.updatedAt = updatedAt;
+  }
+
+  return rule;
+}
+
+function parseBudget(record: Record<string, unknown>): Budget {
+  const budget: Budget = {
+    id: readRequiredString(record, "id"),
+    profile: readRequiredString(record, "profile"),
+    categoryId: readRequiredString(record, "categoryId"),
+    currencyCode: readRequiredNumber(record, "currencyCode"),
+    periodStart: readRequiredString(record, "periodStart"),
+    periodEnd: readRequiredString(record, "periodEnd"),
+    amountLimit: readRequiredNumber(record, "amountLimit"),
+    rollover: readOptionalBoolean(record, "rollover") ?? false,
+    createdAt: readRequiredString(record, "createdAt"),
+    updatedAt: readRequiredString(record, "updatedAt"),
+  };
+  const includeInflows = readOptionalBoolean(record, "includeInflows");
+
+  if (includeInflows !== undefined) {
+    budget.includeInflows = includeInflows;
+  }
+
+  return budget;
+}
+
+function parseBudgetPeriod(record: Record<string, unknown>): BudgetPeriod {
+  const status = readRequiredString(record, "status");
+
+  if (status !== "open" && status !== "closed") {
+    throw new Error("Invalid local configuration: status is unsupported");
+  }
+
+  const period: BudgetPeriod = {
+    id: readRequiredString(record, "id"),
+    profile: readRequiredString(record, "profile"),
+    budgetId: readRequiredString(record, "budgetId"),
+    periodStart: readRequiredString(record, "periodStart"),
+    periodEnd: readRequiredString(record, "periodEnd"),
+    plannedAmount: readRequiredNumber(record, "plannedAmount"),
+    status,
+    createdAt: readRequiredString(record, "createdAt"),
+    updatedAt: readRequiredString(record, "updatedAt"),
+  };
+  const actualAmount = readOptionalNumber(record, "actualAmount");
+
+  if (actualAmount !== undefined) {
+    period.actualAmount = actualAmount;
+  }
+
+  return period;
+}
+
+function parseTag(record: Record<string, unknown>): Tag {
+  const tag: Tag = {
+    id: readRequiredString(record, "id"),
+    name: readRequiredString(record, "name"),
+    normalizedName: readRequiredString(record, "normalizedName"),
+    createdAt: readRequiredString(record, "createdAt"),
+  };
+  const updatedAt = readOptionalString(record, "updatedAt");
+
+  if (updatedAt !== undefined) {
+    tag.updatedAt = updatedAt;
+  }
+
+  return tag;
+}
+
+export function parseLocalConfigurationImport(
+  value: unknown,
+): LocalConfigurationImportBody {
+  if (!isRecord(value)) {
+    throw new Error("Invalid local configuration: JSON object is required");
+  }
+
+  if (value.format !== undefined && value.format !== "local-configuration") {
+    throw new Error("Invalid local configuration: format is unsupported");
+  }
+
+  return {
+    categories: readArray(value, "categories").map(parseCategory),
+    categoryRules: readArray(value, "categoryRules").map(parseCategoryRule),
+    budgets: readArray(value, "budgets").map(parseBudget),
+    budgetPeriods: readArray(value, "budgetPeriods").map(parseBudgetPeriod),
+    tags: readArray(value, "tags").map(parseTag),
+  };
+}
+
 export async function createLedgerExport(
   db: SqliteLedgerDb,
   request: ExportRequest,
@@ -368,5 +685,42 @@ export async function createLedgerExport(
       format === "journal-csv"
         ? renderJournalCsv(page.entries)
         : renderLedgerCsv(page.entries),
+  };
+}
+
+export async function createLocalConfigurationExport(
+  db: SqliteLedgerDb,
+  request: LocalConfigurationExportRequest,
+): Promise<LedgerExport> {
+  const [categories, categoryRules, budgets, budgetPeriods, tags] =
+    await Promise.all([
+      db.listCategories(request.profile),
+      db.listCategoryRules(request.profile),
+      db.listBudgets(request.profile),
+      db.listBudgetPeriods(request.profile),
+      db.listTags(request.profile),
+    ]);
+  const body: LocalConfigurationExportBody = {
+    profile: request.profile,
+    format: "local-configuration",
+    schemaVersion: 1,
+    categories,
+    categoryRules,
+    budgets,
+    budgetPeriods,
+    tags,
+    totals: {
+      categories: categories.length,
+      categoryRules: categoryRules.length,
+      budgets: budgets.length,
+      budgetPeriods: budgetPeriods.length,
+      tags: tags.length,
+    },
+  };
+
+  return {
+    fileName: createLocalConfigurationFileName(request),
+    contentType: "application/json; charset=utf-8",
+    body: JSON.stringify(body, null, 2),
   };
 }
