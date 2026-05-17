@@ -37,6 +37,7 @@ configuration, and direct filesystem behavior.
   category assignment behavior.
 - `Merchant` defines normalized local merchant metadata derived from synced
   ledger rows for cleanup rules and filters.
+- `Tag` defines normalized local tag metadata derived from user annotations.
 - `Budget` defines the planned category-period budget contract before richer
   budget storage and UI are enabled.
 - `BudgetPeriod` defines per-period budget tracking rows before monthly close

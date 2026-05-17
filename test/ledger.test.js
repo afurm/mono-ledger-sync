@@ -314,6 +314,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         search: "reimbursable",
         limit: 20,
       });
+      const tags = await db.listTags(profile);
 
       assert.equal(result.run.status, "success");
       assert.equal(result.run.itemsSeen, 7);
@@ -340,6 +341,10 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       );
       assert.equal(annotated.note, "Review with accountant");
       assert.deepEqual(annotated.tags, ["tax", "reimbursable"]);
+      assert.deepEqual(
+        tags.map((tag) => tag.name),
+        ["reimbursable", "tax"],
+      );
       assert.equal(noteOnlyUpdate.note, "Updated review note");
       assert.deepEqual(noteOnlyUpdate.tags, ["tax", "reimbursable"]);
       assert.equal(emptyUpdate.updatedAt, noteOnlyUpdate.updatedAt);
@@ -1028,6 +1033,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0011_budgets",
         "0012_budget_periods",
         "0013_recurring_items",
+        "0014_tags",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1037,6 +1043,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
       assert.deepEqual(await db.listRecurringItems(profile), []);
+      assert.deepEqual(await db.listTags(profile), []);
 
       const accounts = await db.listAccounts(profile);
       assert.equal(accounts.length, 1);

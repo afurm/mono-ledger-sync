@@ -20,6 +20,7 @@ import type {
   SyncRun,
   SyncRunStatus,
   StoredWebhookEvent,
+  Tag,
   WebhookEventStatus,
   ledgerEntrySortDirections,
   ledgerEntrySortFields,
@@ -46,6 +47,7 @@ export type {
   SyncRun,
   SyncRunStatus,
   StoredWebhookEvent,
+  Tag,
   LedgerWriteStats,
   WebhookEventStatus,
 } from "../domain/index.js";
@@ -117,6 +119,7 @@ export interface LedgerDb {
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  listTags(profile?: string): Promise<readonly Tag[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,

@@ -38,6 +38,7 @@ import type {
   StoredWebhookEvent,
   SyncCursor,
   SyncRun,
+  Tag,
 } from "../storage/index.js";
 
 const require = createRequire(import.meta.url);
@@ -114,6 +115,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  listTags(profile?: string): Promise<readonly Tag[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -299,6 +301,14 @@ interface SqliteRecurringItemRow {
   is_active: number;
   started_at: string | null;
   last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SqliteTagRow {
+  id: string;
+  name: string;
+  normalized_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -820,6 +830,25 @@ const migrations: readonly SqliteMigration[] = [
         ON recurring_items(profile, account_id);
     `,
   },
+  {
+    id: "0014_tags",
+    description: "Add tag storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS tags (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_profile_normalized
+        ON tags(profile, normalized_name);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1028,6 +1057,19 @@ function merchantIdForName(normalizedName: string): string {
   return `merchant-${digest}`;
 }
 
+function normalizeTagName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function tagIdForName(normalizedName: string): string {
+  const digest = createHash("sha256")
+    .update(normalizedName)
+    .digest("hex")
+    .slice(0, 16);
+
+  return `tag-${digest}`;
+}
+
 function mapAccountRow(row: SqliteAccountRow): LedgerAccount {
   const account: LedgerAccount = {
     id: row.id,
@@ -1181,6 +1223,21 @@ function mapRecurringItemRow(row: SqliteRecurringItemRow): RecurringItem {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function mapTagRow(row: SqliteTagRow): Tag {
+  const tag: Tag = {
+    id: row.id,
+    name: row.name,
+    normalizedName: row.normalized_name,
+    createdAt: row.created_at,
+  };
+
+  if (row.updated_at !== row.created_at) {
+    tag.updatedAt = row.updated_at;
+  }
+
+  return tag;
 }
 
 function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
@@ -2044,6 +2101,26 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     return rows.map(mapRecurringItemRow);
   }
 
+  async listTags(profile = this.profile): Promise<readonly Tag[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            name,
+            normalized_name,
+            created_at,
+            updated_at
+          FROM tags
+          WHERE profile = ?
+          ORDER BY name
+        `,
+      )
+      .all(profile) as SqliteTagRow[];
+
+    return rows.map(mapTagRow);
+  }
+
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
@@ -2128,6 +2205,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     const row = selectEntry.get(profile, id) as
       | SqliteLedgerEntryRow
       | undefined;
+
+    if (row && annotation.tagsJson !== undefined) {
+      this.upsertTagsFromLedgerEntry(profile, row, nowIso());
+    }
 
     return row ? mapLedgerEntryRow(row) : undefined;
   }
@@ -2754,6 +2835,59 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         createdAt: timestamp,
         updatedAt: timestamp,
       });
+  }
+
+  private upsertTagsFromLedgerEntry(
+    profile: string,
+    row: SqliteLedgerEntryRow,
+    timestamp: string,
+  ): void {
+    const tags = parseTags(row.tags_json);
+
+    if (!tags) {
+      return;
+    }
+
+    const insertTag = this.#database.prepare(
+      `
+        INSERT INTO tags (
+          profile,
+          id,
+          name,
+          normalized_name,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @name,
+          @normalizedName,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, normalized_name) DO UPDATE SET
+          name = excluded.name,
+          updated_at = excluded.updated_at
+      `,
+    );
+
+    for (const name of tags) {
+      const normalizedName = normalizeTagName(name);
+
+      if (!normalizedName) {
+        continue;
+      }
+
+      insertTag.run({
+        profile,
+        id: tagIdForName(normalizedName),
+        name,
+        normalizedName,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
   }
 }
 

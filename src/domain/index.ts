@@ -327,6 +327,14 @@ export interface LedgerEntrySplitPlanUpdate {
   }[];
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+  normalizedName: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface LedgerEntryQuery {
   profile: string;
   accountId?: string;
