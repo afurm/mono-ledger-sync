@@ -29,6 +29,7 @@
     "src/storage/**/*.ts",
     "src/sync/**/*.ts",
     "src/web/api.ts",
+    "src/web/review.ts",
     "src/ui/**/*.ts"
   ]
 }
