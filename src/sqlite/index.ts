@@ -126,6 +126,10 @@ export interface SqliteLedgerDb extends LedgerDb {
     receivedAt?: string,
     deliveryMetadata?: Readonly<Record<string, string>>,
   ): Promise<StoredWebhookEvent>;
+  listPendingWebhookStatementWindows(
+    profile: string,
+    accountId: string,
+  ): Promise<readonly { from: number; to: number }[]>;
   markWebhookEventsAsProcessed(
     profile: string,
     accountId: string,
@@ -213,6 +217,16 @@ interface SqliteWebhookEventRow {
   status: string;
   payload_hash?: string;
   delivery_fingerprint?: string;
+}
+
+interface SqliteWebhookPayloadRow {
+  payload_json: string;
+}
+
+interface SqlitePendingWebhookEventRow {
+  id: string;
+  statement_item_id: string | null;
+  payload_json: string;
 }
 
 interface SqliteSummaryRow {
@@ -914,6 +928,58 @@ function stableStringify(value: unknown): string {
 
 function webhookPayloadHash(event: MonobankPersonalWebhookEvent): string {
   return createHash("sha256").update(stableStringify(event)).digest("hex");
+}
+
+function createStatementItemFingerprint(
+  accountId: string,
+  item: MonobankStatementItem,
+): string {
+  const payload = {
+    accountId,
+    time: item.time,
+    description: item.description,
+    mcc: item.mcc,
+    originalMcc: item.originalMcc,
+    amount: item.amount,
+    operationAmount: item.operationAmount,
+    currencyCode: item.currencyCode,
+    commissionRate: item.commissionRate,
+    cashbackAmount: item.cashbackAmount,
+    balance: item.balance,
+    hold: item.hold,
+    comment: item.comment ?? "",
+    receiptId: item.receiptId ?? "",
+    invoiceId: item.invoiceId ?? "",
+    counterEdrpou: item.counterEdrpou ?? "",
+    counterIban: item.counterIban ?? "",
+    counterName: item.counterName ?? "",
+  };
+
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function statementItemStorageIdentity(
+  accountId: string,
+  item: MonobankStatementItem,
+): string {
+  if (item.id !== undefined && item.id.trim().length > 0) {
+    return item.id;
+  }
+
+  return `missing-id:${createStatementItemFingerprint(accountId, item)}`;
+}
+
+function webhookStatementItemIdentity(payloadJson: string): string | undefined {
+  try {
+    const event = JSON.parse(payloadJson) as MonobankPersonalWebhookEvent;
+
+    return statementItemStorageIdentity(
+      event.data.account,
+      event.data.statementItem,
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 function webhookDeliveryFingerprint(
@@ -2395,7 +2461,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     receivedAt = nowIso(),
     deliveryMetadata = {},
   ): Promise<StoredWebhookEvent> {
-    const statementItemId = event.data.statementItem.id;
+    const statementItemId = statementItemStorageIdentity(
+      event.data.account,
+      event.data.statementItem,
+    );
     const payloadHash = webhookPayloadHash(event);
     const deliveryFingerprint = webhookDeliveryFingerprint(deliveryMetadata);
     const storedEvent: StoredWebhookEvent = {
@@ -2405,7 +2474,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       type: event.type,
       status: "pending",
       receivedAt,
-      ...(statementItemId === undefined ? {} : { statementItemId }),
+      statementItemId,
     };
 
     const insertResult = this.#database
@@ -2509,35 +2578,101 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     return mapWebhookEventRow(row);
   }
 
+  async listPendingWebhookStatementWindows(
+    profile: string,
+    accountId: string,
+  ): Promise<readonly { from: number; to: number }[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT payload_json
+          FROM webhook_events
+          WHERE profile = @profile
+            AND account_id = @accountId
+            AND status = 'pending'
+        `,
+      )
+      .all({ profile, accountId }) as SqliteWebhookPayloadRow[];
+    const statementTimes = rows.flatMap((row) => {
+      try {
+        const event = JSON.parse(
+          row.payload_json,
+        ) as MonobankPersonalWebhookEvent;
+        const time = event.data.statementItem.time;
+
+        return Number.isInteger(time) && time >= 0 ? [time] : [];
+      } catch {
+        return [];
+      }
+    });
+
+    return [...new Set(statementTimes)]
+      .sort((left, right) => left - right)
+      .map((time) => {
+        return { from: time, to: time };
+      });
+  }
+
   async markWebhookEventsAsProcessed(
     profile: string,
     accountId: string,
     processedAt = nowIso(),
   ): Promise<void> {
-    this.#database
+    const rows = this.#database
       .prepare(
         `
-          UPDATE webhook_events
-            SET status = 'processed',
-                processed_at = @processedAt
+          SELECT id, statement_item_id, payload_json
+          FROM webhook_events
           WHERE profile = @profile
             AND account_id = @accountId
             AND status = 'pending'
-            AND statement_item_id IS NOT NULL
-            AND EXISTS (
-              SELECT 1
-              FROM ledger_entries
-              WHERE profile = @profile
-                AND account_id = @accountId
-                AND raw_statement_item_id = webhook_events.statement_item_id
-            )
         `,
       )
-      .run({
+      .all({ profile, accountId }) as SqlitePendingWebhookEventRow[];
+    const hasLedgerEntry = this.#database.prepare(
+      `
+        SELECT 1
+        FROM ledger_entries
+        WHERE profile = @profile
+          AND account_id = @accountId
+          AND raw_statement_item_id = @statementItemId
+        LIMIT 1
+      `,
+    );
+    const markProcessed = this.#database.prepare(
+      `
+        UPDATE webhook_events
+          SET status = 'processed',
+              processed_at = @processedAt
+        WHERE profile = @profile
+          AND id = @id
+      `,
+    );
+
+    for (const row of rows) {
+      const statementItemId =
+        row.statement_item_id ?? webhookStatementItemIdentity(row.payload_json);
+
+      if (!statementItemId) {
+        continue;
+      }
+
+      const ledgerEntry = hasLedgerEntry.get({
         profile,
         accountId,
+        statementItemId,
+      });
+
+      if (!ledgerEntry) {
+        continue;
+      }
+
+      markProcessed.run({
+        profile,
+        id: row.id,
         processedAt,
       });
+    }
   }
 
   async getDatabaseInfo(profile = this.profile): Promise<SqliteDatabaseInfo> {

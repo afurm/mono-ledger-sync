@@ -901,6 +901,240 @@ test("marks pending webhook events as processed after successful account sync", 
   });
 });
 
+test("sync reconcile re-fetches the affected statement window for pending webhooks", async () => {
+  const fixtureSet = await loadMonobankFixtureSet();
+  const account = fixtureSet.clientInfo.accounts[0];
+  const now = Math.floor(Date.now() / 1000);
+  const statementTime = now - 40 * 24 * 60 * 60;
+  const recentStatementTime = now - 20 * 24 * 60 * 60;
+  const { id: _webhookStatementId, ...webhookStatementItemWithoutId } =
+    fixtureSet.statements[account.id][0];
+  const webhookStatementItem = {
+    ...webhookStatementItemWithoutId,
+    time: statementTime,
+  };
+  const recentWebhookStatementItem = {
+    ...fixtureSet.statements[account.id][1],
+    id: "fixture-webhook-reconcile-recent-window",
+    time: recentStatementTime,
+  };
+  const webhookStatementItems = [
+    webhookStatementItem,
+    recentWebhookStatementItem,
+  ];
+  const requestedWindows = [];
+  const adapter = {
+    async getClientInfo() {
+      return {
+        ...fixtureSet.clientInfo,
+        accounts: [account],
+      };
+    },
+    async getStatement(window) {
+      requestedWindows.push(window);
+
+      if (window.accountId !== account.id) {
+        return [];
+      }
+
+      return webhookStatementItems.filter((item) => {
+        return item.time >= window.from && item.time <= window.to;
+      });
+    },
+    async getCurrency() {
+      return fixtureSet.currencyRates;
+    },
+    async setWebhook() {
+      return undefined;
+    },
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      const pendingRecord = await db.recordWebhookEvent({
+        type: "StatementItem",
+        data: {
+          account: account.id,
+          statementItem: webhookStatementItem,
+        },
+      });
+      await db.recordWebhookEvent({
+        type: "StatementItem",
+        data: {
+          account: account.id,
+          statementItem: recentWebhookStatementItem,
+        },
+      });
+
+      await db.transaction(async (tx) => {
+        await tx.setSyncCursor({
+          profile,
+          accountId: account.id,
+          source: "monobank",
+          statementFrom: now - 31 * 24 * 60 * 60 - 100,
+          statementTo: now - 31 * 24 * 60 * 60,
+          updatedAt: new Date().toISOString(),
+        });
+      });
+
+      const result = await syncLedgerWithMonobank({
+        profile,
+        source: "monobank",
+        adapter,
+        db,
+        accountIds: [account.id],
+      });
+      const webhookEvents = await db.listWebhookEvents(profile, 20);
+      const reconciledEvent = webhookEvents.find((event) => {
+        return event.id === pendingRecord.id;
+      });
+
+      assert.equal(result.run.status, "success");
+      assert.equal(
+        requestedWindows.some((window) => {
+          return statementTime >= window.from && statementTime <= window.to;
+        }),
+        true,
+      );
+      assert.equal(
+        requestedWindows.every((window) => {
+          return (
+            window.to - window.from <= monobankPersonalStatementWindowMaxSeconds
+          );
+        }),
+        true,
+      );
+      assert.equal(
+        requestedWindows.some((window) => {
+          return (
+            statementTime >= window.from &&
+            recentStatementTime <= window.to &&
+            window.to - window.from > monobankPersonalStatementWindowMaxSeconds
+          );
+        }),
+        false,
+      );
+      assert.equal(result.accounts[0].from <= statementTime, true);
+      assert.equal(reconciledEvent?.status, "processed");
+      assert.equal(
+        reconciledEvent?.statementItemId?.startsWith("missing-id:"),
+        true,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("sync reconcile does not regress cursor when old webhook replay is interrupted", async () => {
+  const fixtureSet = await loadMonobankFixtureSet();
+  const account = fixtureSet.clientInfo.accounts[0];
+  const now = Math.floor(Date.now() / 1000);
+  const cursorTo = now - 31 * 24 * 60 * 60;
+  const oldStatementTime = now - 45 * 24 * 60 * 60;
+  const webhookStatementItem = {
+    ...fixtureSet.statements[account.id][0],
+    id: "fixture-webhook-reconcile-interrupted",
+    time: oldStatementTime,
+  };
+  const requestedWindows = [];
+  const adapter = {
+    async getClientInfo() {
+      return {
+        ...fixtureSet.clientInfo,
+        accounts: [account],
+      };
+    },
+    async getStatement(window) {
+      requestedWindows.push(window);
+
+      if (oldStatementTime >= window.from && oldStatementTime <= window.to) {
+        return [webhookStatementItem];
+      }
+
+      throw new DomainError(
+        "Rate limit exceeded",
+        "rate_limit_exceeded",
+        "rate_limit",
+        { reason: "tests" },
+      );
+    },
+    async getCurrency() {
+      return fixtureSet.currencyRates;
+    },
+    async setWebhook() {
+      return undefined;
+    },
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.recordWebhookEvent({
+        type: "StatementItem",
+        data: {
+          account: account.id,
+          statementItem: webhookStatementItem,
+        },
+      });
+      await db.transaction(async (tx) => {
+        await tx.setSyncCursor({
+          profile,
+          accountId: account.id,
+          source: "monobank",
+          statementFrom: cursorTo - 100,
+          statementTo: cursorTo,
+          updatedAt: new Date().toISOString(),
+        });
+      });
+
+      await assert.rejects(
+        syncLedgerWithMonobank({
+          profile,
+          source: "monobank",
+          adapter,
+          db,
+          accountIds: [account.id],
+        }),
+        (error) => {
+          return (
+            error instanceof DomainError && error.code === "rate_limit_exceeded"
+          );
+        },
+      );
+
+      const cursor = await db.getSyncCursor(profile, account.id);
+      const webhookEvents = await db.listWebhookEvents(profile, 20);
+
+      assert.equal(requestedWindows.length, 2);
+      assert.deepEqual(cursor, {
+        profile,
+        accountId: account.id,
+        source: "monobank",
+        statementFrom: cursorTo - 100,
+        statementTo: cursorTo,
+        updatedAt: cursor?.updatedAt,
+      });
+      assert.equal(webhookEvents[0].status, "pending");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("tracks rate-limit in sync run stats on adapter failures", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
