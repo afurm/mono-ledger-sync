@@ -431,6 +431,16 @@ export interface CategoryRule {
   updatedAt?: string;
 }
 
+export interface Merchant {
+  id: string;
+  name: string;
+  normalizedName: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface Budget {
   id: string;
   profile: string;

@@ -35,6 +35,8 @@ configuration, and direct filesystem behavior.
   exports.
 - `CategoryRule` defines the stored rule metadata used to explain and later edit
   category assignment behavior.
+- `Merchant` defines normalized local merchant metadata derived from synced
+  ledger rows for cleanup rules and filters.
 - `Budget` defines the planned category-period budget contract before richer
   budget storage and UI are enabled.
 - `RecurringItem` defines the recurring transaction detection contract before

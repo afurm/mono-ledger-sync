@@ -31,6 +31,7 @@ import type {
   LedgerWriteStats,
   LocalAppSettings,
   LocalAppSettingsUpdate,
+  Merchant,
   StoredWebhookEvent,
   SyncCursor,
   SyncRun,
@@ -106,6 +107,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
+  listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -238,6 +240,16 @@ interface SqliteCategoryRuleRow {
   amount_direction: "income" | "expense" | "any" | null;
   is_system: number;
   is_enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SqliteMerchantRow {
+  id: string;
+  name: string;
+  normalized_name: string;
+  first_seen_at: number;
+  last_seen_at: number;
   created_at: string;
   updated_at: string;
 }
@@ -649,6 +661,30 @@ const migrations: readonly SqliteMigration[] = [
         ON category_rules(profile, category_id);
     `,
   },
+  {
+    id: "0010_merchants",
+    description: "Add merchant storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS merchants (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL,
+        first_seen_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_profile_normalized
+        ON merchants(profile, normalized_name);
+
+      CREATE INDEX IF NOT EXISTS idx_merchants_profile_last_seen
+        ON merchants(profile, last_seen_at DESC);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -844,6 +880,19 @@ function normalizeLedgerEntryAnnotation(update: LedgerEntryAnnotationUpdate): {
   };
 }
 
+function normalizeMerchantName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function merchantIdForName(normalizedName: string): string {
+  const digest = createHash("sha256")
+    .update(normalizedName)
+    .digest("hex")
+    .slice(0, 16);
+
+  return `merchant-${digest}`;
+}
+
 function mapAccountRow(row: SqliteAccountRow): LedgerAccount {
   const account: LedgerAccount = {
     id: row.id,
@@ -927,6 +976,23 @@ function mapCategoryRuleRow(row: SqliteCategoryRuleRow): CategoryRule {
   }
 
   return rule;
+}
+
+function mapMerchantRow(row: SqliteMerchantRow): Merchant {
+  const merchant: Merchant = {
+    id: row.id,
+    name: row.name,
+    normalizedName: row.normalized_name,
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+    createdAt: row.created_at,
+  };
+
+  if (row.updated_at !== row.created_at) {
+    merchant.updatedAt = row.updated_at;
+  }
+
+  return merchant;
 }
 
 function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
@@ -1685,6 +1751,28 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     return rows.map(mapCategoryRuleRow);
   }
 
+  async listMerchants(profile = this.profile): Promise<readonly Merchant[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            name,
+            normalized_name,
+            first_seen_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          FROM merchants
+          WHERE profile = ?
+          ORDER BY last_seen_at DESC, name
+        `,
+      )
+      .all(profile) as SqliteMerchantRow[];
+
+    return rows.map(mapMerchantRow);
+  }
+
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
@@ -2326,11 +2414,75 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         updatedAt: timestamp,
       });
 
+    this.upsertMerchantFromLedgerEntry(entry, timestamp);
+
     return {
       inserted: existed ? 0 : 1,
       updated: existed ? 1 : 0,
       skipped: 0,
     };
+  }
+
+  private upsertMerchantFromLedgerEntry(
+    entry: LedgerEntry,
+    timestamp: string,
+  ): void {
+    const name = entry.merchantName?.trim();
+
+    if (!name) {
+      return;
+    }
+
+    const normalizedName = normalizeMerchantName(name);
+
+    if (!normalizedName) {
+      return;
+    }
+
+    this.#database
+      .prepare(
+        `
+          INSERT INTO merchants (
+            profile,
+            id,
+            name,
+            normalized_name,
+            first_seen_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            @profile,
+            @id,
+            @name,
+            @normalizedName,
+            @firstSeenAt,
+            @lastSeenAt,
+            @createdAt,
+            @updatedAt
+          )
+          ON CONFLICT(profile, normalized_name) DO UPDATE SET
+            name = CASE
+              WHEN excluded.last_seen_at >= merchants.last_seen_at
+              THEN excluded.name
+              ELSE merchants.name
+            END,
+            first_seen_at = MIN(merchants.first_seen_at, excluded.first_seen_at),
+            last_seen_at = MAX(merchants.last_seen_at, excluded.last_seen_at),
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        profile: this.profile,
+        id: merchantIdForName(normalizedName),
+        name,
+        normalizedName,
+        firstSeenAt: entry.time,
+        lastSeenAt: entry.time,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
   }
 }
 

@@ -13,6 +13,7 @@ import type {
   LedgerWriteStats,
   LocalAppSettings,
   LocalAppSettingsUpdate,
+  Merchant,
   RecurringItem,
   SyncCursor,
   SyncRun,
@@ -37,6 +38,7 @@ export type {
   LedgerSummary,
   LocalAppSettings,
   LocalAppSettingsUpdate,
+  Merchant,
   RecurringItem,
   SyncCursor,
   SyncRun,
@@ -109,6 +111,7 @@ export interface LedgerDb {
   recordSyncRun(run: SyncRun): Promise<void>;
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
+  listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,
