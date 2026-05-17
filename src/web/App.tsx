@@ -1818,6 +1818,15 @@ function WebhookSettingsPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100">
+          <AlertCircleIcon />
+          <AlertTitle>Personal webhook payloads are hints</AlertTitle>
+          <AlertDescription className="text-amber-900/85 dark:text-amber-100/85">
+            Until Monobank documents a verifiable personal webhook signature,
+            treat every payload as advisory and reconcile it through statement
+            pulls before relying on ledger changes.
+          </AlertDescription>
+        </Alert>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {settings.map((setting) => (
             <div
