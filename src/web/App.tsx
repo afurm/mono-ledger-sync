@@ -37,6 +37,7 @@ import {
   StickyNoteIcon,
   StoreIcon,
   TagIcon,
+  Trash2Icon,
   UserRoundIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -4440,6 +4441,7 @@ function SettingsRoute({
   const [isDeletingToken, setIsDeletingToken] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [acknowledgedLocalToken, setAcknowledgedLocalToken] = useState(false);
+  const [confirmedTokenRemoval, setConfirmedTokenRemoval] = useState(false);
   const [isSwitchingSource, setIsSwitchingSource] = useState(false);
   const [sourceActionError, setSourceActionError] = useState<
     string | undefined
@@ -4500,6 +4502,7 @@ function SettingsRoute({
       setTokenInput("");
       setShowToken(false);
       setAcknowledgedLocalToken(false);
+      setConfirmedTokenRemoval(false);
       setTokenActionMessage(
         `Monobank token saved for the ${tokenStatus.profile} local profile.`,
       );
@@ -4514,6 +4517,11 @@ function SettingsRoute({
   }
 
   async function removeToken(): Promise<void> {
+    if (!confirmedTokenRemoval) {
+      setTokenActionError("Confirm token removal before deleting it.");
+      return;
+    }
+
     setIsDeletingToken(true);
     setTokenActionError(undefined);
     setTokenActionMessage(undefined);
@@ -4521,6 +4529,7 @@ function SettingsRoute({
     try {
       const tokenStatus = await clearMonobankToken();
       setAcknowledgedLocalToken(false);
+      setConfirmedTokenRemoval(false);
       setTokenActionMessage(
         `Monobank token removed from the ${tokenStatus.profile} local profile.`,
       );
@@ -4684,6 +4693,26 @@ function SettingsRoute({
               </span>
             </label>
 
+            {snapshot.config.token.hasToken && (
+              <label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-destructive"
+                  checked={confirmedTokenRemoval}
+                  disabled={isBusy}
+                  onChange={(event) => {
+                    setConfirmedTokenRemoval(event.target.checked);
+                    setTokenActionError(undefined);
+                    setTokenActionMessage(undefined);
+                  }}
+                />
+                <span className="text-muted-foreground">
+                  Delete the saved Monobank token for the {activeProfile} local
+                  profile.
+                </span>
+              </label>
+            )}
+
             <div className="flex flex-wrap gap-2">
               <Button
                 type="submit"
@@ -4693,10 +4722,15 @@ function SettingsRoute({
               </Button>
               <Button
                 type="button"
-                variant="outline"
-                disabled={isBusy || !snapshot.config.token.hasToken}
+                variant="destructive"
+                disabled={
+                  isBusy ||
+                  !snapshot.config.token.hasToken ||
+                  !confirmedTokenRemoval
+                }
                 onClick={removeToken}
               >
+                <Trash2Icon data-icon="inline-start" />
                 {isDeletingToken ? "Removing..." : "Remove token"}
               </Button>
             </div>
