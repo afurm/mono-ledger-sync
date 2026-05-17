@@ -249,6 +249,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         profile,
         limit: 20,
       });
+      const merchants = await db.listMerchants(profile);
       const annotated = await db.updateLedgerEntryAnnotation(
         profile,
         transactions.entries[0].id,
@@ -319,6 +320,16 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       assert.equal(result.summary.ledgerEntries, 7);
       assert.equal(accounts.length, 2);
       assert.equal(transactions.total, 7);
+      assert.equal(merchants.length > 0, true);
+      assert.ok(
+        merchants.some((merchant) => merchant.name === "Fixture Grocery LLC"),
+      );
+      assert.equal(
+        merchants.every(
+          (merchant) => merchant.normalizedName === merchant.name.toLowerCase(),
+        ),
+        true,
+      );
       assert.ok(
         transactions.entries.some((entry) => {
           return (
@@ -1013,6 +1024,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0007_webhook_event_status",
         "0008_local_app_settings",
         "0009_category_rules",
+        "0010_merchants",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
