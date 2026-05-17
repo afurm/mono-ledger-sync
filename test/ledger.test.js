@@ -976,7 +976,7 @@ test("tracks rate-limit in sync run stats on adapter failures", async () => {
   });
 });
 
-test("records a partial run when sync is interrupted and keeps cursor untouched", async () => {
+test("records a partial run when sync is interrupted and resumes after the completed window", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
     const db = createSqliteLedgerDb({
@@ -985,6 +985,7 @@ test("records a partial run when sync is interrupted and keeps cursor untouched"
     });
     const syncAbortController = new AbortController();
     let statementCalls = 0;
+    const statementWindows = [];
     const adapter = {
       async getClientInfo() {
         return {
@@ -1002,8 +1003,9 @@ test("records a partial run when sync is interrupted and keeps cursor untouched"
           jars: [],
         };
       },
-      async getStatement() {
+      async getStatement(request) {
         statementCalls += 1;
+        statementWindows.push(request);
 
         if (statementCalls === 1) {
           syncAbortController.abort(
@@ -1062,14 +1064,43 @@ test("records a partial run when sync is interrupted and keeps cursor untouched"
       assert.equal(runs[0].itemsInserted, 1);
       assert.equal(runs[0].itemsUpdated, 0);
       assert.equal(runs[0].itemsSkipped, 0);
-      assert.equal(
-        await db.getSyncCursor(profile, "interrupted-account"),
-        undefined,
+      const interruptedCursor = await db.getSyncCursor(
+        profile,
+        "interrupted-account",
       );
+
+      assert.deepEqual(interruptedCursor, {
+        profile,
+        accountId: "interrupted-account",
+        source: "fixture",
+        statementFrom: 1,
+        statementTo: 3,
+        updatedAt: interruptedCursor?.updatedAt,
+      });
       assert.equal(statementCalls, 1);
       assert.equal(
         (await db.listLedgerEntries({ profile, limit: 20 })).total,
         1,
+      );
+
+      const resumedResult = await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter,
+        db,
+        to: 7,
+        sliceSeconds: 2,
+      });
+
+      assert.equal(resumedResult.run.status, "success");
+      assert.equal(resumedResult.accounts[0].from, 4);
+      assert.deepEqual(
+        statementWindows.map((window) => [window.from, window.to]),
+        [
+          [1, 3],
+          [4, 6],
+          [7, 7],
+        ],
       );
     } finally {
       await db.close();
