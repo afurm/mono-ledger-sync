@@ -2,6 +2,7 @@ import type { LedgerEntry } from "./api.js";
 
 export type LedgerEntryReviewCandidateKind =
   | "duplicate"
+  | "transfer"
   | "reversal"
   | "refund";
 
@@ -12,6 +13,7 @@ export interface LedgerEntryReviewCandidate {
 }
 
 const reversalWindowSeconds = 2 * 24 * 60 * 60;
+const transferWindowSeconds = 3 * 24 * 60 * 60;
 const refundWindowSeconds = 45 * 24 * 60 * 60;
 
 function normalizedCounterparty(entry: LedgerEntry): string {
@@ -24,6 +26,26 @@ function sameCounterparty(left: LedgerEntry, right: LedgerEntry): boolean {
 
 function oppositeAmounts(left: LedgerEntry, right: LedgerEntry): boolean {
   return left.amount !== 0 && left.amount === -right.amount;
+}
+
+function transferLike(entry: LedgerEntry): boolean {
+  const text = `${entry.categoryId ?? ""} ${entry.merchantName ?? ""} ${
+    entry.description
+  }`
+    .trim()
+    .toLowerCase();
+
+  return entry.categoryId === "transfers" || text.includes("transfer");
+}
+
+function transferMatch(left: LedgerEntry, right: LedgerEntry): boolean {
+  return (
+    left.accountId !== right.accountId &&
+    left.currencyCode === right.currencyCode &&
+    oppositeAmounts(left, right) &&
+    transferLike(left) &&
+    transferLike(right)
+  );
 }
 
 function sortedPair(
@@ -87,11 +109,25 @@ export function findLedgerEntryReviewCandidates(
         continue;
       }
 
+      const secondsBetween = comparison.time - entry.time;
+
+      if (
+        secondsBetween <= transferWindowSeconds &&
+        transferMatch(entry, comparison)
+      ) {
+        pairedEntryIds.add(entry.id);
+        pairedEntryIds.add(comparison.id);
+        candidates.push({
+          kind: "transfer",
+          entries: sortedPair(entry, comparison),
+          reason: "Opposite transfer amounts across two accounts.",
+        });
+        break;
+      }
+
       if (!sameCounterparty(entry, comparison)) {
         continue;
       }
-
-      const secondsBetween = comparison.time - entry.time;
 
       if (
         secondsBetween <= reversalWindowSeconds &&

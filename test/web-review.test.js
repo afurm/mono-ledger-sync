@@ -6,17 +6,18 @@ import { findLedgerEntryReviewCandidates } from "../dist/web/review.js";
 function entry(overrides) {
   return {
     id: overrides.id,
-    accountId: "account-uah",
+    accountId: overrides.accountId ?? "account-uah",
     time: overrides.time,
     description: overrides.description ?? overrides.merchantName,
     amount: overrides.amount,
     currencyCode: 980,
+    categoryId: overrides.categoryId,
     merchantName: overrides.merchantName,
     rawStatementItemId: overrides.id,
   };
 }
 
-test("detects duplicate, reversal, and refund ledger review candidates", () => {
+test("detects duplicate, transfer, reversal, and refund ledger review candidates", () => {
   const candidates = findLedgerEntryReviewCandidates([
     entry({
       id: "duplicate-a",
@@ -35,6 +36,22 @@ test("detects duplicate, reversal, and refund ledger review candidates", () => {
       merchantName: "Transit App",
       amount: -4500,
       time: 1_775_088_000,
+    }),
+    entry({
+      id: "transfer-out",
+      accountId: "account-uah",
+      categoryId: "transfers",
+      description: "Transfer to savings",
+      amount: -50_000,
+      time: 1_775_100_000,
+    }),
+    entry({
+      id: "transfer-in",
+      accountId: "account-savings",
+      categoryId: "transfers",
+      description: "Transfer from card",
+      amount: 50_000,
+      time: 1_775_100_300,
     }),
     entry({
       id: "reversal",
@@ -58,13 +75,14 @@ test("detects duplicate, reversal, and refund ledger review candidates", () => {
 
   assert.deepEqual(
     candidates.map((candidate) => candidate.kind),
-    ["duplicate", "reversal", "refund"],
+    ["duplicate", "reversal", "transfer", "refund"],
   );
   assert.deepEqual(
     candidates.map((candidate) => candidate.entries.map((item) => item.id)),
     [
       ["duplicate-a", "duplicate-b"],
       ["charge", "reversal"],
+      ["transfer-out", "transfer-in"],
       ["purchase", "refund"],
     ],
   );

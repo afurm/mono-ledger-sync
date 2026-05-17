@@ -6208,6 +6208,8 @@ function reviewCandidateLabel(candidate: LedgerEntryReviewCandidate): string {
   switch (candidate.kind) {
     case "duplicate":
       return "Duplicate";
+    case "transfer":
+      return "Transfer";
     case "reversal":
       return "Reversal";
     case "refund":
@@ -6221,6 +6223,8 @@ function reviewCandidateBadgeVariant(
   switch (candidate.kind) {
     case "duplicate":
       return "secondary";
+    case "transfer":
+      return "default";
     case "reversal":
       return "outline";
     case "refund":
@@ -6318,7 +6322,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
           <OverviewStatusItem
             label="Duplicate candidates"
             value={String(duplicateCandidates)}
-            detail="Potential same merchant, amount, and time matches"
+            detail="Potential duplicate, transfer, reversal, and refund matches"
           />
         </CardContent>
       </Card>
@@ -6622,7 +6626,8 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             <CardHeader>
               <CardTitle>Duplicate detection</CardTitle>
               <CardDescription>
-                Review queue for potential duplicate or reversal records.
+                Review queue for potential duplicate, transfer, reversal, or
+                refund records.
               </CardDescription>
               <CardAction>
                 <Button disabled size="sm" type="button" variant="outline">
@@ -6641,12 +6646,13 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 <AlertTitle>
                   {duplicateCandidates > 0
                     ? "Potential duplicates found"
-                    : "No duplicate candidates in the current local page"}
+                    : "No review candidates in the current local page"}
                 </AlertTitle>
                 <AlertDescription>
-                  The read-only detector checks exact duplicates, short-window
-                  reversals, and later positive refunds. History is preserved
-                  until review writes are available.
+                  The read-only detector checks exact duplicates, matched
+                  transfers between accounts, short-window reversals, and later
+                  positive refunds. History is preserved until review writes are
+                  available.
                 </AlertDescription>
               </Alert>
               {reviewCandidates.length > 0 && (
