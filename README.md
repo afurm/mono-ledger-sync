@@ -69,6 +69,11 @@ const plan = createSyncPlan({
 - Use personal Monobank API tokens only for your own data on your own machine; do not use this project as a hosted or shared service for other people's banking data.
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
+- Secure token persistence should follow
+  [`docs/decisions/0008-secure-token-storage.md`](docs/decisions/0008-secure-token-storage.md):
+  use OS credential stores for packaged builds, keep SQLite out of token
+  storage, and fall back to session-only handling when no secure provider is
+  available.
 
 ## Webhook endpoint safety
 

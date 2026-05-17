@@ -89,6 +89,22 @@ test("documents the shared domain model contract", async () => {
   assert.match(readme, /docs\/domain-model\.md/);
 });
 
+test("documents secure token storage boundaries", async () => {
+  const decision = await readFile(
+    "docs/decisions/0008-secure-token-storage.md",
+    "utf8",
+  );
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(decision, /macOS: Keychain Services/);
+  assert.match(decision, /Windows: Credential Manager/);
+  assert.match(decision, /Linux: Secret Service/);
+  assert.match(decision, /CI and tests: no persistent provider by default/);
+  assert.match(decision, /SQLite remains out of scope for token persistence/);
+  assert.match(decision, /session-only token handling/);
+  assert.match(readme, /0008-secure-token-storage\.md/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 
