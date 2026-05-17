@@ -4422,6 +4422,7 @@ function SettingsRoute({
   const isTokenInputValid = tokenInput.trim().length > 0;
   const isMonobankSource = snapshot.config.source === "monobank";
   const isConfigBusy = isSavingToken || isDeletingToken || isSwitchingSource;
+  const activeProfile = snapshot.config.profile;
 
   async function saveToken(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -4439,11 +4440,11 @@ function SettingsRoute({
     setTokenActionMessage(undefined);
 
     try {
-      await saveMonobankToken(nextToken);
+      const tokenStatus = await saveMonobankToken(nextToken, activeProfile);
       setTokenInput("");
       setShowToken(false);
       setTokenActionMessage(
-        "Monobank token saved for the current local server session.",
+        `Monobank token saved for the ${tokenStatus.profile} local profile.`,
       );
       await onRefresh();
     } catch (error) {
@@ -4461,9 +4462,9 @@ function SettingsRoute({
     setTokenActionMessage(undefined);
 
     try {
-      await clearMonobankToken();
+      const tokenStatus = await clearMonobankToken();
       setTokenActionMessage(
-        "Monobank token removed from the current local server session.",
+        `Monobank token removed from the ${tokenStatus.profile} local profile.`,
       );
       await onRefresh();
     } catch (error) {
@@ -4503,9 +4504,11 @@ function SettingsRoute({
         <CardHeader>
           <CardTitle>Monobank token</CardTitle>
           <CardDescription>
-            Manage local token onboarding and deletion for the running Monobank
-            source.
+            Manage local token onboarding and deletion for the selected profile.
           </CardDescription>
+          <CardAction>
+            <Badge variant="secondary">{activeProfile}</Badge>
+          </CardAction>
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="grid gap-2">

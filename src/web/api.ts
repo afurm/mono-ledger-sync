@@ -27,6 +27,7 @@ export interface LocalApiWebhookSettings {
 }
 
 export interface LocalApiMonobankTokenStatus {
+  profile: string;
   hasToken: boolean;
 }
 
@@ -595,13 +596,14 @@ export async function runFixtureSync(): Promise<void> {
 
 export async function saveMonobankToken(
   token: string,
+  profile: string,
 ): Promise<LocalApiMonobankTokenStatus> {
   return requestJson<LocalApiMonobankTokenStatus>("/api/app/token", {
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ profile, token }),
   });
 }
 
