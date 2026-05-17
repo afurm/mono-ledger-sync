@@ -1025,12 +1025,14 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0008_local_app_settings",
         "0009_category_rules",
         "0010_merchants",
+        "0011_budgets",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
       assert.equal((await db.listCategories(profile)).length, 8);
       assert.equal((await db.listCategoryRules(profile)).length, 8);
+      assert.deepEqual(await db.listBudgets(profile), []);
 
       const accounts = await db.listAccounts(profile);
       assert.equal(accounts.length, 1);
