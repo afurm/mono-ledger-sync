@@ -117,6 +117,14 @@ test("documents safe local webhook exposure", async () => {
   assert.match(localFirstDoc, /never place tokens in\s+webhook URLs/);
 });
 
+test("documents token cleanup during local account removal", async () => {
+  const localFirstDoc = await readFile("docs/local-first.md", "utf8");
+
+  assert.match(localFirstDoc, /Removing local account data/);
+  assert.match(localFirstDoc, /DELETE `?\/api\/app\/token`?/);
+  assert.match(localFirstDoc, /Token deletion is profile-scoped/);
+});
+
 test("local web UI exposes webhook settings panel fields", async () => {
   const appSource = await readFile("src/web/App.tsx", "utf8");
 
