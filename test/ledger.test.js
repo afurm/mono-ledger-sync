@@ -700,6 +700,75 @@ test("categorizes statement items by stable built-in rules", () => {
       categoryName: "Subscriptions",
     },
   );
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 4900 }), {
+    categoryId: "utilities",
+    categoryName: "Utilities",
+  });
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 5912 }), {
+    categoryId: "healthcare",
+    categoryName: "Healthcare",
+  });
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 5311 }), {
+    categoryId: "shopping",
+    categoryName: "Shopping",
+  });
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 5200 }), {
+    categoryId: "household",
+    categoryName: "Household",
+  });
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 8299 }), {
+    categoryId: "education",
+    categoryName: "Education",
+  });
+  assert.deepEqual(
+    categorizeStatementItem({
+      ...baseItem,
+      description: "Education subscription",
+      mcc: 9999,
+    }),
+    {
+      categoryId: "education",
+      categoryName: "Education",
+    },
+  );
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 9311 }), {
+    categoryId: "taxes",
+    categoryName: "Taxes",
+  });
+  assert.deepEqual(
+    categorizeStatementItem({
+      ...baseItem,
+      description: "City taxes payment",
+      mcc: 9999,
+    }),
+    {
+      categoryId: "taxes",
+      categoryName: "Taxes",
+    },
+  );
+  assert.deepEqual(
+    categorizeStatementItem({
+      ...baseItem,
+      description: "Taxi ride",
+      mcc: 9999,
+    }),
+    {
+      categoryId: "uncategorized",
+      categoryName: "Uncategorized",
+    },
+  );
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 8398 }), {
+    categoryId: "charity",
+    categoryName: "Charity",
+  });
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 6011 }), {
+    categoryId: "cash",
+    categoryName: "Cash",
+  });
+  assert.deepEqual(categorizeStatementItem({ ...baseItem, mcc: 6012 }), {
+    categoryId: "fees",
+    categoryName: "Fees",
+  });
   assert.deepEqual(categorizeStatementItem(baseItem), {
     categoryId: "uncategorized",
     categoryName: "Uncategorized",
@@ -724,10 +793,19 @@ test("seeds category rules for the current built-in categorization model", async
         [
           "income-positive-amount",
           "groceries-mcc-or-text",
+          "utilities-mcc-or-text",
+          "healthcare-mcc-or-text",
+          "shopping-mcc-or-text",
+          "household-mcc-or-text",
+          "education-mcc-or-text",
           "subscriptions-mcc-or-text",
           "transport-mcc-or-text",
           "travel-mcc-or-text",
           "dining-mcc-or-text",
+          "taxes-mcc-or-text",
+          "charity-mcc-or-text",
+          "cash-mcc-or-text",
+          "fees-mcc-or-text",
           "transfers-mcc-or-text",
           "uncategorized-fallback",
         ],
@@ -736,6 +814,18 @@ test("seeds category rules for the current built-in categorization model", async
       assert.equal(rules[0].amountDirection, "income");
       assert.equal(rules[1].mcc, 5411);
       assert.equal(rules[1].descriptionContains, "grocery");
+      assert.equal(
+        rules.find((rule) => rule.id === "utilities-mcc-or-text")?.mcc,
+        4900,
+      );
+      assert.equal(
+        rules.find((rule) => rule.id === "healthcare-mcc-or-text")?.mcc,
+        5912,
+      );
+      assert.equal(
+        rules.find((rule) => rule.id === "taxes-mcc-or-text")?.mcc,
+        9311,
+      );
       assert.equal(rules.at(-1)?.matchType, "fallback");
       assert.equal(
         rules.every((rule) => rule.isSystem),
@@ -1695,7 +1785,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
       assert.equal((await db.listCategories(profile)).length, 17);
-      assert.equal((await db.listCategoryRules(profile)).length, 8);
+      assert.equal((await db.listCategoryRules(profile)).length, 17);
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
       assert.deepEqual(await db.listRecurringItems(profile), []);

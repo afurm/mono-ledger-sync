@@ -387,6 +387,86 @@ const builtInRuleSummaries = [
     },
   },
   {
+    id: "utilities",
+    label: "Utilities",
+    priority: 25,
+    conditions: "MCC 4900 or utility text",
+    targetAction: "Set category to Utilities",
+    editor: {
+      merchantContains: "utility",
+      descriptionContains: "utility",
+      mcc: "4900",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "healthcare",
+    label: "Healthcare",
+    priority: 26,
+    conditions: "MCC 5912 or pharmacy text",
+    targetAction: "Set category to Healthcare",
+    editor: {
+      merchantContains: "pharmacy",
+      descriptionContains: "pharmacy",
+      mcc: "5912",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "shopping",
+    label: "Shopping",
+    priority: 27,
+    conditions: "MCC 5311 or marketplace text",
+    targetAction: "Set category to Shopping",
+    editor: {
+      merchantContains: "marketplace",
+      descriptionContains: "marketplace",
+      mcc: "5311",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "household",
+    label: "Household",
+    priority: 28,
+    conditions: "MCC 5200 or household text",
+    targetAction: "Set category to Household",
+    editor: {
+      merchantContains: "household",
+      descriptionContains: "household",
+      mcc: "5200",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "education",
+    label: "Education",
+    priority: 29,
+    conditions: "MCC 8299 or education text",
+    targetAction: "Set category to Education",
+    editor: {
+      merchantContains: "education",
+      descriptionContains: "education",
+      mcc: "8299",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
     id: "subscriptions",
     label: "Subscriptions",
     priority: 30,
@@ -444,6 +524,70 @@ const builtInRuleSummaries = [
       merchantContains: "cafe, coffee, restaurant",
       descriptionContains: "coffee",
       mcc: "5814",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "taxes",
+    label: "Taxes",
+    priority: 65,
+    conditions: "MCC 9311 or tax text",
+    targetAction: "Set category to Taxes",
+    editor: {
+      merchantContains: "tax",
+      descriptionContains: "tax",
+      mcc: "9311",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "charity",
+    label: "Charity",
+    priority: 66,
+    conditions: "MCC 8398 or donation text",
+    targetAction: "Set category to Charity",
+    editor: {
+      merchantContains: "donation",
+      descriptionContains: "donation",
+      mcc: "8398",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "cash",
+    label: "Cash",
+    priority: 67,
+    conditions: "MCC 6011 or ATM text",
+    targetAction: "Set category to Cash",
+    editor: {
+      merchantContains: "atm",
+      descriptionContains: "atm",
+      mcc: "6011",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "fees",
+    label: "Fees",
+    priority: 68,
+    conditions: "MCC 6012 or fee text",
+    targetAction: "Set category to Fees",
+    editor: {
+      merchantContains: "fee",
+      descriptionContains: "fee",
+      mcc: "6012",
       amountRange: "Any expense amount",
       transactionType: "Expense",
       account: "All accounts",
@@ -2719,6 +2863,24 @@ function transactionCategoryRuleMatch(entry: LedgerEntry): string {
       return "Built-in travel rule: MCC 4722 or travel text";
     case "dining":
       return "Built-in dining rule: MCC 5814 or coffee text";
+    case "utilities":
+      return "Built-in utilities rule: MCC 4900 or utility text";
+    case "healthcare":
+      return "Built-in healthcare rule: MCC 5912 or pharmacy text";
+    case "shopping":
+      return "Built-in shopping rule: MCC 5311 or marketplace text";
+    case "household":
+      return "Built-in household rule: MCC 5200 or household text";
+    case "education":
+      return "Built-in education rule: MCC 8299 or education text";
+    case "taxes":
+      return "Built-in taxes rule: MCC 9311 or tax text";
+    case "charity":
+      return "Built-in charity rule: MCC 8398 or donation text";
+    case "cash":
+      return "Built-in cash rule: MCC 6011 or ATM text";
+    case "fees":
+      return "Built-in fees rule: MCC 6012 or fee text";
     case "transfers":
       return "Built-in transfer rule: MCC 4829 or transfer text";
     case "uncategorized":
@@ -5761,12 +5923,61 @@ function firstRuleConstraintTerm(value: string, fallback: string): string {
   return ruleConstraintTerms(value)[0] ?? fallback;
 }
 
+function ruleConstraintTermVariants(term: string): readonly string[] {
+  const normalizedTerm = term.toLowerCase();
+  const variants = [
+    normalizedTerm,
+    `${normalizedTerm}s`,
+    `${normalizedTerm}es`,
+  ];
+
+  if (normalizedTerm.endsWith("y")) {
+    variants.push(`${normalizedTerm.slice(0, -1)}ies`);
+  }
+
+  return variants;
+}
+
+function tokenizeRuleConstraintText(text: string): readonly string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+function tokenSequenceIncludes(
+  textTokens: readonly string[],
+  termTokens: readonly string[],
+): boolean {
+  if (termTokens.length === 0 || termTokens.length > textTokens.length) {
+    return false;
+  }
+
+  return textTokens.some((_, startIndex) => {
+    return termTokens.every(
+      (termToken, offset) => textTokens[startIndex + offset] === termToken,
+    );
+  });
+}
+
 function textMatchesRuleConstraint(value: string, text: string): boolean {
   const terms = ruleConstraintTerms(value);
-  const normalizedText = text.toLowerCase();
+  const textTokens = tokenizeRuleConstraintText(text);
+  const textTokenSet = new Set(textTokens);
 
   return (
-    terms.length === 0 || terms.some((term) => normalizedText.includes(term))
+    terms.length === 0 ||
+    terms.some((term) => {
+      const termTokens = tokenizeRuleConstraintText(term);
+
+      if (termTokens.length > 1) {
+        return tokenSequenceIncludes(textTokens, termTokens);
+      }
+
+      return ruleConstraintTermVariants(term).some((variant) =>
+        textTokenSet.has(variant),
+      );
+    })
   );
 }
 
