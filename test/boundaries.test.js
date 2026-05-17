@@ -126,6 +126,9 @@ test("local web UI exposes webhook settings panel fields", async () => {
   assert.match(appSource, /Path/);
   assert.match(appSource, /Enabled/);
   assert.match(appSource, /Webhook endpoint/);
+  assert.match(appSource, /Personal webhook payloads are hints/);
+  assert.match(appSource, /verifiable personal webhook signature/);
+  assert.match(appSource, /reconcile it through statement\s+pulls/);
 });
 
 test("serves local API health through Fastify", async () => {
