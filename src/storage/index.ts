@@ -1,5 +1,6 @@
 import type {
   AccountBalance,
+  Budget,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -9,6 +10,7 @@ import type {
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
   LedgerWriteStats,
+  RecurringItem,
   SyncCursor,
   SyncRun,
   SyncRunStatus,
@@ -26,8 +28,10 @@ export type {
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   Category,
+  Budget,
   LedgerEntryQuery,
   LedgerSummary,
+  RecurringItem,
   SyncCursor,
   SyncRun,
   SyncRunStatus,
@@ -53,10 +57,18 @@ export {
 } from "../domain/index.js";
 export {
   createLedgerQueryService,
+  createLedgerQueryServices,
   createLedgerServices,
   createLedgerWriteService,
+  type LedgerBalanceQueryService,
+  type LedgerBudgetQueryService,
+  type LedgerCategoryQueryService,
+  type LedgerQueryServices,
   type LedgerQueryService,
+  type LedgerRecurringItemQueryService,
   type LedgerServices,
+  type LedgerSyncStateQueryService,
+  type LedgerTransactionQueryService,
   type LedgerWriteService,
 } from "./services.js";
 
