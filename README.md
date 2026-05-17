@@ -84,9 +84,27 @@ The local server exposes webhook settings in `/api/app/config.webhook`:
 - `webhook.path`: one high-entropy per-instance path (for example `/api/webhooks/monobank-ab12...`)
 - `webhook.url`: full URL to register in Monobank personal webhook settings
 
-Webhook registration should always use the returned `webhook.url` and remain local-only.
-Webhook payloads are recorded as local hints and are reconciled through statement pulls before
-they affect the final ledger state.
+The default `webhook.url` is a loopback URL for the local app. It is useful for
+local health checks, but Monobank cannot deliver webhooks to `127.0.0.1` from
+outside your machine.
+
+If you need live personal webhook delivery while developing locally:
+
+1. Start the local app with the intended port, then read the current
+   `webhook.path` from the UI or `/api/app/config`.
+2. Expose only that local port through a temporary HTTPS tunnel controlled by
+   you.
+3. Register the tunnel origin plus the exact high-entropy `webhook.path` in
+   Monobank personal webhook settings.
+4. Keep the tunnel open only while you are actively using it, then remove the
+   webhook URL from Monobank or stop the tunnel.
+
+Do not bind the local API to a public interface, reuse stale tunnel URLs, share
+the tunnel URL publicly, or put tokens in webhook URLs. The route path is an
+unguessable local receiver path, not an authentication system.
+
+Webhook payloads are recorded as local hints and are reconciled through
+statement pulls before they affect the final ledger state.
 
 ## Disclaimer
 
