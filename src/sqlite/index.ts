@@ -17,6 +17,7 @@ import type {
   AccountBalance,
   LedgerAccount,
   WebhookEventStatus,
+  Budget,
   Category,
   CategoryRule,
   LedgerDb,
@@ -108,6 +109,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
+  listBudgets(profile?: string): Promise<readonly Budget[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -250,6 +252,20 @@ interface SqliteMerchantRow {
   normalized_name: string;
   first_seen_at: number;
   last_seen_at: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SqliteBudgetRow {
+  id: string;
+  profile: string;
+  category_id: string;
+  currency_code: number;
+  period_start: string;
+  period_end: string;
+  amount_limit: number;
+  rollover: number;
+  include_inflows: number;
   created_at: string;
   updated_at: string;
 }
@@ -685,6 +701,34 @@ const migrations: readonly SqliteMigration[] = [
         ON merchants(profile, last_seen_at DESC);
     `,
   },
+  {
+    id: "0011_budgets",
+    description: "Add budget storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS budgets (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        category_id TEXT NOT NULL,
+        currency_code INTEGER NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        amount_limit INTEGER NOT NULL,
+        rollover INTEGER NOT NULL DEFAULT 0,
+        include_inflows INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name),
+        FOREIGN KEY (profile, category_id) REFERENCES categories(profile, id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_budgets_profile_period
+        ON budgets(profile, period_start, period_end);
+
+      CREATE INDEX IF NOT EXISTS idx_budgets_profile_category
+        ON budgets(profile, category_id);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -993,6 +1037,22 @@ function mapMerchantRow(row: SqliteMerchantRow): Merchant {
   }
 
   return merchant;
+}
+
+function mapBudgetRow(row: SqliteBudgetRow): Budget {
+  return {
+    id: row.id,
+    profile: row.profile,
+    categoryId: row.category_id,
+    currencyCode: row.currency_code,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    amountLimit: row.amount_limit,
+    rollover: row.rollover === 1,
+    ...(row.include_inflows === 1 ? { includeInflows: true } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
@@ -1771,6 +1831,32 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteMerchantRow[];
 
     return rows.map(mapMerchantRow);
+  }
+
+  async listBudgets(profile = this.profile): Promise<readonly Budget[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            profile,
+            category_id,
+            currency_code,
+            period_start,
+            period_end,
+            amount_limit,
+            rollover,
+            include_inflows,
+            created_at,
+            updated_at
+          FROM budgets
+          WHERE profile = ?
+          ORDER BY period_start DESC, category_id, id
+        `,
+      )
+      .all(profile) as SqliteBudgetRow[];
+
+    return rows.map(mapBudgetRow);
   }
 
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {

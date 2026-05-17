@@ -112,6 +112,7 @@ export interface LedgerDb {
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
+  listBudgets(profile?: string): Promise<readonly Budget[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,

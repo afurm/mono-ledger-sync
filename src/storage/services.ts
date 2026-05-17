@@ -124,8 +124,8 @@ export function createLedgerQueryService({
     listCategories(profile) {
       return db.listCategories(coerceProfile(profile, defaultProfile));
     },
-    async listBudgets() {
-      return [];
+    listBudgets(profile) {
+      return db.listBudgets(coerceProfile(profile, defaultProfile));
     },
     async listRecurringItems() {
       return [];
