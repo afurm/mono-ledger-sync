@@ -1780,6 +1780,80 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
   );
 }
 
+function WebhookSettingsPanel({
+  config,
+}: {
+  config: LocalAppSnapshot["config"] | undefined;
+}) {
+  const webhook = config?.webhook;
+  const settings = [
+    {
+      label: "Profile",
+      value: config?.profile ?? "Waiting for local API",
+      mono: false,
+    },
+    {
+      label: "Port",
+      value: webhook ? String(webhook.port) : "Unknown",
+      mono: true,
+    },
+    {
+      label: "Path",
+      value: webhook?.path ?? "Unknown",
+      mono: true,
+    },
+    {
+      label: "Enabled",
+      value: webhook?.enabled ? "Enabled" : "Disabled",
+      mono: false,
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Webhook settings</CardTitle>
+        <CardDescription>
+          Local endpoint configuration used by the Monobank personal API.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {settings.map((setting) => (
+            <div
+              className="rounded-md border border-border bg-muted/30 px-3 py-2"
+              key={setting.label}
+            >
+              <p className="text-xs text-muted-foreground">{setting.label}</p>
+              {setting.label === "Enabled" ? (
+                <Badge variant={webhook?.enabled ? "default" : "secondary"}>
+                  {setting.value}
+                </Badge>
+              ) : (
+                <p
+                  className={
+                    setting.mono
+                      ? "break-all font-mono text-sm font-medium"
+                      : "break-all text-sm font-medium"
+                  }
+                >
+                  {setting.value}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Webhook endpoint</p>
+          <p className="break-all font-mono text-sm font-medium">
+            {webhook?.url ?? "Waiting for local API"}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StaleDataBanner({
   snapshot,
   syncing,
@@ -4374,52 +4448,7 @@ function SyncRoute({
             </AlertDescription>
           </Alert>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Webhook settings</CardTitle>
-              <CardDescription>
-                Local endpoint configuration used by the Monobank personal API.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 text-sm">
-              <div>
-                <p className="text-muted-foreground">Profile</p>
-                <p className="font-medium">{snapshot?.config.profile}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Host</p>
-                <p className="font-medium">
-                  {snapshot?.config.webhook.host ?? "Unknown"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Port</p>
-                <p className="font-medium">{snapshot?.config.webhook.port}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Path</p>
-                <p className="break-all font-mono font-medium">
-                  {snapshot?.config.webhook.path}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Enabled</p>
-                <Badge
-                  variant={
-                    snapshot?.config.webhook.enabled ? "default" : "secondary"
-                  }
-                >
-                  {snapshot?.config.webhook.enabled ? "Enabled" : "Disabled"}
-                </Badge>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Webhook endpoint</p>
-                <p className="break-all font-mono font-medium">
-                  {snapshot?.config.webhook.url}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <WebhookSettingsPanel config={snapshot?.config} />
         </div>
       </TabsContent>
     </Tabs>

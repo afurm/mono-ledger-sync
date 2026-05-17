@@ -105,6 +105,17 @@ test("documents secure token storage boundaries", async () => {
   assert.match(readme, /0008-secure-token-storage\.md/);
 });
 
+test("local web UI exposes webhook settings panel fields", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /function WebhookSettingsPanel/);
+  assert.match(appSource, /Profile/);
+  assert.match(appSource, /Port/);
+  assert.match(appSource, /Path/);
+  assert.match(appSource, /Enabled/);
+  assert.match(appSource, /Webhook endpoint/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 
