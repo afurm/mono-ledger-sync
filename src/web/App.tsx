@@ -155,6 +155,7 @@ import {
   type LedgerEntryReviewCandidate,
   findLedgerEntryReviewCandidates,
 } from "./review";
+import { type SyncRunSummaryStats, summarizeSyncRuns } from "./sync-summary";
 
 type LoadState =
   | { status: "loading"; data?: LocalAppSnapshot; error?: undefined }
@@ -1064,6 +1065,37 @@ function SyncRunStats({ run }: { run: SyncRun }) {
         <div className="rounded-lg border bg-muted/30 p-2" key={stat.label}>
           <p className="text-xs text-muted-foreground">{stat.label}</p>
           <p className="text-sm font-semibold">{stat.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SyncRunSummaryStatsPanel({
+  summary,
+}: {
+  summary: SyncRunSummaryStats;
+}) {
+  const stats = [
+    { label: "Runs", value: summary.runs },
+    { label: "API calls", value: summary.apiCalls },
+    { label: "Windows fetched", value: summary.windowsFetched },
+    { label: "Items seen", value: summary.itemsSeen },
+    { label: "Inserted", value: summary.itemsInserted },
+    { label: "Updated", value: summary.itemsUpdated },
+    { label: "Skipped", value: summary.itemsSkipped },
+    { label: "Rate-limited", value: summary.rateLimited },
+  ];
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {stats.map((stat) => (
+        <div
+          className="rounded-md border bg-muted/30 px-3 py-2"
+          key={stat.label}
+        >
+          <p className="text-xs text-muted-foreground">{stat.label}</p>
+          <p className="text-base font-semibold tabular-nums">{stat.value}</p>
         </div>
       ))}
     </div>
@@ -4245,6 +4277,9 @@ function SyncRoute({
   snapshot: LocalAppSnapshot | undefined;
   onRouteChange: (routeId: RouteId) => void;
 }) {
+  const syncRuns = snapshot?.syncRuns ?? [];
+  const summaryStats = summarizeSyncRuns(syncRuns);
+
   return (
     <Tabs defaultValue="runs">
       <TabsList>
@@ -4271,8 +4306,9 @@ function SyncRoute({
               </Button>
             </CardAction>
           </CardHeader>
-          <CardContent>
-            <SyncRunsTable runs={snapshot?.syncRuns ?? []} />
+          <CardContent className="grid gap-4">
+            <SyncRunSummaryStatsPanel summary={summaryStats} />
+            <SyncRunsTable runs={syncRuns} />
           </CardContent>
         </Card>
       </TabsContent>
