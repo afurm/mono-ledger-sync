@@ -14,6 +14,7 @@ import type {
   SyncRun,
 } from "./index.js";
 
+import type { LedgerDbTransaction } from "./index.js";
 import type { SqliteLedgerDb } from "../sqlite/index.js";
 
 export interface LedgerTransactionQueryService {
@@ -67,6 +68,16 @@ export interface LedgerQueryService
     LedgerSyncStateQueryService {}
 
 export interface LedgerWriteService {
+  updateTransactionNote(
+    id: string,
+    note: string | undefined,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined>;
+  updateTransactionTags(
+    id: string,
+    tags: readonly string[] | undefined,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined>;
   updateTransactionAnnotation(
     id: string,
     update: LedgerEntryAnnotationUpdate,
@@ -171,19 +182,44 @@ export function createLedgerWriteService({
   db,
   defaultProfile,
 }: CreateLedgerServicesOptions): LedgerWriteService {
+  async function withProfileTransaction<T>(
+    profile: string | undefined,
+    callback: (tx: LedgerDbTransaction, profile: string) => Promise<T>,
+  ): Promise<T> {
+    const resolvedProfile = coerceProfile(profile, defaultProfile);
+
+    return db.transaction((tx) => callback(tx, resolvedProfile));
+  }
+
+  function updateTransactionAnnotation(
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined> {
+    return withProfileTransaction(profile, (tx, resolvedProfile) =>
+      tx.updateLedgerEntryAnnotation(resolvedProfile, id, update),
+    );
+  }
+
   return {
-    updateTransactionAnnotation(id, update, profile) {
-      return db.updateLedgerEntryAnnotation(
-        coerceProfile(profile, defaultProfile),
+    updateTransactionNote(id, note, profile) {
+      return updateTransactionAnnotation(
         id,
-        update,
+        note === undefined ? {} : { note },
+        profile,
       );
     },
-    updateTransactionSplitPlan(id, update, profile) {
-      return db.updateLedgerEntrySplitPlan(
-        coerceProfile(profile, defaultProfile),
+    updateTransactionTags(id, tags, profile) {
+      return updateTransactionAnnotation(
         id,
-        update,
+        tags === undefined ? {} : { tags },
+        profile,
+      );
+    },
+    updateTransactionAnnotation,
+    updateTransactionSplitPlan(id, update, profile) {
+      return withProfileTransaction(profile, (tx, resolvedProfile) =>
+        tx.updateLedgerEntrySplitPlan(resolvedProfile, id, update),
       );
     },
   };
