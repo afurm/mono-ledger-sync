@@ -15,6 +15,19 @@
 
 The planned sync flow is pull-first. Webhook events can improve freshness, but final ledger state should be reconciled through statement pulls so retries, duplicate events, and missing signatures do not corrupt the ledger.
 
+## Local webhook exposure
+
+The local webhook receiver starts as a loopback endpoint. Register it directly
+only for local checks. For live Monobank personal webhook delivery during local
+development, expose the local app through a temporary HTTPS tunnel and register
+only the tunnel origin plus the exact high-entropy webhook path from
+`/api/app/config`.
+
+Keep tunnels short-lived, avoid public interface binds, never place tokens in
+webhook URLs, and remove the Monobank webhook URL or stop the tunnel when the
+session ends. Received webhook payloads remain local hints until a statement
+pull reconciles them into the ledger.
+
 ## Moving and restoring data
 
 The local UI shows the active database path in the sidebar and exposes the same

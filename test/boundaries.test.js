@@ -105,6 +105,18 @@ test("documents secure token storage boundaries", async () => {
   assert.match(readme, /0008-secure-token-storage\.md/);
 });
 
+test("documents safe local webhook exposure", async () => {
+  const localFirstDoc = await readFile("docs/local-first.md", "utf8");
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(readme, /temporary HTTPS tunnel/);
+  assert.match(readme, /exact high-entropy `webhook\.path`/);
+  assert.match(readme, /statement pulls before/);
+  assert.match(localFirstDoc, /Local webhook exposure/);
+  assert.match(localFirstDoc, /temporary HTTPS tunnel/);
+  assert.match(localFirstDoc, /never place tokens in\s+webhook URLs/);
+});
+
 test("local web UI exposes webhook settings panel fields", async () => {
   const appSource = await readFile("src/web/App.tsx", "utf8");
 
