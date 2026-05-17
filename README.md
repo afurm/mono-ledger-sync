@@ -124,6 +124,26 @@ and Credential Manager without passing secrets through shell arguments.
 Unsupported or unavailable secure stores fall back to the running session
 instead of writing plaintext credentials to SQLite or config files.
 
+### Rotating a Monobank token
+
+Rotate the personal API token from the local settings screen or the local API;
+do not edit SQLite, generated exports, or config files to change credentials.
+
+1. Create a replacement personal token in Monobank.
+2. Open **Settings -> Monobank token**, paste the replacement token, confirm the
+   local-only handling checkbox, and save it for the active local profile. The
+   same flow is available through `POST /api/app/token` with the active
+   `profile` and replacement `token`.
+3. Confirm the token status in settings. Persistent secure storage means the
+   token survived through the OS credential store; session-only storage means it
+   is available only until the local server process stops.
+4. Run a Monobank sync after saving the replacement token.
+5. Revoke the old token in Monobank after the replacement token works.
+
+If a token may have been exposed, remove it from **Settings -> Monobank token**
+with the explicit deletion checkbox, revoke it in Monobank, and restart the
+local server if the UI reported session-only token handling.
+
 Release automation is documented in [docs/release.md](docs/release.md).
 Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).
 Common local workflows are documented in
