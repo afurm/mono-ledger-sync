@@ -324,6 +324,18 @@ export interface BudgetProgress {
   status: "on_track" | "near_limit" | "overspent";
 }
 
+export interface NetWorthTrendPoint {
+  date: string;
+  amount: number;
+  currencyCode: number;
+}
+
+export interface NetWorthTrend {
+  enabled: boolean;
+  reason?: string;
+  points: readonly NetWorthTrendPoint[];
+}
+
 export interface UpcomingRecurringPayment {
   id: string;
   recurringItemId: string;

@@ -62,6 +62,7 @@ import type {
   LedgerEntrySortField,
   LedgerJar,
   LedgerSummary,
+  NetWorthTrend,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
   SyncRun,
@@ -424,6 +425,22 @@ const ledgerSummaryResponseSchema = {
     currencies: { type: "array", items: { type: "number" } },
     lastSyncedAt: { type: "string" },
     oldestSyncCursorUpdatedAt: { type: "string" },
+  },
+} as const;
+
+const netWorthTrendResponseSchema = {
+  type: "object",
+  required: ["enabled", "points"],
+  properties: {
+    enabled: { type: "boolean" },
+    reason: { type: "string" },
+    points: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+      },
+    },
   },
 } as const;
 
@@ -2015,6 +2032,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.getLedgerSummary(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/net-worth-trend`,
+    {
+      schema: {
+        response: {
+          200: netWorthTrendResponseSchema,
+        },
+      },
+    },
+    async (): Promise<NetWorthTrend> => {
+      const services = await getServices();
+
+      return services.queryService.getNetWorthTrend(services.profile);
     },
   );
 
