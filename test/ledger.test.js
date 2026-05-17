@@ -1484,6 +1484,17 @@ test("local API token endpoint saves and deletes monobank token state", async ()
           token: "   ",
         }),
       });
+      const whitespaceTokenResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/token",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          profile: "demo",
+          token: "test monobank token",
+        }),
+      });
       const populatedTokenConfig = await server.inject({
         method: "GET",
         url: "/api/app/config",
@@ -1524,6 +1535,11 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       assert.deepEqual(invalidSaveResponse.json(), {
         error: "invalid_token",
         message: "Monobank token must be a non-empty string.",
+      });
+      assert.equal(whitespaceTokenResponse.statusCode, 400);
+      assert.deepEqual(whitespaceTokenResponse.json(), {
+        error: "invalid_token",
+        message: "Monobank token must not contain whitespace.",
       });
       assert.equal(populatedTokenConfig.statusCode, 200);
       assert.equal(populatedTokenConfig.json().token.profile, "demo");

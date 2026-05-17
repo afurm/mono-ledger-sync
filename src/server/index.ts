@@ -1800,6 +1800,15 @@ function registerLocalApiRoutes(
         };
       }
 
+      if (/\s/.test(token)) {
+        reply.code(400);
+
+        return {
+          error: "invalid_token",
+          message: "Monobank token must not contain whitespace.",
+        };
+      }
+
       if (body?.profile !== undefined && body.profile !== profile) {
         reply.code(400);
 

@@ -4377,6 +4377,38 @@ function tokenStateLabel(hasToken: boolean): {
   };
 }
 
+function normalizePastedToken(value: string): string {
+  return value.trim();
+}
+
+function validateTokenInput(value: string): string | undefined {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return "Monobank token cannot be empty or whitespace.";
+  }
+
+  if (/\s/.test(normalized)) {
+    return "Monobank token cannot contain spaces or line breaks.";
+  }
+
+  return undefined;
+}
+
+function maskTokenPreview(value: string): string {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return "No token entered";
+  }
+
+  if (normalized.length <= 4) {
+    return "••••";
+  }
+
+  return `•••• ${normalized.slice(-4)}`;
+}
+
 function SettingsRoute({
   snapshot,
   loading,
@@ -4397,6 +4429,7 @@ function SettingsRoute({
   const [isSavingToken, setIsSavingToken] = useState(false);
   const [isDeletingToken, setIsDeletingToken] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [acknowledgedLocalToken, setAcknowledgedLocalToken] = useState(false);
   const [isSwitchingSource, setIsSwitchingSource] = useState(false);
   const [sourceActionError, setSourceActionError] = useState<
     string | undefined
@@ -4419,7 +4452,14 @@ function SettingsRoute({
     description,
   } = tokenStateLabel(snapshot.config.token.hasToken);
   const isBusy = isSavingToken || isDeletingToken;
-  const isTokenInputValid = tokenInput.trim().length > 0;
+  const tokenValidationMessage = tokenInput
+    ? validateTokenInput(tokenInput)
+    : undefined;
+  const isTokenInputValid =
+    tokenInput.trim().length > 0 &&
+    tokenValidationMessage === undefined &&
+    acknowledgedLocalToken;
+  const maskedTokenPreview = maskTokenPreview(tokenInput);
   const isMonobankSource = snapshot.config.source === "monobank";
   const isConfigBusy = isSavingToken || isDeletingToken || isSwitchingSource;
   const activeProfile = snapshot.config.profile;
@@ -4428,9 +4468,15 @@ function SettingsRoute({
     event.preventDefault();
 
     const nextToken = tokenInput.trim();
+    const validationMessage = validateTokenInput(tokenInput);
 
-    if (!nextToken) {
-      setTokenError("Monobank token cannot be empty or whitespace.");
+    if (validationMessage !== undefined) {
+      setTokenError(validationMessage);
+      return;
+    }
+
+    if (!acknowledgedLocalToken) {
+      setTokenError("Confirm local-only token handling before saving.");
       return;
     }
 
@@ -4443,6 +4489,7 @@ function SettingsRoute({
       const tokenStatus = await saveMonobankToken(nextToken, activeProfile);
       setTokenInput("");
       setShowToken(false);
+      setAcknowledgedLocalToken(false);
       setTokenActionMessage(
         `Monobank token saved for the ${tokenStatus.profile} local profile.`,
       );
@@ -4463,6 +4510,7 @@ function SettingsRoute({
 
     try {
       const tokenStatus = await clearMonobankToken();
+      setAcknowledgedLocalToken(false);
       setTokenActionMessage(
         `Monobank token removed from the ${tokenStatus.profile} local profile.`,
       );
@@ -4538,7 +4586,18 @@ function SettingsRoute({
                 inputMode="text"
                 onChange={(event) => {
                   setTokenInput(event.target.value);
-                  setTokenError(undefined);
+                  setTokenError(validateTokenInput(event.target.value));
+                  setTokenActionError(undefined);
+                  setTokenActionMessage(undefined);
+                }}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const pasted = normalizePastedToken(
+                    event.clipboardData.getData("text"),
+                  );
+
+                  setTokenInput(pasted);
+                  setTokenError(validateTokenInput(pasted));
                   setTokenActionError(undefined);
                   setTokenActionMessage(undefined);
                 }}
@@ -4547,6 +4606,12 @@ function SettingsRoute({
                   tokenError ? "monobank-token-error" : undefined
                 }
               />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline">{maskedTokenPreview}</Badge>
+                <span>
+                  Paste trims surrounding whitespace before validation.
+                </span>
+              </div>
               {tokenError && (
                 <span
                   id="monobank-token-error"
@@ -4578,13 +4643,35 @@ function SettingsRoute({
                   size="sm"
                   type="button"
                   variant="outline"
-                  onClick={() => setTokenInput("")}
+                  onClick={() => {
+                    setTokenInput("");
+                    setTokenError(undefined);
+                    setAcknowledgedLocalToken(false);
+                  }}
                   disabled={tokenInput.length === 0}
                 >
                   <XIcon data-icon="inline-start" />
                   Clear input
                 </Button>
               </div>
+            </label>
+
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-primary"
+                checked={acknowledgedLocalToken}
+                onChange={(event) => {
+                  setAcknowledgedLocalToken(event.target.checked);
+                  setTokenError(
+                    tokenInput ? validateTokenInput(tokenInput) : undefined,
+                  );
+                }}
+              />
+              <span className="text-muted-foreground">
+                I understand this token is used only by the local API on this
+                device for the {activeProfile} profile.
+              </span>
             </label>
 
             <div className="flex flex-wrap gap-2">
