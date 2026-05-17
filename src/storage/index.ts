@@ -6,6 +6,7 @@ import type {
   LedgerEntryAnnotationUpdate,
   LedgerEntryPage,
   Category,
+  CategoryRule,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
@@ -30,6 +31,7 @@ export type {
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   Category,
+  CategoryRule,
   Budget,
   LedgerEntryQuery,
   LedgerSummary,
@@ -106,6 +108,7 @@ export interface LedgerDb {
   ): Promise<LocalAppSettings>;
   recordSyncRun(run: SyncRun): Promise<void>;
   listCategories(profile?: string): Promise<readonly Category[]>;
+  listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,

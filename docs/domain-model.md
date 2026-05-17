@@ -33,6 +33,8 @@ configuration, and direct filesystem behavior.
 
 - `Category` defines local category metadata used by sync, rules, filters, and
   exports.
+- `CategoryRule` defines the stored rule metadata used to explain and later edit
+  category assignment behavior.
 - `Budget` defines the planned category-period budget contract before richer
   budget storage and UI are enabled.
 - `RecurringItem` defines the recurring transaction detection contract before
