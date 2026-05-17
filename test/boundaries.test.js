@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { productArchitecture, version } from "mono-ledger-sync/core";
@@ -34,6 +35,25 @@ test("defines the local API and UI boundaries", () => {
     "rules-and-mappings",
     "sync-and-webhooks",
   ]);
+});
+
+test("documents the minimum local product flow", async () => {
+  const workflow = await readFile(
+    "examples/sample-workflows/minimum-product-flow.md",
+    "utf8",
+  );
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(workflow, /## 1\. Install and start the local app/);
+  assert.match(
+    workflow,
+    /## 2\. Add a Monobank token when live sync is needed/,
+  );
+  assert.match(workflow, /## 3\. Sync accounts and statements/);
+  assert.match(workflow, /## 4\. Review transactions/);
+  assert.match(workflow, /## 5\. Categorize spending/);
+  assert.match(workflow, /## 6\. Export local data/);
+  assert.match(readme, /minimum local product flow/);
 });
 
 test("serves local API health through Fastify", async () => {
