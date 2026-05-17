@@ -19,6 +19,7 @@ import type {
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
+  MerchantCleanupRule,
   NetWorthTrend,
   NetWorthTrendPoint,
   RecurringItem,
@@ -53,6 +54,7 @@ export type {
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
+  MerchantCleanupRule,
   NetWorthTrend,
   NetWorthTrendPoint,
   RecurringItem,
@@ -139,6 +141,9 @@ export interface LedgerDb {
   listJars(profile?: string): Promise<readonly LedgerJar[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
+  listMerchantCleanupRules(
+    profile?: string,
+  ): Promise<readonly MerchantCleanupRule[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;

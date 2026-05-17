@@ -37,6 +37,7 @@ import type {
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
+  MerchantCleanupRule,
   RecurringItem,
   StoredWebhookEvent,
   SyncCursor,
@@ -339,6 +340,18 @@ interface SqliteMerchantRow {
   updated_at: string;
 }
 
+interface SqliteMerchantCleanupRuleRow {
+  id: string;
+  name: string;
+  priority: number;
+  merchant_contains: string;
+  canonical_name: string;
+  is_system: number;
+  is_enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface SqliteBudgetRow {
   id: string;
   profile: string;
@@ -407,6 +420,14 @@ interface SeedCategoryRule {
   descriptionContains?: string;
   mcc?: number;
   amountDirection?: "income" | "expense" | "any";
+}
+
+interface SeedMerchantCleanupRule {
+  id: string;
+  name: string;
+  priority: number;
+  merchantContains: string;
+  canonicalName: string;
 }
 
 const seededCategories: readonly SeedCategory[] = [
@@ -681,6 +702,30 @@ const seededCategoryRules: readonly SeedCategoryRule[] = [
     priority: 9999,
     matchType: "fallback",
     amountDirection: "any",
+  },
+];
+
+const seededMerchantCleanupRules: readonly SeedMerchantCleanupRule[] = [
+  {
+    id: "fixture-grocery-cleanup",
+    name: "Fixture Grocery cleanup",
+    priority: 100,
+    merchantContains: "fixture grocery",
+    canonicalName: "Fixture Grocery",
+  },
+  {
+    id: "kyiv-metro-cleanup",
+    name: "Kyiv Metro cleanup",
+    priority: 200,
+    merchantContains: "kyiv metro",
+    canonicalName: "Kyiv Metro",
+  },
+  {
+    id: "cloud-subscription-cleanup",
+    name: "Cloud Subscription cleanup",
+    priority: 300,
+    merchantContains: "cloud subscription",
+    canonicalName: "Cloud Subscription",
   },
 ];
 
@@ -1086,6 +1131,29 @@ const migrations: readonly SqliteMigration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_budget_periods_profile_period
         ON budget_periods(profile, period_start DESC, budget_id, id);
+    `,
+  },
+  {
+    id: "0016_merchant_cleanup_rules",
+    description: "Add merchant cleanup rules",
+    sql: `
+      CREATE TABLE IF NOT EXISTS merchant_cleanup_rules (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        merchant_contains TEXT NOT NULL,
+        canonical_name TEXT NOT NULL,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        is_enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_merchant_cleanup_rules_profile_priority
+        ON merchant_cleanup_rules(profile, is_enabled, priority, id);
     `,
   },
 ];
@@ -1575,6 +1643,31 @@ function mapMerchantRow(row: SqliteMerchantRow): Merchant {
   return merchant;
 }
 
+function mapMerchantCleanupRuleRow(
+  row: SqliteMerchantCleanupRuleRow,
+): MerchantCleanupRule {
+  const rule: MerchantCleanupRule = {
+    id: row.id,
+    name: row.name,
+    priority: row.priority,
+    merchantContains: row.merchant_contains,
+    canonicalName: row.canonical_name,
+    createdAt: row.created_at,
+  };
+
+  if (row.is_system === 1) {
+    rule.isSystem = true;
+  }
+
+  rule.isEnabled = row.is_enabled === 1;
+
+  if (row.updated_at !== row.created_at) {
+    rule.updatedAt = row.updated_at;
+  }
+
+  return rule;
+}
+
 function mapBudgetRow(row: SqliteBudgetRow): Budget {
   return {
     id: row.id,
@@ -1911,6 +2004,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       this.ensureProfile();
       this.seedDefaultCategories();
       this.seedDefaultCategoryRules();
+      this.seedDefaultMerchantCleanupRules();
       this.#database.exec("COMMIT");
     } catch (error) {
       this.#database.exec("ROLLBACK");
@@ -2470,6 +2564,32 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteMerchantRow[];
 
     return rows.map(mapMerchantRow);
+  }
+
+  async listMerchantCleanupRules(
+    profile = this.profile,
+  ): Promise<readonly MerchantCleanupRule[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            name,
+            priority,
+            merchant_contains,
+            canonical_name,
+            is_system,
+            is_enabled,
+            created_at,
+            updated_at
+          FROM merchant_cleanup_rules
+          WHERE profile = ?
+          ORDER BY priority, id
+        `,
+      )
+      .all(profile) as SqliteMerchantCleanupRuleRow[];
+
+    return rows.map(mapMerchantCleanupRuleRow);
   }
 
   async listBudgets(profile = this.profile): Promise<readonly Budget[]> {
@@ -3676,6 +3796,69 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     })();
   }
 
+  private seedDefaultMerchantCleanupRules(): void {
+    const seed = this.#database
+      .prepare(
+        `
+          SELECT 1
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'merchant_cleanup_rules'
+          LIMIT 1
+        `,
+      )
+      .get();
+
+    if (!seed) {
+      return;
+    }
+
+    const insertRule = this.#database.prepare(
+      `
+        INSERT INTO merchant_cleanup_rules (
+          profile,
+          id,
+          name,
+          priority,
+          merchant_contains,
+          canonical_name,
+          is_system,
+          is_enabled,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @name,
+          @priority,
+          @merchantContains,
+          @canonicalName,
+          1,
+          1,
+          @timestamp,
+          @timestamp
+        )
+        ON CONFLICT(profile, id) DO NOTHING
+      `,
+    );
+
+    const timestamp = nowIso();
+
+    this.#database.transaction(() => {
+      for (const rule of seededMerchantCleanupRules) {
+        insertRule.run({
+          profile: this.profile,
+          id: rule.id,
+          name: rule.name,
+          priority: rule.priority,
+          merchantContains: rule.merchantContains,
+          canonicalName: rule.canonicalName,
+          timestamp,
+        });
+      }
+    })();
+  }
+
   private setSyncCursorSync(cursor: SyncCursor): void {
     this.#database
       .prepare(
@@ -3703,10 +3886,17 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   }
 
   private upsertLedgerEntry(entry: LedgerEntry): LedgerWriteStats {
+    const cleanedMerchantName = this.applyMerchantCleanupRules(
+      entry.merchantName,
+    );
+    const normalizedEntry: LedgerEntry =
+      cleanedMerchantName === undefined
+        ? { ...entry }
+        : { ...entry, merchantName: cleanedMerchantName };
     const existed = Boolean(
       this.#database
         .prepare("SELECT 1 FROM ledger_entries WHERE profile = ? AND id = ?")
-        .get(this.profile, entry.id),
+        .get(this.profile, normalizedEntry.id),
     );
     const timestamp = nowIso();
 
@@ -3743,24 +3933,24 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       )
       .run({
         profile: this.profile,
-        id: entry.id,
-        accountId: entry.accountId,
-        time: entry.time,
-        description: entry.description,
-        amount: entry.amount,
-        operationAmount: entry.operationAmount ?? null,
-        currencyCode: entry.currencyCode,
-        categoryId: entry.categoryId ?? null,
-        categoryName: entry.categoryName ?? null,
-        merchantName: entry.merchantName ?? null,
-        rawStatementItemId: entry.rawStatementItemId,
-        hold: entry.hold ? 1 : 0,
-        balance: entry.balance ?? null,
+        id: normalizedEntry.id,
+        accountId: normalizedEntry.accountId,
+        time: normalizedEntry.time,
+        description: normalizedEntry.description,
+        amount: normalizedEntry.amount,
+        operationAmount: normalizedEntry.operationAmount ?? null,
+        currencyCode: normalizedEntry.currencyCode,
+        categoryId: normalizedEntry.categoryId ?? null,
+        categoryName: normalizedEntry.categoryName ?? null,
+        merchantName: normalizedEntry.merchantName ?? null,
+        rawStatementItemId: normalizedEntry.rawStatementItemId,
+        hold: normalizedEntry.hold ? 1 : 0,
+        balance: normalizedEntry.balance ?? null,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
 
-    this.upsertMerchantFromLedgerEntry(entry, timestamp);
+    this.upsertMerchantFromLedgerEntry(normalizedEntry, timestamp);
 
     return {
       inserted: existed ? 0 : 1,
@@ -3779,6 +3969,44 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       entry.time,
       timestamp,
     );
+  }
+
+  private applyMerchantCleanupRules(
+    merchantName: string | undefined,
+  ): string | undefined {
+    const name = merchantName?.trim();
+
+    if (!name) {
+      return merchantName;
+    }
+
+    const normalizedName = normalizeMerchantName(name);
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            merchant_contains,
+            canonical_name
+          FROM merchant_cleanup_rules
+          WHERE profile = ?
+            AND is_enabled = 1
+          ORDER BY priority, id
+        `,
+      )
+      .all(this.profile) as Pick<
+      SqliteMerchantCleanupRuleRow,
+      "merchant_contains" | "canonical_name"
+    >[];
+
+    for (const row of rows) {
+      const normalizedNeedle = normalizeMerchantName(row.merchant_contains);
+
+      if (normalizedNeedle && normalizedName.includes(normalizedNeedle)) {
+        return row.canonical_name;
+      }
+    }
+
+    return name;
   }
 
   private upsertMerchantFromLedgerEntryRow(

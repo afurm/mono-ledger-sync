@@ -6493,6 +6493,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
     "Raw transaction archive",
   ];
   const ruleTestAccount = snapshot?.accounts[0];
+  const merchantCleanupRules = snapshot?.merchantCleanupRules ?? [];
 
   useEffect(() => {
     if (
@@ -6801,7 +6802,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             <CardHeader>
               <CardTitle>Merchant mapping</CardTitle>
               <CardDescription>
-                Local merchant labels ready for future cleanup rules.
+                Local merchant labels and cleanup rules applied during sync.
               </CardDescription>
               <CardAction>
                 <Button disabled size="sm" type="button" variant="outline">
@@ -6828,10 +6829,37 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                   ))}
                 </div>
               )}
-              <p className="text-sm text-muted-foreground">
-                Merchant edits will stay local and reversible once write flows
-                are enabled.
-              </p>
+              <Separator />
+              <div className="grid gap-2">
+                {merchantCleanupRules.length === 0 ? (
+                  <Alert>
+                    <AlertCircleIcon />
+                    <AlertTitle>No cleanup rules configured</AlertTitle>
+                    <AlertDescription>
+                      Synced merchant names will be stored as received.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  merchantCleanupRules.map((rule) => (
+                    <div
+                      className="grid gap-2 rounded-md border border-border px-3 py-2 sm:grid-cols-[1fr_auto] sm:items-center"
+                      key={rule.id}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {rule.canonicalName}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          Contains {rule.merchantContains}
+                        </div>
+                      </div>
+                      <Badge variant={rule.isEnabled ? "secondary" : "outline"}>
+                        Priority {rule.priority}
+                      </Badge>
+                    </div>
+                  ))
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
