@@ -24,6 +24,9 @@ export {
 export {
   type DomainErrorCategory,
   type DomainErrorCode,
+  createDomainErrorDescriptor,
+  domainErrorCategoryForCode,
+  domainErrorCodeCategories,
   domainErrorCategories,
   domainErrorCodes,
   type DomainErrorDescriptor,
