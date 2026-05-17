@@ -40,6 +40,8 @@ export {
   type LocalActivityEvent,
   type LocalActivityEventSeverity,
   type LocalActivityEventType,
+  type LocalAppSettings,
+  type LocalAppSettingsUpdate,
   type Profile,
   type RecurringItem,
   type SyncCursor as DomainSyncCursor,

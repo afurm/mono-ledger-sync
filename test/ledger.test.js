@@ -965,6 +965,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0005_webhook_delivery_dedup",
         "0006_categories",
         "0007_webhook_event_status",
+        "0008_local_app_settings",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1586,6 +1587,99 @@ test("local API can switch between fixture and monobank sources at runtime", asy
       assert.equal(fixtureRun.statusCode, 200);
     } finally {
       await server.close();
+    }
+  });
+});
+
+test("local API loads profile settings from storage unless environment overrides", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const previousSource = process.env.MONO_LEDGER_SYNC_SOURCE;
+    const firstServer = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 55668,
+    });
+
+    try {
+      const switchResponse = await firstServer.inject({
+        method: "POST",
+        url: "/api/app/source",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          source: "monobank",
+        }),
+      });
+
+      assert.equal(switchResponse.statusCode, 200);
+      assert.equal(switchResponse.json().source, "monobank");
+    } finally {
+      await firstServer.close();
+    }
+
+    const storedServer = createLocalApiServer({
+      profile: "demo",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 55669,
+    });
+
+    try {
+      const storedConfig = await storedServer.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const [concurrentConfig, concurrentSync] = await Promise.all([
+        storedServer.inject({
+          method: "GET",
+          url: "/api/app/config",
+        }),
+        storedServer.inject({
+          method: "POST",
+          url: "/api/sync/run",
+        }),
+      ]);
+
+      assert.equal(storedConfig.statusCode, 200);
+      assert.equal(storedConfig.json().source, "monobank");
+      assert.equal(concurrentConfig.statusCode, 200);
+      assert.equal(concurrentConfig.json().source, "monobank");
+      assert.equal(concurrentSync.statusCode, 400);
+      assert.equal(concurrentSync.json().error, "auth_required");
+    } finally {
+      await storedServer.close();
+    }
+
+    try {
+      process.env.MONO_LEDGER_SYNC_SOURCE = "fixture";
+
+      const envServer = createLocalApiServer({
+        profile: "demo",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55670,
+      });
+
+      try {
+        const envConfig = await envServer.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+
+        assert.equal(envConfig.statusCode, 200);
+        assert.equal(envConfig.json().source, "fixture");
+      } finally {
+        await envServer.close();
+      }
+    } finally {
+      if (previousSource === undefined) {
+        Reflect.deleteProperty(process.env, "MONO_LEDGER_SYNC_SOURCE");
+      } else {
+        process.env.MONO_LEDGER_SYNC_SOURCE = previousSource;
+      }
     }
   });
 });

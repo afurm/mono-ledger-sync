@@ -10,6 +10,8 @@ import type {
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
   LedgerWriteStats,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
   RecurringItem,
   SyncCursor,
   SyncRun,
@@ -31,6 +33,8 @@ export type {
   Budget,
   LedgerEntryQuery,
   LedgerSummary,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
   RecurringItem,
   SyncCursor,
   SyncRun,
@@ -95,6 +99,11 @@ export interface LedgerDb {
     profile: string,
     accountId: string,
   ): Promise<SyncCursor | undefined>;
+  getLocalAppSettings(profile: string): Promise<LocalAppSettings | undefined>;
+  updateLocalAppSettings(
+    profile: string,
+    update: LocalAppSettingsUpdate,
+  ): Promise<LocalAppSettings>;
   recordSyncRun(run: SyncRun): Promise<void>;
   listCategories(profile?: string): Promise<readonly Category[]>;
   listWebhookEvents(

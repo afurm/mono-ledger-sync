@@ -66,6 +66,16 @@ export interface DomainErrorDescriptor {
   details?: Record<string, unknown>;
 }
 
+export interface LocalAppSettings {
+  profile: string;
+  source?: "fixture" | "monobank";
+  updatedAt: string;
+}
+
+export interface LocalAppSettingsUpdate {
+  source?: "fixture" | "monobank";
+}
+
 export function domainErrorCategoryForCode(
   code: DomainErrorCode,
 ): DomainErrorCategory {

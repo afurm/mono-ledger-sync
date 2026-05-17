@@ -28,6 +28,8 @@ import type {
   LedgerEntrySortField,
   LedgerSummary,
   LedgerWriteStats,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
   StoredWebhookEvent,
   SyncCursor,
   SyncRun,
@@ -163,6 +165,12 @@ interface SqliteSyncCursorRow {
   source: "fixture" | "monobank";
   statement_from: number;
   statement_to: number;
+  updated_at: string;
+}
+
+interface SqliteLocalAppSettingsRow {
+  profile: string;
+  source: "fixture" | "monobank" | null;
   updated_at: string;
 }
 
@@ -487,6 +495,18 @@ const migrations: readonly SqliteMigration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_webhook_events_status
         ON webhook_events(profile, status);
+    `,
+  },
+  {
+    id: "0008_local_app_settings",
+    description: "Store profile-scoped local app settings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS local_app_settings (
+        profile TEXT PRIMARY KEY,
+        source TEXT,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
     `,
   },
 ];
@@ -1066,6 +1086,63 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .get(profile, accountId) as SqliteSyncCursorRow | undefined;
 
     return row ? mapSyncCursorRow(row) : undefined;
+  }
+
+  async getLocalAppSettings(
+    profile: string,
+  ): Promise<LocalAppSettings | undefined> {
+    const row = this.#database
+      .prepare(
+        `
+          SELECT profile, source, updated_at
+          FROM local_app_settings
+          WHERE profile = ?
+        `,
+      )
+      .get(profile) as SqliteLocalAppSettingsRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      profile: row.profile,
+      ...(row.source === null ? {} : { source: row.source }),
+      updatedAt: row.updated_at,
+    };
+  }
+
+  async updateLocalAppSettings(
+    profile: string,
+    update: LocalAppSettingsUpdate,
+  ): Promise<LocalAppSettings> {
+    this.ensureProfile();
+
+    const current = await this.getLocalAppSettings(profile);
+    const nextSource = update.source ?? current?.source;
+    const updatedAt = nowIso();
+
+    this.#database
+      .prepare(
+        `
+          INSERT INTO local_app_settings (profile, source, updated_at)
+          VALUES (@profile, @source, @updatedAt)
+          ON CONFLICT(profile) DO UPDATE SET
+            source = excluded.source,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        profile,
+        source: nextSource ?? null,
+        updatedAt,
+      });
+
+    return {
+      profile,
+      ...(nextSource === undefined ? {} : { source: nextSource }),
+      updatedAt,
+    };
   }
 
   async recordSyncRun(run: SyncRun): Promise<void> {
