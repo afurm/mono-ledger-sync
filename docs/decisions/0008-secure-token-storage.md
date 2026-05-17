@@ -51,6 +51,13 @@ Packaged desktop work should add or replace platform adapters behind the
 secure-storage boundary instead of widening SQLite tables or writing tokens to
 app config files.
 
+Token rotation uses the same boundary as initial token save. Users should save
+the replacement token through the settings UI or `POST /api/app/token`, verify a
+Monobank sync, then revoke the old token in Monobank. If a token may have been
+exposed, users should delete the local token through settings or
+`DELETE /api/app/token`, revoke the token in Monobank, and restart the local app
+when the token status was session-only.
+
 Tests and CI stay fixture-first. Any live adapter check must remain opt-in and
 credential-driven through environment variables so pull-request validation does
 not require or leak personal banking credentials.
