@@ -1459,6 +1459,18 @@ test("local API token endpoint saves and deletes monobank token state", async ()
           "content-type": "application/json",
         },
         body: JSON.stringify({
+          profile: "demo",
+          token: "test-monobank-token",
+        }),
+      });
+      const wrongProfileResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/token",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          profile: "other",
           token: "test-monobank-token",
         }),
       });
@@ -1490,6 +1502,7 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       });
 
       assert.equal(noTokenConfig.statusCode, 200);
+      assert.equal(noTokenConfig.json().token.profile, "demo");
       assert.equal(noTokenConfig.json().token.hasToken, false);
       assert.equal(emptyTokenSync.statusCode, 400);
       assert.deepEqual(emptyTokenSync.json(), {
@@ -1498,17 +1511,30 @@ test("local API token endpoint saves and deletes monobank token state", async ()
           "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
       });
       assert.equal(saveResponse.statusCode, 200);
-      assert.deepEqual(saveResponse.json(), { hasToken: true });
+      assert.deepEqual(saveResponse.json(), {
+        profile: "demo",
+        hasToken: true,
+      });
+      assert.equal(wrongProfileResponse.statusCode, 400);
+      assert.deepEqual(wrongProfileResponse.json(), {
+        error: "config_invalid",
+        message: "Monobank token profile must match demo.",
+      });
       assert.equal(invalidSaveResponse.statusCode, 400);
       assert.deepEqual(invalidSaveResponse.json(), {
         error: "invalid_token",
         message: "Monobank token must be a non-empty string.",
       });
       assert.equal(populatedTokenConfig.statusCode, 200);
+      assert.equal(populatedTokenConfig.json().token.profile, "demo");
       assert.equal(populatedTokenConfig.json().token.hasToken, true);
       assert.equal(deleteResponse.statusCode, 200);
-      assert.deepEqual(deleteResponse.json(), { hasToken: false });
+      assert.deepEqual(deleteResponse.json(), {
+        profile: "demo",
+        hasToken: false,
+      });
       assert.equal(deletedTokenConfig.statusCode, 200);
+      assert.equal(deletedTokenConfig.json().token.profile, "demo");
       assert.equal(deletedTokenConfig.json().token.hasToken, false);
       assert.equal(deletedTokenSync.statusCode, 400);
       assert.deepEqual(deletedTokenSync.json(), {

@@ -142,6 +142,7 @@ export interface LocalApiWebhookSettings {
 }
 
 interface LocalApiMonobankTokenStatus {
+  profile: string;
   hasToken: boolean;
 }
 
@@ -323,8 +324,9 @@ const appConfigResponseSchema = {
     },
     token: {
       type: "object",
-      required: ["hasToken"],
+      required: ["profile", "hasToken"],
       properties: {
+        profile: { type: "string" },
         hasToken: { type: "boolean" },
       },
     },
@@ -335,6 +337,7 @@ const monobankTokenBodySchema = {
   type: "object",
   required: ["token"],
   properties: {
+    profile: { type: "string" },
     token: { type: "string" },
   },
   additionalProperties: false,
@@ -351,8 +354,9 @@ const appSourceBodySchema = {
 
 const monobankTokenResponseSchema = {
   type: "object",
-  required: ["hasToken"],
+  required: ["profile", "hasToken"],
   properties: {
+    profile: { type: "string" },
     hasToken: { type: "boolean" },
   },
 } as const;
@@ -1571,7 +1575,10 @@ function registerLocalApiRoutes(
   options: LocalApiServerOptions,
   getServices: () => Promise<LocalAppServices>,
   getMonobankToken: () => string | undefined,
-  saveMonobankToken: (token: string) => Promise<LocalApiMonobankTokenStatus>,
+  saveMonobankToken: (
+    token: string,
+    profile: string,
+  ) => Promise<LocalApiMonobankTokenStatus>,
   removeMonobankToken: () => Promise<LocalApiMonobankTokenStatus>,
   setSource: (source: LedgerSource) => Promise<void>,
   localWebhookRoutePath: LocalWebhookRoutePath,
@@ -1667,6 +1674,7 @@ function registerLocalApiRoutes(
       databasePath: services.databasePath,
       localOnly: true,
       token: {
+        profile: services.profile,
         hasToken: monobankToken !== undefined,
       },
       webhook: {
@@ -1777,7 +1785,10 @@ function registerLocalApiRoutes(
     ): Promise<
       LocalApiMonobankTokenStatus | { error: string; message: string }
     > => {
-      const body = request.body as { token: string } | undefined;
+      const body = request.body as
+        | { profile?: string; token: string }
+        | undefined;
+      const profile = resolveProfile(options);
       const token = body?.token?.trim();
 
       if (token === undefined || token.length === 0) {
@@ -1789,7 +1800,16 @@ function registerLocalApiRoutes(
         };
       }
 
-      return saveMonobankToken(token);
+      if (body?.profile !== undefined && body.profile !== profile) {
+        reply.code(400);
+
+        return {
+          error: "config_invalid",
+          message: `Monobank token profile must match ${profile}.`,
+        };
+      }
+
+      return saveMonobankToken(token, profile);
     },
   );
 
@@ -2415,17 +2435,20 @@ export function createLocalApiServer(
     await rebuildServices();
 
     return {
+      profile: resolveProfile(options),
       hasToken: false,
     };
   }
 
   async function saveMonobankToken(
     token: string,
+    profile: string,
   ): Promise<LocalApiMonobankTokenStatus> {
     monobankToken = token;
     await rebuildServices();
 
     return {
+      profile,
       hasToken: true,
     };
   }
