@@ -594,6 +594,8 @@ export async function syncLedgerWithMonobank(
           options.profile,
           account.id,
           webhookProcessedAt,
+          windows,
+          startedAt,
         );
       }
 

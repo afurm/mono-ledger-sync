@@ -853,6 +853,26 @@ test("marks pending webhook events as processed after successful account sync", 
       statementItem: statementItems[1],
     },
   };
+  const ignoredWebhookEvent = {
+    type: "StatementItem",
+    data: {
+      account: accountId,
+      statementItem: {
+        ...statementItems[2],
+        id: "fixture-webhook-ignored-after-reconcile",
+      },
+    },
+  };
+  const failedWebhookEvent = {
+    type: "StatementItem",
+    data: {
+      account: accountId,
+      statementItem: {
+        ...statementItems[3],
+        id: "fixture-webhook-failed-after-reconcile",
+      },
+    },
+  };
 
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -868,6 +888,17 @@ test("marks pending webhook events as processed after successful account sync", 
         duplicateWebhookEvent,
       );
       const pendingRecord = await db.recordWebhookEvent(pendingWebhookEvent);
+      const ignoredRecord = await db.recordWebhookEvent(ignoredWebhookEvent);
+      const failedRecord = await db.recordWebhookEvent(failedWebhookEvent);
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase
+          .prepare("UPDATE webhook_events SET payload_json = ? WHERE id = ?")
+          .run("{malformed-json", failedRecord.id);
+      } finally {
+        rawDatabase.close();
+      }
 
       assert.equal(firstRecord.id, duplicateRecord.id);
       assert.equal(duplicateRecord.status, "duplicate");
@@ -889,12 +920,96 @@ test("marks pending webhook events as processed after successful account sync", 
       const pendingEvent = webhookEvents.find((event) => {
         return event.id === pendingRecord.id;
       });
+      const ignoredEvent = webhookEvents.find((event) => {
+        return event.id === ignoredRecord.id;
+      });
+      const failedEvent = webhookEvents.find((event) => {
+        return event.id === failedRecord.id;
+      });
 
       assert.equal(result.run.status, "success");
       assert.equal(duplicateEvent?.status, "duplicate");
       assert.equal(pendingEvent?.status, "processed");
       assert.equal(typeof pendingEvent?.processedAt, "string");
       assert.equal(pendingEvent?.processedAt?.trim().length > 0, true);
+      assert.equal(ignoredEvent?.status, "ignored");
+      assert.equal(typeof ignoredEvent?.processedAt, "string");
+      assert.equal(failedEvent?.status, "failed");
+      assert.equal(typeof failedEvent?.processedAt, "string");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("keeps webhook events pending when they arrive after sync starts", async () => {
+  const fixtureSet = await loadMonobankFixtureSet();
+  const account = fixtureSet.clientInfo.accounts[0];
+  const statementItems = fixtureSet.statements[account.id];
+  const lateWebhookEvent = {
+    type: "StatementItem",
+    data: {
+      account: account.id,
+      statementItem: {
+        ...statementItems[2],
+        id: "fixture-webhook-arrived-during-sync",
+      },
+    },
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    let lateRecordId;
+    const adapter = {
+      async getClientInfo() {
+        return {
+          ...fixtureSet.clientInfo,
+          accounts: [account],
+        };
+      },
+      async getStatement(window) {
+        if (lateRecordId === undefined) {
+          const record = await db.recordWebhookEvent(
+            lateWebhookEvent,
+            "2999-01-01T00:00:00.000Z",
+          );
+          lateRecordId = record.id;
+        }
+
+        return statementItems.filter((item) => {
+          return item.time >= window.from && item.time <= window.to;
+        });
+      },
+      async getCurrency() {
+        return fixtureSet.currencyRates;
+      },
+      async setWebhook() {
+        return undefined;
+      },
+    };
+
+    try {
+      const result = await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter,
+        db,
+        accountIds: [account.id],
+        from: statementItems[0].time,
+        to: statementItems[statementItems.length - 1].time,
+      });
+      const webhookEvents = await db.listWebhookEvents(profile, 20);
+      const lateEvent = webhookEvents.find((event) => {
+        return event.id === lateRecordId;
+      });
+
+      assert.equal(result.run.status, "success");
+      assert.equal(lateEvent?.status, "pending");
+      assert.equal(lateEvent?.processedAt, undefined);
     } finally {
       await db.close();
     }
