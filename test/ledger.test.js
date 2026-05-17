@@ -1693,6 +1693,14 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(summary.income, 500000);
         assert.equal(summary.expenses, 2450);
         assert.equal(summary.net, 497550);
+        assert.deepEqual(summary.monthToDate, {
+          month: "2026-04",
+          from: "2026-04-01",
+          to: "2026-04-02",
+          income: 500000,
+          expenses: 2450,
+          net: 497550,
+        });
         assert.equal(summary.lastSyncedAt, "2026-05-16T08:03:00.000Z");
         assert.equal(
           summary.oldestSyncCursorUpdatedAt,
@@ -2172,6 +2180,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(syncBody.stats.itemsSeen, 7);
       assert.equal(summaryResponse.statusCode, 200);
       assert.equal(summaryResponse.json().ledgerEntries, 7);
+      assert.deepEqual(summaryResponse.json().monthToDate, {
+        month: "2026-04",
+        from: "2026-04-01",
+        to: "2026-04-10",
+        income: 8520000,
+        expenses: 408650,
+        net: 8111350,
+      });
       assert.equal(categoriesResponse.statusCode, 200);
       assert.deepEqual(
         categoriesResponse.json().map((category) => category.id),

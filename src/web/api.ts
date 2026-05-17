@@ -51,9 +51,19 @@ export interface LedgerSummary {
   income: number;
   expenses: number;
   net: number;
+  monthToDate: LedgerCashflowSummary;
   currencies: readonly number[];
   lastSyncedAt?: string;
   oldestSyncCursorUpdatedAt?: string;
+}
+
+export interface LedgerCashflowSummary {
+  month: string;
+  from: string;
+  to: string;
+  income: number;
+  expenses: number;
+  net: number;
 }
 
 export interface LedgerAccount {
@@ -228,6 +238,9 @@ interface CachedLocalAppSnapshot {
 
 type PersistedLocalAppSnapshot = Omit<LocalAppSnapshot, "jars"> & {
   jars?: readonly LedgerJar[];
+  summary: Omit<LedgerSummary, "monthToDate"> & {
+    monthToDate?: LedgerCashflowSummary;
+  };
 };
 
 const LOCAL_APP_SNAPSHOT_CACHE_PREFIX =
@@ -296,11 +309,23 @@ function normalizeCachedLocalAppSnapshot(
   cached: CachedLocalAppSnapshot,
 ): CachedLocalAppSnapshot {
   const snapshot = cached.snapshot as PersistedLocalAppSnapshot;
+  const monthToDate = snapshot.summary.monthToDate ?? {
+    month: "cached",
+    from: "cached",
+    to: "cached",
+    income: snapshot.summary.income,
+    expenses: snapshot.summary.expenses,
+    net: snapshot.summary.net,
+  };
 
   return {
     ...cached,
     snapshot: {
       ...snapshot,
+      summary: {
+        ...snapshot.summary,
+        monthToDate,
+      },
       jars: snapshot.jars ?? [],
     },
   };

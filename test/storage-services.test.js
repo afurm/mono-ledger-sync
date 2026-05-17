@@ -86,6 +86,14 @@ test("query service defaults profile and wraps storage reads", async () => {
 
       assert.equal(summary.profile, profile);
       assert.equal(summary.ledgerEntries, 7);
+      assert.deepEqual(summary.monthToDate, {
+        month: "2026-04",
+        from: "2026-04-01",
+        to: "2026-04-10",
+        income: 8520000,
+        expenses: 408650,
+        net: 8111350,
+      });
       assert.equal(accounts.length, 2);
       assert.equal(jars.length, 1);
       assert.equal(balances.length, 2);

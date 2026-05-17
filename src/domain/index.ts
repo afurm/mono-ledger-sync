@@ -291,6 +291,15 @@ export interface LedgerAccount {
   updatedAt: string;
 }
 
+export interface LedgerCashflowSummary {
+  month: string;
+  from: string;
+  to: string;
+  income: number;
+  expenses: number;
+  net: number;
+}
+
 export interface LedgerJar {
   id: string;
   title: string;
@@ -377,6 +386,7 @@ export interface LedgerSummary {
   income: number;
   expenses: number;
   net: number;
+  monthToDate: LedgerCashflowSummary;
   currencies: readonly number[];
   lastSyncedAt?: string;
   oldestSyncCursorUpdatedAt?: string;
