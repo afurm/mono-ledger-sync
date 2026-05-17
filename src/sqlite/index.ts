@@ -447,6 +447,61 @@ const seededCategories: readonly SeedCategory[] = [
     description: "Restaurants, cafes, and food outside home.",
   },
   {
+    id: "utilities",
+    name: "Utilities",
+    color: "#2563eb",
+    description:
+      "Utility bills, mobile plans, internet, and communal services.",
+  },
+  {
+    id: "healthcare",
+    name: "Healthcare",
+    color: "#dc2626",
+    description: "Pharmacies, clinics, medical visits, and health services.",
+  },
+  {
+    id: "shopping",
+    name: "Shopping",
+    color: "#9333ea",
+    description: "Clothing, marketplaces, electronics, and personal shopping.",
+  },
+  {
+    id: "household",
+    name: "Household",
+    color: "#ca8a04",
+    description: "Home goods, repairs, furniture, and household supplies.",
+  },
+  {
+    id: "education",
+    name: "Education",
+    color: "#0891b2",
+    description: "Courses, books, school, and professional learning.",
+  },
+  {
+    id: "taxes",
+    name: "Taxes",
+    color: "#475569",
+    description: "Taxes, public services, and mandatory state payments.",
+  },
+  {
+    id: "charity",
+    name: "Charity",
+    color: "#db2777",
+    description: "Donations, volunteer support, and charitable transfers.",
+  },
+  {
+    id: "cash",
+    name: "Cash",
+    color: "#65a30d",
+    description: "ATM withdrawals and cash handling.",
+  },
+  {
+    id: "fees",
+    name: "Fees",
+    color: "#ea580c",
+    description: "Bank fees, commissions, and service charges.",
+  },
+  {
     id: "transfers",
     name: "Transfers",
     color: "#64748b",
