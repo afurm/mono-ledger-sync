@@ -44,10 +44,43 @@ export const domainErrorCodes = [
 
 export type DomainErrorCode = (typeof domainErrorCodes)[number];
 
+export const domainErrorCodeCategories: Readonly<
+  Record<DomainErrorCode, DomainErrorCategory>
+> = {
+  auth_required: "auth",
+  token_invalid: "auth",
+  rate_limit_exceeded: "rate_limit",
+  validation_failed: "validation",
+  request_invalid: "validation",
+  network_unreachable: "network",
+  storage_corrupted: "storage",
+  migration_failed: "migration",
+  config_invalid: "config",
+  privacy_violation: "privacy",
+  internal_error: "internal",
+};
+
 export interface DomainErrorDescriptor {
   code: DomainErrorCode;
   category: DomainErrorCategory;
   details?: Record<string, unknown>;
+}
+
+export function domainErrorCategoryForCode(
+  code: DomainErrorCode,
+): DomainErrorCategory {
+  return domainErrorCodeCategories[code];
+}
+
+export function createDomainErrorDescriptor(
+  code: DomainErrorCode,
+  details?: Record<string, unknown>,
+): DomainErrorDescriptor {
+  return {
+    code,
+    category: domainErrorCategoryForCode(code),
+    ...(details ? { details } : {}),
+  };
 }
 
 export class DomainError extends Error {

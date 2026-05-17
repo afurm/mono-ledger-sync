@@ -42,7 +42,7 @@ configuration, and direct filesystem behavior.
 
 - `DomainError` carries a stable error code and category for auth, rate limit,
   validation, network, storage, migration, config, privacy, and internal
-  failures.
+  failures. `domainErrorCodeCategories` is the canonical code-to-category map.
 - `LocalActivityEvent` is the local event stream contract for sync lifecycle,
   ledger writes, webhook delivery, exports, report refreshes, rule application,
   warnings, and errors.
