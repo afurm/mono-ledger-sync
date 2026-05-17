@@ -139,6 +139,16 @@ test("local web UI exposes webhook settings panel fields", async () => {
   assert.match(appSource, /reconcile it through statement\s+pulls/);
 });
 
+test("local web UI exposes a privacy onboarding screen", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /function PrivacyOnboardingCard/);
+  assert.match(appSource, /Privacy-first local setup/);
+  assert.match(appSource, /No cloud account required/);
+  assert.match(appSource, /no hosted token relay/);
+  assert.match(appSource, /Review privacy settings/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 

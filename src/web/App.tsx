@@ -3612,6 +3612,79 @@ function TransactionRowActions({
   );
 }
 
+function PrivacyOnboardingCard({
+  snapshot,
+  onRouteChange,
+}: {
+  snapshot: LocalAppSnapshot;
+  onRouteChange: (routeId: RouteId) => void;
+}) {
+  const tokenStatus = tokenStateLabel(snapshot.config.token);
+
+  return (
+    <Card className="border-primary/30 bg-primary/5">
+      <CardHeader>
+        <CardTitle>Privacy-first local setup</CardTitle>
+        <CardDescription>
+          Review where sensitive data lives before connecting a Monobank token
+          or syncing statements.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">No cloud account required</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border border-border bg-background/80 p-3">
+            <DatabaseIcon className="mb-2 size-4 text-primary" />
+            <p className="text-sm font-medium">Local database</p>
+            <p className="break-all text-sm text-muted-foreground">
+              {snapshot.config.databasePath}
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-background/80 p-3">
+            <ShieldCheckIcon className="mb-2 size-4 text-primary" />
+            <p className="text-sm font-medium">Token control</p>
+            <p className="text-sm text-muted-foreground">
+              {tokenStatus.description}
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-background/80 p-3">
+            <DownloadIcon className="mb-2 size-4 text-primary" />
+            <p className="text-sm font-medium">Portable records</p>
+            <p className="text-sm text-muted-foreground">
+              Backups and exports stay as local files you control.
+            </p>
+          </div>
+        </div>
+        <Alert>
+          <ShieldCheckIcon />
+          <AlertTitle>Local-first privacy model</AlertTitle>
+          <AlertDescription>
+            Tokens, raw Monobank payloads, ledger data, backups, and exports
+            stay on this machine. There is no hosted token relay or required
+            cloud account for local setup.
+          </AlertDescription>
+        </Alert>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2">
+        <Button type="button" onClick={() => onRouteChange("settings")}>
+          <ShieldCheckIcon data-icon="inline-start" />
+          Review privacy settings
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onRouteChange("sync")}
+        >
+          <RefreshCwIcon data-icon="inline-start" />
+          Continue to sync
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function OverviewRoute({
   snapshot,
   loading,
@@ -3643,9 +3716,18 @@ function OverviewRoute({
   const freshness = dataFreshnessLabel(snapshot.summary.lastSyncedAt);
   const webhookHints = snapshot.fixtures?.webhookEvents ?? 0;
   const databaseHealth = snapshot.health.status;
+  const showPrivacyOnboarding =
+    snapshot.summary.accounts === 0 && snapshot.summary.ledgerEntries === 0;
 
   return (
     <div className="flex flex-col gap-4">
+      {showPrivacyOnboarding ? (
+        <PrivacyOnboardingCard
+          snapshot={snapshot}
+          onRouteChange={onRouteChange}
+        />
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard
           title="Accounts"
