@@ -6208,6 +6208,8 @@ function reviewCandidateLabel(candidate: LedgerEntryReviewCandidate): string {
   switch (candidate.kind) {
     case "duplicate":
       return "Duplicate";
+    case "needs_review":
+      return "Needs review";
     case "transfer":
       return "Transfer";
     case "reversal":
@@ -6223,6 +6225,8 @@ function reviewCandidateBadgeVariant(
   switch (candidate.kind) {
     case "duplicate":
       return "secondary";
+    case "needs_review":
+      return "outline";
     case "transfer":
       return "default";
     case "reversal":
@@ -6322,7 +6326,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
           <OverviewStatusItem
             label="Duplicate candidates"
             value={String(duplicateCandidates)}
-            detail="Potential duplicate, transfer, reversal, and refund matches"
+            detail="Uncategorized, hold, duplicate, transfer, reversal, and refund matches"
           />
         </CardContent>
       </Card>
@@ -6626,8 +6630,8 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             <CardHeader>
               <CardTitle>Duplicate detection</CardTitle>
               <CardDescription>
-                Review queue for potential duplicate, transfer, reversal, or
-                refund records.
+                Review queue for uncategorized, hold, duplicate, transfer,
+                reversal, or refund records.
               </CardDescription>
               <CardAction>
                 <Button disabled size="sm" type="button" variant="outline">
@@ -6649,10 +6653,10 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                     : "No review candidates in the current local page"}
                 </AlertTitle>
                 <AlertDescription>
-                  The read-only detector checks exact duplicates, matched
-                  transfers between accounts, short-window reversals, and later
-                  positive refunds. History is preserved until review writes are
-                  available.
+                  The read-only detector checks uncategorized and hold rows,
+                  exact duplicates, matched transfers between accounts,
+                  short-window reversals, and later positive refunds. History is
+                  preserved until review writes are available.
                 </AlertDescription>
               </Alert>
               {reviewCandidates.length > 0 && (

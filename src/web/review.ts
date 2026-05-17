@@ -2,6 +2,7 @@ import type { LedgerEntry } from "./api.js";
 
 export type LedgerEntryReviewCandidateKind =
   | "duplicate"
+  | "needs_review"
   | "transfer"
   | "reversal"
   | "refund";
@@ -46,6 +47,32 @@ function transferMatch(left: LedgerEntry, right: LedgerEntry): boolean {
     transferLike(left) &&
     transferLike(right)
   );
+}
+
+function alreadyReviewed(entry: LedgerEntry): boolean {
+  return (
+    entry.tags?.some((tag) => tag.trim().toLowerCase() === "reviewed") ?? false
+  );
+}
+
+function needsReview(entry: LedgerEntry): boolean {
+  if (alreadyReviewed(entry)) {
+    return false;
+  }
+
+  return (
+    entry.hold === true ||
+    !entry.categoryId ||
+    entry.categoryId === "uncategorized"
+  );
+}
+
+function needsReviewReason(entry: LedgerEntry): string {
+  if (entry.hold === true) {
+    return "Pending hold transaction should be reviewed before month close.";
+  }
+
+  return "Uncategorized transaction needs a category review.";
 }
 
 function sortedPair(
@@ -163,6 +190,18 @@ export function findLedgerEntryReviewCandidates(
         break;
       }
     }
+  }
+
+  for (const entry of sortedEntries) {
+    if (!needsReview(entry)) {
+      continue;
+    }
+
+    candidates.push({
+      kind: "needs_review",
+      entries: [entry],
+      reason: needsReviewReason(entry),
+    });
   }
 
   return candidates;
