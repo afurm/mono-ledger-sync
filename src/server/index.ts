@@ -34,7 +34,10 @@ import {
   type MonobankStatementItem,
 } from "../monobank/index.js";
 import { createSqliteLedgerDb, type SqliteLedgerDb } from "../sqlite/index.js";
-import { syncLedgerWithMonobank } from "../sync/index.js";
+import {
+  createProcessSignalAbortController,
+  syncLedgerWithMonobank,
+} from "../sync/index.js";
 import {
   ledgerEntrySortDirections,
   ledgerEntrySortFields,
@@ -2011,13 +2014,7 @@ function registerLocalApiRoutes(
         };
       }
 
-      const syncAbortController = new AbortController();
-      const handleInterrupt = (): void => {
-        syncAbortController.abort();
-      };
-
-      process.on("SIGINT", handleInterrupt);
-      process.on("SIGTERM", handleInterrupt);
+      const syncAbortController = createProcessSignalAbortController();
 
       try {
         return await syncLedgerWithMonobank({
@@ -2028,8 +2025,7 @@ function registerLocalApiRoutes(
           signal: syncAbortController.signal,
         });
       } finally {
-        process.off("SIGINT", handleInterrupt);
-        process.off("SIGTERM", handleInterrupt);
+        syncAbortController.dispose();
       }
     },
   );
