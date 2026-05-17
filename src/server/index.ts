@@ -48,6 +48,7 @@ import {
   type LedgerWriteService,
 } from "../storage/index.js";
 import type {
+  Category,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -406,6 +407,14 @@ const ledgerSummaryResponseSchema = {
 } as const;
 
 const ledgerAccountsResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const ledgerCategoriesResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -1896,6 +1905,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listAccounts(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/categories`,
+    {
+      schema: {
+        response: {
+          200: ledgerCategoriesResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly Category[]> => {
+      const services = await getServices();
+
+      return services.queryService.listCategories(services.profile);
     },
   );
 
