@@ -109,6 +109,9 @@ server and proxies browser requests through `http://127.0.0.1:5173`.
 Release automation is documented in [docs/release.md](docs/release.md).
 Common local workflows are documented in
 [examples/sample-workflows](examples/sample-workflows).
+Start with the
+[minimum local product flow](examples/sample-workflows/minimum-product-flow.md)
+for the install, token, sync, review, categorization, and export path.
 
 ## License
 
