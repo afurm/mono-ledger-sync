@@ -66,6 +66,14 @@ export interface LedgerCashflowSummary {
   net: number;
 }
 
+export interface LedgerCategorySpending {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
 export interface LedgerAccount {
   id: string;
   type: string;
@@ -217,6 +225,7 @@ export interface LocalAppSnapshot {
   accounts: readonly LedgerAccount[];
   jars: readonly LedgerJar[];
   categories: readonly Category[];
+  categorySpending: readonly LedgerCategorySpending[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
   webhookEvents: readonly WebhookEvent[];
@@ -236,8 +245,12 @@ interface CachedLocalAppSnapshot {
   snapshot: LocalAppSnapshot;
 }
 
-type PersistedLocalAppSnapshot = Omit<LocalAppSnapshot, "jars"> & {
+type PersistedLocalAppSnapshot = Omit<
+  LocalAppSnapshot,
+  "jars" | "categorySpending"
+> & {
   jars?: readonly LedgerJar[];
+  categorySpending?: readonly LedgerCategorySpending[];
   summary: Omit<LedgerSummary, "monthToDate"> & {
     monthToDate?: LedgerCashflowSummary;
   };
@@ -327,6 +340,7 @@ function normalizeCachedLocalAppSnapshot(
         monthToDate,
       },
       jars: snapshot.jars ?? [],
+      categorySpending: snapshot.categorySpending ?? [],
     },
   };
 }
@@ -734,6 +748,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       accounts,
       jars,
       categories,
+      categorySpending,
       transactions,
       syncRuns,
       webhookEvents,
@@ -743,6 +758,9 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
       requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
       requestJson<readonly Category[]>("/api/ledger/categories"),
+      requestJson<readonly LedgerCategorySpending[]>(
+        "/api/ledger/category-spending",
+      ),
       loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
       requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
@@ -762,6 +780,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       accounts,
       jars,
       categories,
+      categorySpending,
       transactions,
       syncRuns,
       webhookEvents,

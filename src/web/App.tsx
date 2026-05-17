@@ -3714,6 +3714,72 @@ function PrivacyOnboardingCard({
   );
 }
 
+function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  const rows = snapshot.categorySpending.slice(0, 6);
+  const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Spending by category</CardTitle>
+        <CardDescription>
+          Expense categories from the local ledger snapshot.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No expense categories found in the current ledger.
+          </p>
+        ) : (
+          rows.map((row) => {
+            const width =
+              maxAmount > 0 ? Math.max(4, (row.amount / maxAmount) * 100) : 0;
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              categoryId: row.categoryId,
+              amountMax: "-0.01",
+            });
+
+            return (
+              <a
+                className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={`${row.categoryId}:${row.currencyCode}`}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {row.categoryName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.transactionCount} transactions
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-semibold">
+                      {formatMinorAmount(row.amount, row.currencyCode)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {currencyLabel(row.currencyCode)}
+                    </p>
+                  </div>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function OverviewRoute({
   snapshot,
   loading,
@@ -3879,6 +3945,7 @@ function OverviewRoute({
             events={snapshot.webhookEvents}
             onRouteChange={onRouteChange}
           />
+          <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard
             runs={snapshot.syncRuns}
             onRouteChange={onRouteChange}

@@ -52,6 +52,7 @@ import {
 import type {
   Category,
   LedgerAccount,
+  LedgerCategorySpending,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntrySplitPlanUpdate,
@@ -441,6 +442,14 @@ const ledgerJarsResponseSchema = {
 } as const;
 
 const ledgerCategoriesResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const ledgerCategorySpendingResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2036,6 +2045,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listCategories(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/category-spending`,
+    {
+      schema: {
+        response: {
+          200: ledgerCategorySpendingResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly LedgerCategorySpending[]> => {
+      const services = await getServices();
+
+      return services.queryService.listCategorySpending(services.profile);
     },
   );
 

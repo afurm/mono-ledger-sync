@@ -64,6 +64,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         sortDirection: "desc",
       });
       const categories = await queryService.listCategories();
+      const categorySpending = await queryService.listCategorySpending();
       const budgets = await queryService.listBudgets();
       const budgetPeriods = await queryService.listBudgetPeriods();
       const recurringItems = await queryService.listRecurringItems();
@@ -77,6 +78,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const groupedBalances = await queryServices.balances.getAccountBalances();
       const groupedJars = await queryServices.balances.listJars();
       const groupedCategories = await queryServices.categories.listCategories();
+      const groupedCategorySpending =
+        await queryServices.categories.listCategorySpending();
       const groupedBudgets = await queryServices.budgets.listBudgets();
       const groupedBudgetPeriods =
         await queryServices.budgets.listBudgetPeriods();
@@ -104,6 +107,20 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(categoryIds.length > 0, true);
       assert.ok(categoryIds.includes("income"));
       assert.ok(categoryIds.includes("uncategorized"));
+      assert.deepEqual(
+        categorySpending.map((row) => [
+          row.categoryId,
+          row.currencyCode,
+          row.amount,
+        ]),
+        [
+          ["transfers", 980, 250000],
+          ["groceries", 980, 84250],
+          ["subscriptions", 840, 52900],
+          ["travel", 978, 20000],
+          ["transport", 980, 1500],
+        ],
+      );
       assert.deepEqual(budgets, []);
       assert.deepEqual(budgetPeriods, []);
       assert.deepEqual(recurringItems, []);
@@ -117,6 +134,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         groupedCategories.map((category) => category.id),
         categoryIds,
       );
+      assert.deepEqual(groupedCategorySpending, categorySpending);
       assert.deepEqual(groupedBudgets, []);
       assert.deepEqual(groupedBudgetPeriods, []);
       assert.deepEqual(groupedRecurringItems, []);

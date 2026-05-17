@@ -8,6 +8,7 @@ import type {
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
+  LedgerCategorySpending,
   LedgerJar,
   Category,
   LedgerSummary,
@@ -34,6 +35,9 @@ export interface LedgerBalanceQueryService {
 
 export interface LedgerCategoryQueryService {
   listCategories(profile?: string): Promise<readonly Category[]>;
+  listCategorySpending(
+    profile?: string,
+  ): Promise<readonly LedgerCategorySpending[]>;
 }
 
 export interface LedgerBudgetQueryService {
@@ -131,6 +135,9 @@ export function createLedgerQueryService({
     listCategories(profile) {
       return db.listCategories(coerceProfile(profile, defaultProfile));
     },
+    listCategorySpending(profile) {
+      return db.listCategorySpending(coerceProfile(profile, defaultProfile));
+    },
     listBudgets(profile) {
       return db.listBudgets(coerceProfile(profile, defaultProfile));
     },
@@ -175,6 +182,7 @@ export function createLedgerQueryServices(
     },
     categories: {
       listCategories: query.listCategories,
+      listCategorySpending: query.listCategorySpending,
     },
     budgets: {
       listBudgets: query.listBudgets,
