@@ -193,6 +193,9 @@ export interface LedgerEntry {
   currencyCode: number;
   categoryId?: string;
   categoryName?: string;
+  categorySource?: "system_rule" | "user_rule" | "manual";
+  categoryRuleId?: string;
+  categoryRuleVersion?: string;
   merchantName?: string;
   hold?: boolean;
   balance?: number;

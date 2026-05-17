@@ -363,6 +363,8 @@ export interface LedgerJar {
   updatedAt: string;
 }
 
+export type LedgerEntryCategorySource = "system_rule" | "user_rule" | "manual";
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
@@ -373,6 +375,9 @@ export interface LedgerEntry {
   currencyCode: number;
   categoryId?: string;
   categoryName?: string;
+  categorySource?: LedgerEntryCategorySource;
+  categoryRuleId?: string;
+  categoryRuleVersion?: string;
   merchantName?: string;
   hold?: boolean;
   balance?: number;

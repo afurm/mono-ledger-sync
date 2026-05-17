@@ -2988,6 +2988,18 @@ function TransactionCategoryBadge({
 }
 
 function transactionCategoryRuleMatch(entry: LedgerEntry): string {
+  if (entry.categorySource === "manual") {
+    return "Manual category override";
+  }
+
+  if (entry.categorySource === "user_rule" && entry.categoryRuleId) {
+    return `User rule ${entry.categoryRuleId}`;
+  }
+
+  if (entry.categorySource === "system_rule" && entry.categoryRuleId) {
+    return `System rule ${entry.categoryRuleId}`;
+  }
+
   switch (entry.categoryId) {
     case "income":
       return "Built-in positive amount rule";
@@ -3065,6 +3077,14 @@ function splitPlanLinesFromEntry(entry: LedgerEntry): SplitPlanLineInput[] {
 function transactionCategoryHistory(entry: LedgerEntry): string {
   if (!entry.categoryId || entry.categoryId === "uncategorized") {
     return "Initial ledger assignment only; no category changes recorded";
+  }
+
+  if (entry.categorySource === "manual") {
+    return "Category was manually assigned";
+  }
+
+  if (entry.categoryRuleVersion) {
+    return `Assigned from current sync rules at version ${entry.categoryRuleVersion}`;
   }
 
   return "Initial ledger assignment from the current sync rules";

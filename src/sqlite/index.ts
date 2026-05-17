@@ -206,6 +206,9 @@ interface SqliteLedgerEntryRow {
   currency_code: number;
   category_id: string | null;
   category_name: string | null;
+  category_source?: LedgerEntry["categorySource"] | null;
+  category_rule_id?: string | null;
+  category_rule_version?: string | null;
   merchant_name: string | null;
   raw_statement_item_id: string;
   hold: number;
@@ -1178,6 +1181,33 @@ const migrations: readonly SqliteMigration[] = [
 
     `,
   },
+  {
+    id: "0018_ledger_entry_category_rule_metadata",
+    description: "Track category rule metadata on ledger entries",
+    sql: `
+      ALTER TABLE ledger_entries ADD COLUMN category_source TEXT;
+      ALTER TABLE ledger_entries ADD COLUMN category_rule_id TEXT;
+      ALTER TABLE ledger_entries ADD COLUMN category_rule_version TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_ledger_entries_category_source
+        ON ledger_entries(profile, category_source);
+
+      CREATE INDEX IF NOT EXISTS idx_ledger_entries_category_rule
+        ON ledger_entries(profile, category_rule_id);
+
+      UPDATE ledger_entries
+        SET category_source = 'manual',
+            category_rule_id = NULL,
+            category_rule_version = NULL
+        WHERE EXISTS (
+          SELECT 1
+          FROM ledger_entry_manual_overrides
+          WHERE ledger_entry_manual_overrides.profile = ledger_entries.profile
+            AND ledger_entry_manual_overrides.ledger_entry_id = ledger_entries.id
+            AND ledger_entry_manual_overrides.has_category_override = 1
+        );
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1842,6 +1872,21 @@ function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
     entry.categoryName = row.category_name;
   }
 
+  if (row.category_source !== undefined && row.category_source !== null) {
+    entry.categorySource = row.category_source;
+  }
+
+  if (row.category_rule_id !== undefined && row.category_rule_id !== null) {
+    entry.categoryRuleId = row.category_rule_id;
+  }
+
+  if (
+    row.category_rule_version !== undefined &&
+    row.category_rule_version !== null
+  ) {
+    entry.categoryRuleVersion = row.category_rule_version;
+  }
+
   if (row.merchant_name !== null) {
     entry.merchantName = row.merchant_name;
   }
@@ -2075,6 +2120,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         hasMigration.get("0016_merchant_cleanup_rules"),
       );
       let appliedManualOverrideMigration = false;
+      let appliedCategoryRuleMetadataMigration = false;
 
       for (const migration of migrations) {
         if (hasMigration.get(migration.id)) {
@@ -2085,6 +2131,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         recordMigration.run(migration.id, migration.description, nowIso());
         appliedManualOverrideMigration ||=
           migration.id === "0017_ledger_entry_manual_overrides";
+        appliedCategoryRuleMetadataMigration ||=
+          migration.id === "0018_ledger_entry_category_rule_metadata";
       }
 
       this.ensureProfile();
@@ -2093,6 +2141,12 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         this.backfillLegacyManualOverrideMarkers({
           compareCleanedMerchants: hadMerchantCleanupMigration,
         });
+      }
+      if (
+        appliedManualOverrideMigration ||
+        appliedCategoryRuleMetadataMigration
+      ) {
+        this.backfillManualCategoryOverrideSources();
       }
       this.seedDefaultCategories();
       this.seedDefaultCategoryRules();
@@ -2831,7 +2885,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `
           SELECT
             id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, merchant_name,
+            currency_code, category_id, category_name, category_source,
+            category_rule_id, category_rule_version, merchant_name,
             raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
             created_at, updated_at
           FROM ledger_entries
@@ -2860,7 +2915,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       `
           SELECT
             id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, merchant_name,
+            currency_code, category_id, category_name, category_source,
+            category_rule_id, category_rule_version, merchant_name,
           raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
           created_at, updated_at
         FROM ledger_entries
@@ -2939,7 +2995,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       `
         SELECT
           id, account_id, time, description, amount, operation_amount,
-          currency_code, category_id, category_name, merchant_name,
+          currency_code, category_id, category_name, category_source,
+          category_rule_id, category_rule_version, merchant_name,
           raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
           created_at, updated_at
         FROM ledger_entries
@@ -2951,6 +3008,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     if (normalizedUpdate.categoryId !== undefined) {
       setClauses.push("category_id = @categoryId");
       setClauses.push("category_name = @categoryName");
+      setClauses.push("category_source = @categorySource");
+      setClauses.push("category_rule_id = NULL");
+      setClauses.push("category_rule_version = NULL");
     }
 
     if (normalizedUpdate.merchantName !== undefined) {
@@ -3021,6 +3081,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         id,
         categoryId: normalizedUpdate.categoryId ?? null,
         categoryName: categoryName ?? null,
+        categorySource:
+          normalizedUpdate.categoryId === undefined ? null : "manual",
         merchantName: normalizedUpdate.merchantName ?? null,
         tagsJson: normalizedUpdate.tagsJson ?? null,
         updatedAt: timestamp,
@@ -3071,7 +3133,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       `
         SELECT
           id, account_id, time, description, amount, operation_amount,
-          currency_code, category_id, category_name, merchant_name,
+          currency_code, category_id, category_name, category_source,
+          category_rule_id, category_rule_version, merchant_name,
           raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
           created_at, updated_at
         FROM ledger_entries
@@ -4074,6 +4137,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             ledger_entries.currency_code,
             ledger_entries.category_id,
             ledger_entries.category_name,
+            ledger_entries.category_source,
+            ledger_entries.category_rule_id,
+            ledger_entries.category_rule_version,
             ledger_entries.merchant_name,
             ledger_entries.raw_statement_item_id,
             ledger_entries.hold,
@@ -4159,6 +4225,27 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     }
   }
 
+  private backfillManualCategoryOverrideSources(): void {
+    this.#database
+      .prepare(
+        `
+          UPDATE ledger_entries
+          SET
+            category_source = 'manual',
+            category_rule_id = NULL,
+            category_rule_version = NULL
+          WHERE EXISTS (
+            SELECT 1
+            FROM ledger_entry_manual_overrides
+            WHERE ledger_entry_manual_overrides.profile = ledger_entries.profile
+              AND ledger_entry_manual_overrides.ledger_entry_id = ledger_entries.id
+              AND ledger_entry_manual_overrides.has_category_override = 1
+          )
+        `,
+      )
+      .run();
+  }
+
   private ledgerEntryFromStoredRaw(
     row: SqliteLedgerEntryRow,
     item: MonobankStatementItem,
@@ -4240,12 +4327,14 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           INSERT INTO ledger_entries (
             profile, id, account_id, time, description, amount,
             operation_amount, currency_code, category_id, category_name,
+            category_source, category_rule_id, category_rule_version,
             merchant_name, raw_statement_item_id, hold, balance,
             created_at, updated_at
           )
           VALUES (
             @profile, @id, @accountId, @time, @description, @amount,
             @operationAmount, @currencyCode, @categoryId, @categoryName,
+            @categorySource, @categoryRuleId, @categoryRuleVersion,
             @merchantName, @rawStatementItemId, @hold, @balance,
             @createdAt, @updatedAt
           )
@@ -4258,6 +4347,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             currency_code = excluded.currency_code,
             category_id = excluded.category_id,
             category_name = excluded.category_name,
+            category_source = excluded.category_source,
+            category_rule_id = excluded.category_rule_id,
+            category_rule_version = excluded.category_rule_version,
             merchant_name = excluded.merchant_name,
             raw_statement_item_id = excluded.raw_statement_item_id,
             hold = excluded.hold,
@@ -4276,6 +4368,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         currencyCode: normalizedEntry.currencyCode,
         categoryId: normalizedEntry.categoryId ?? null,
         categoryName: normalizedEntry.categoryName ?? null,
+        categorySource: normalizedEntry.categorySource ?? null,
+        categoryRuleId: normalizedEntry.categoryRuleId ?? null,
+        categoryRuleVersion: normalizedEntry.categoryRuleVersion ?? null,
         merchantName: normalizedEntry.merchantName ?? null,
         rawStatementItemId: normalizedEntry.rawStatementItemId,
         hold: normalizedEntry.hold ? 1 : 0,
@@ -4308,7 +4403,13 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         : { ...entry, merchantName: cleanedMerchantName };
 
     if (statementItem === undefined) {
-      return cleanedEntry;
+      return cleanedEntry.categoryId &&
+        cleanedEntry.categorySource === undefined
+        ? {
+            ...cleanedEntry,
+            categorySource: "manual",
+          }
+        : cleanedEntry;
     }
 
     const entryWithManualMerchant = this.mergeManualLedgerEntryOverrides(
@@ -4382,7 +4483,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `
           SELECT
             id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, merchant_name,
+            currency_code, category_id, category_name, category_source,
+            category_rule_id, category_rule_version, merchant_name,
             raw_statement_item_id, hold, balance, note, tags_json,
             split_plan_json, created_at, updated_at
           FROM ledger_entries
@@ -4409,6 +4511,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       } else {
         mergedEntry.categoryName = row.category_name;
       }
+
+      mergedEntry.categorySource = "manual";
+      delete mergedEntry.categoryRuleId;
+      delete mergedEntry.categoryRuleVersion;
     }
 
     if (fields.merchant && overrideState.hasMerchantOverride) {
@@ -4428,7 +4534,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `
           SELECT
             id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, merchant_name,
+            currency_code, category_id, category_name, category_source,
+            category_rule_id, category_rule_version, merchant_name,
             raw_statement_item_id, hold, balance, note, tags_json,
             split_plan_json, created_at, updated_at
           FROM ledger_entries
@@ -4447,6 +4554,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       row.currency_code === entry.currencyCode &&
       row.category_id === (entry.categoryId ?? null) &&
       row.category_name === (entry.categoryName ?? null) &&
+      (row.category_source ?? null) === (entry.categorySource ?? null) &&
+      (row.category_rule_id ?? null) === (entry.categoryRuleId ?? null) &&
+      (row.category_rule_version ?? null) ===
+        (entry.categoryRuleVersion ?? null) &&
       row.merchant_name === (entry.merchantName ?? null) &&
       row.raw_statement_item_id === entry.rawStatementItemId &&
       row.hold === (entry.hold ? 1 : 0) &&
@@ -4509,6 +4620,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         ...entry,
         categoryId: row.category_id,
         categoryName: row.category_name ?? row.category_id,
+        categorySource: row.is_system === 1 ? "system_rule" : "user_rule",
+        categoryRuleId: row.id,
+        categoryRuleVersion: row.updated_at,
       };
     }
 
