@@ -134,6 +134,8 @@ export interface SqliteLedgerDb extends LedgerDb {
     profile: string,
     accountId: string,
     processedAt?: string,
+    reconciledWindows?: readonly { from: number; to: number }[],
+    receivedBefore?: string,
   ): Promise<void>;
   getDatabaseInfo(profile?: string): Promise<SqliteDatabaseInfo>;
   compact(): Promise<void>;
@@ -969,14 +971,25 @@ function statementItemStorageIdentity(
   return `missing-id:${createStatementItemFingerprint(accountId, item)}`;
 }
 
-function webhookStatementItemIdentity(payloadJson: string): string | undefined {
+function webhookStatementItemMetadata(
+  payloadJson: string,
+): { statementItemId: string; time: number } | undefined {
   try {
     const event = JSON.parse(payloadJson) as MonobankPersonalWebhookEvent;
 
-    return statementItemStorageIdentity(
-      event.data.account,
-      event.data.statementItem,
-    );
+    const time = event.data.statementItem.time;
+
+    if (!Number.isInteger(time) || time < 0) {
+      return undefined;
+    }
+
+    return {
+      statementItemId: statementItemStorageIdentity(
+        event.data.account,
+        event.data.statementItem,
+      ),
+      time,
+    };
   } catch {
     return undefined;
   }
@@ -2617,6 +2630,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     profile: string,
     accountId: string,
     processedAt = nowIso(),
+    reconciledWindows: readonly { from: number; to: number }[] = [],
+    receivedBefore = processedAt,
   ): Promise<void> {
     const rows = this.#database
       .prepare(
@@ -2626,9 +2641,14 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           WHERE profile = @profile
             AND account_id = @accountId
             AND status = 'pending'
+            AND received_at <= @receivedBefore
         `,
       )
-      .all({ profile, accountId }) as SqlitePendingWebhookEventRow[];
+      .all({
+        profile,
+        accountId,
+        receivedBefore,
+      }) as SqlitePendingWebhookEventRow[];
     const hasLedgerEntry = this.#database.prepare(
       `
         SELECT 1
@@ -2648,12 +2668,36 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           AND id = @id
       `,
     );
+    const markIgnored = this.#database.prepare(
+      `
+        UPDATE webhook_events
+          SET status = 'ignored',
+              processed_at = @processedAt
+        WHERE profile = @profile
+          AND id = @id
+      `,
+    );
+    const markFailed = this.#database.prepare(
+      `
+        UPDATE webhook_events
+          SET status = 'failed',
+              processed_at = @processedAt
+        WHERE profile = @profile
+          AND id = @id
+      `,
+    );
 
     for (const row of rows) {
+      const metadata = webhookStatementItemMetadata(row.payload_json);
       const statementItemId =
-        row.statement_item_id ?? webhookStatementItemIdentity(row.payload_json);
+        row.statement_item_id ?? metadata?.statementItemId;
 
-      if (!statementItemId) {
+      if (!statementItemId || !metadata) {
+        markFailed.run({
+          profile,
+          id: row.id,
+          processedAt,
+        });
         continue;
       }
 
@@ -2664,6 +2708,18 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       });
 
       if (!ledgerEntry) {
+        const wasReconciled = reconciledWindows.some((window) => {
+          return metadata.time >= window.from && metadata.time <= window.to;
+        });
+
+        if (wasReconciled) {
+          markIgnored.run({
+            profile,
+            id: row.id,
+            processedAt,
+          });
+        }
+
         continue;
       }
 
