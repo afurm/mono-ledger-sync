@@ -5,6 +5,19 @@ export interface MonobankTokenStore {
   getToken(profile: string): Promise<string | undefined>;
   setToken(profile: string, token: string): Promise<void>;
   deleteToken(profile: string): Promise<void>;
+  getStatus?(profile: string): Promise<MonobankTokenStoreStatus>;
+}
+
+export type MonobankTokenStoreStorage = "secure" | "session";
+export type MonobankTokenStorePersistence = "persistent" | "session";
+export type MonobankTokenStoreFallbackReason =
+  | "secure_storage_unavailable"
+  | "secure_storage_write_failed";
+
+export interface MonobankTokenStoreStatus {
+  storage: MonobankTokenStoreStorage;
+  persistence: MonobankTokenStorePersistence;
+  fallbackReason?: MonobankTokenStoreFallbackReason;
 }
 
 export interface MonobankTokenStoreCommandResult {
@@ -82,6 +95,13 @@ export function createSessionMonobankTokenStore(): MonobankTokenStore {
     async deleteToken(profile) {
       tokens.delete(profile);
     },
+    async getStatus() {
+      return {
+        storage: "session",
+        persistence: "session",
+        fallbackReason: "secure_storage_unavailable",
+      };
+    },
   };
 }
 
@@ -134,6 +154,12 @@ function createLinuxSecretServiceMonobankTokenStore(
         // Missing credentials are already deleted from the product perspective.
       }
     },
+    async getStatus() {
+      return {
+        storage: "secure",
+        persistence: "persistent",
+      };
+    },
   };
 }
 
@@ -152,6 +178,7 @@ export function createDefaultMonobankTokenStore(
   options: MonobankTokenStoreOptions = {},
 ): MonobankTokenStore {
   const sessionTokens = new Map<string, string>();
+  const fallbackReasons = new Map<string, MonobankTokenStoreFallbackReason>();
   const secureStore = createSecureMonobankTokenStore({
     serviceName: options.serviceName ?? defaultServiceName,
     platform: options.platform ?? process.platform,
@@ -174,13 +201,33 @@ export function createDefaultMonobankTokenStore(
       try {
         await secureStore.setToken(profile, token);
         sessionTokens.delete(profile);
+        fallbackReasons.delete(profile);
       } catch {
         sessionTokens.set(profile, token);
+        fallbackReasons.set(profile, "secure_storage_write_failed");
       }
     },
     async deleteToken(profile) {
       sessionTokens.delete(profile);
+      fallbackReasons.delete(profile);
       await secureStore.deleteToken(profile);
+    },
+    async getStatus(profile) {
+      if (sessionTokens.has(profile)) {
+        return {
+          storage: "session",
+          persistence: "session",
+          fallbackReason:
+            fallbackReasons.get(profile) ?? "secure_storage_unavailable",
+        };
+      }
+
+      return (
+        (await secureStore.getStatus?.(profile)) ?? {
+          storage: "secure",
+          persistence: "persistent",
+        }
+      );
     },
   };
 }

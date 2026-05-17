@@ -120,7 +120,11 @@ export {
   type MonobankTokenStore,
   type MonobankTokenStoreCommandResult,
   type MonobankTokenStoreCommandRunner,
+  type MonobankTokenStoreFallbackReason,
   type MonobankTokenStoreOptions,
+  type MonobankTokenStorePersistence,
+  type MonobankTokenStoreStatus,
+  type MonobankTokenStoreStorage,
 } from "./security/index.js";
 export {
   createLedgerExport,

@@ -1401,11 +1401,22 @@ test("local API sync with monobank source uses env token and base URL", async ()
           });
 
           try {
+            const configResponse = await server.inject({
+              method: "GET",
+              url: "/api/app/config",
+            });
             const syncResponse = await server.inject({
               method: "POST",
               url: "/api/sync/run",
             });
 
+            assert.equal(configResponse.statusCode, 200);
+            assert.deepEqual(configResponse.json().token, {
+              profile: "demo",
+              hasToken: true,
+              storage: "session",
+              persistence: "session",
+            });
             assert.equal(syncResponse.statusCode, 200);
             assert.equal(syncResponse.json().run.status, "success");
             assert.equal(syncResponse.json().run.source, "monobank");
@@ -1532,6 +1543,9 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       assert.deepEqual(saveResponse.json(), {
         profile: "demo",
         hasToken: true,
+        storage: "session",
+        persistence: "session",
+        fallbackReason: "secure_storage_unavailable",
       });
       assert.equal(wrongProfileResponse.statusCode, 400);
       assert.deepEqual(wrongProfileResponse.json(), {
@@ -1555,6 +1569,9 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       assert.deepEqual(deleteResponse.json(), {
         profile: "demo",
         hasToken: false,
+        storage: "session",
+        persistence: "session",
+        fallbackReason: "secure_storage_unavailable",
       });
       assert.equal(deletedTokenConfig.statusCode, 200);
       assert.equal(deletedTokenConfig.json().token.profile, "demo");
@@ -1565,6 +1582,80 @@ test("local API token endpoint saves and deletes monobank token state", async ()
         message:
           "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
       });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("local API supports legacy custom monobank token stores without status metadata", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const tokens = new Map();
+    const monobankTokenStore = {
+      async getToken(profile) {
+        return tokens.get(profile);
+      },
+      async setToken(profile, token) {
+        tokens.set(profile, token);
+      },
+      async deleteToken(profile) {
+        tokens.delete(profile);
+      },
+    };
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "monobank",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 55667,
+      monobankTokenStore,
+    });
+
+    try {
+      const emptyConfig = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const saveResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/token",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          profile: "demo",
+          token: "legacy-store-token",
+        }),
+      });
+
+      assert.equal(emptyConfig.statusCode, 200);
+      assert.deepEqual(emptyConfig.json().token, {
+        profile: "demo",
+        hasToken: false,
+        storage: "session",
+        persistence: "session",
+      });
+      assert.equal(saveResponse.statusCode, 200);
+      assert.deepEqual(saveResponse.json(), {
+        profile: "demo",
+        hasToken: true,
+        storage: "session",
+        persistence: "session",
+      });
+      assert.equal(tokens.get("demo"), "legacy-store-token");
+      const deleteResponse = await server.inject({
+        method: "DELETE",
+        url: "/api/app/token",
+      });
+
+      assert.equal(deleteResponse.statusCode, 200);
+      assert.deepEqual(deleteResponse.json(), {
+        profile: "demo",
+        hasToken: false,
+        storage: "session",
+        persistence: "session",
+      });
+      assert.equal(tokens.has("demo"), false);
     } finally {
       await server.close();
     }
@@ -1600,6 +1691,9 @@ test("local API loads saved monobank token from token store", async () => {
       assert.deepEqual(saveResponse.json(), {
         profile: "demo",
         hasToken: true,
+        storage: "session",
+        persistence: "session",
+        fallbackReason: "secure_storage_unavailable",
       });
     } finally {
       await firstServer.close();
@@ -1627,6 +1721,9 @@ test("local API loads saved monobank token from token store", async () => {
       assert.deepEqual(configResponse.json().token, {
         profile: "demo",
         hasToken: true,
+        storage: "session",
+        persistence: "session",
+        fallbackReason: "secure_storage_unavailable",
       });
 
       await secondServer.close();
