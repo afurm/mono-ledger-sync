@@ -403,6 +403,7 @@ const ledgerSummaryResponseSchema = {
     net: { type: "number" },
     currencies: { type: "array", items: { type: "number" } },
     lastSyncedAt: { type: "string" },
+    oldestSyncCursorUpdatedAt: { type: "string" },
   },
 } as const;
 

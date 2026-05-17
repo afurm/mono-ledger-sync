@@ -369,6 +369,7 @@ export interface LedgerSummary {
   net: number;
   currencies: readonly number[];
   lastSyncedAt?: string;
+  oldestSyncCursorUpdatedAt?: string;
 }
 
 export interface SyncCursor {

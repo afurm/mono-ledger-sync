@@ -995,6 +995,30 @@ function getLedgerFreshnessWarning(
     };
   }
 
+  const oldestCursorUpdatedAt = snapshot.summary.oldestSyncCursorUpdatedAt;
+
+  if (oldestCursorUpdatedAt) {
+    const oldestCursorTime = Date.parse(oldestCursorUpdatedAt);
+
+    if (!Number.isFinite(oldestCursorTime)) {
+      return {
+        title: "Sync cursor needs attention",
+        description: `The local ledger has an unreadable cursor timestamp for ${snapshot.config.profile}. Run sync to refresh local statement progress.`,
+      };
+    }
+
+    const cursorAgeMs = now - oldestCursorTime;
+
+    if (cursorAgeMs > STALE_SYNC_THRESHOLD_MS) {
+      return {
+        title: "Statement cursor may be stale",
+        description: `${snapshot.config.profile} has a statement cursor last updated ${formatSyncAge(
+          cursorAgeMs,
+        )}. Run sync before reviewing reports or exporting local files.`,
+      };
+    }
+  }
+
   const ageMs = now - lastSyncedTime;
 
   if (ageMs <= STALE_SYNC_THRESHOLD_MS) {

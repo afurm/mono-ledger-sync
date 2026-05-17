@@ -223,6 +223,7 @@ interface SqliteSummaryRow {
   net: number | null;
   currencies_json: string;
   last_synced_at: string | null;
+  oldest_sync_cursor_updated_at: string | null;
 }
 
 interface SqliteCategoryRow {
@@ -2299,7 +2300,12 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
               SELECT MAX(finished_at)
               FROM sync_runs
               WHERE profile = @profile AND status = 'success'
-            ) AS last_synced_at
+            ) AS last_synced_at,
+            (
+              SELECT MIN(updated_at)
+              FROM sync_cursors
+              WHERE profile = @profile
+            ) AS oldest_sync_cursor_updated_at
           FROM ledger_entries
           WHERE profile = @profile
         `,
@@ -2320,6 +2326,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           })
         : [],
       ...(row.last_synced_at ? { lastSyncedAt: row.last_synced_at } : {}),
+      ...(row.oldest_sync_cursor_updated_at
+        ? { oldestSyncCursorUpdatedAt: row.oldest_sync_cursor_updated_at }
+        : {}),
     };
   }
 

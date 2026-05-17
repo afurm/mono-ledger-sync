@@ -1128,6 +1128,47 @@ test("process signal controller aborts sync work and removes listeners", () => {
   assert.equal(target.listenerCount("SIGTERM"), 0);
 });
 
+test("ledger summary exposes the oldest sync cursor timestamp", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.transaction(async (tx) => {
+        await tx.setSyncCursor({
+          profile,
+          accountId: "fresh-account",
+          source: "fixture",
+          statementFrom: 20,
+          statementTo: 30,
+          updatedAt: "2026-05-17T08:00:00.000Z",
+        });
+        await tx.setSyncCursor({
+          profile,
+          accountId: "stale-account",
+          source: "fixture",
+          statementFrom: 1,
+          statementTo: 10,
+          updatedAt: "2026-05-15T08:00:00.000Z",
+        });
+      });
+
+      const summary = await db.getLedgerSummary(profile);
+
+      assert.equal(
+        summary.oldestSyncCursorUpdatedAt,
+        "2026-05-15T08:00:00.000Z",
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("migrates legacy first-migration sqlite DB and preserves baseline queries", async () => {
   await withLegacyFirstMigrationDb(async ({ databasePath }) => {
     const profile = "legacy";
@@ -1213,6 +1254,10 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(summary.expenses, 2450);
         assert.equal(summary.net, 497550);
         assert.equal(summary.lastSyncedAt, "2026-05-16T08:03:00.000Z");
+        assert.equal(
+          summary.oldestSyncCursorUpdatedAt,
+          "2026-05-16T08:03:00.000Z",
+        );
 
         const groceryPage = await db.listLedgerEntries({
           profile,
