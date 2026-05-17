@@ -51,6 +51,7 @@ import {
 } from "../storage/index.js";
 import type {
   Category,
+  BudgetProgress,
   LedgerAccount,
   LedgerCategorySpending,
   LedgerEntry,
@@ -459,6 +460,14 @@ const ledgerCategorySpendingResponseSchema = {
 } as const;
 
 const upcomingRecurringPaymentsResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const budgetProgressResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2088,6 +2097,22 @@ function registerLocalApiRoutes(
       return services.queryService.listUpcomingRecurringPayments(
         services.profile,
       );
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/budget-progress`,
+    {
+      schema: {
+        response: {
+          200: budgetProgressResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly BudgetProgress[]> => {
+      const services = await getServices();
+
+      return services.queryService.listBudgetProgress(services.profile);
     },
   );
 

@@ -73,6 +73,7 @@ test("documents the shared domain model contract", async () => {
     "SyncRun",
     "Category",
     "Budget",
+    "BudgetProgress",
     "RecurringItem",
     "UpcomingRecurringPayment",
     "DomainError",
@@ -168,6 +169,7 @@ test("web client caches local snapshots for offline browsing", async () => {
     apiSource,
     /categorySpending: snapshot\.categorySpending \?\? \[\]/,
   );
+  assert.match(apiSource, /budgetProgress: snapshot\.budgetProgress \?\? \[\]/);
   assert.match(
     apiSource,
     /upcomingRecurringPayments: snapshot\.upcomingRecurringPayments \?\? \[\]/,
@@ -184,6 +186,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Browsing last local snapshot/);
   assert.match(appSource, /snapshot\?\.offline\?\.reason/);
   assert.match(appSource, /MTD net cashflow/);
+  assert.match(appSource, /Budget progress/);
   assert.match(appSource, /Spending by category/);
   assert.match(appSource, /Upcoming recurring payments/);
 });

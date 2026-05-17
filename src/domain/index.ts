@@ -308,6 +308,22 @@ export interface LedgerCategorySpending {
   transactionCount: number;
 }
 
+export interface BudgetProgress {
+  id: string;
+  budgetId: string;
+  profile: string;
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  periodStart: string;
+  periodEnd: string;
+  amountLimit: number;
+  actualAmount: number;
+  remainingAmount: number;
+  progressPercentage: number;
+  status: "on_track" | "near_limit" | "overspent";
+}
+
 export interface UpcomingRecurringPayment {
   id: string;
   recurringItemId: string;

@@ -71,6 +71,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       const categorySpending = await queryService.listCategorySpending();
       const budgets = await queryService.listBudgets();
       const budgetPeriods = await queryService.listBudgetPeriods();
+      const budgetProgress = await queryService.listBudgetProgress();
       const recurringItems = await queryService.listRecurringItems();
       const runs = await queryService.listSyncRuns();
       const events = await queryService.listWebhookEvents();
@@ -87,6 +88,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const groupedBudgets = await queryServices.budgets.listBudgets();
       const groupedBudgetPeriods =
         await queryServices.budgets.listBudgetPeriods();
+      const groupedBudgetProgress =
+        await queryServices.budgets.listBudgetProgress();
       const groupedRecurringItems =
         await queryServices.recurringItems.listRecurringItems();
       const groupedRuns = await queryServices.syncState.listSyncRuns();
@@ -127,6 +130,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       );
       assert.deepEqual(budgets, []);
       assert.deepEqual(budgetPeriods, []);
+      assert.deepEqual(budgetProgress, []);
       assert.deepEqual(recurringItems, []);
       assert.equal(runs.length, 1);
       assert.equal(runs[0].profile, profile);
@@ -141,8 +145,108 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.deepEqual(groupedCategorySpending, categorySpending);
       assert.deepEqual(groupedBudgets, []);
       assert.deepEqual(groupedBudgetPeriods, []);
+      assert.deepEqual(groupedBudgetProgress, []);
       assert.deepEqual(groupedRecurringItems, []);
       assert.equal(groupedRuns.length, runs.length);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("query service ranks budget progress and overspend warnings", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.importLocalConfiguration(profile, {
+        budgets: [
+          {
+            id: "groceries-monthly",
+            profile,
+            categoryId: "groceries",
+            currencyCode: 980,
+            periodStart: "2026-05-01",
+            periodEnd: "2026-05-31",
+            amountLimit: 100000,
+            rollover: false,
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-01T00:00:00.000Z",
+          },
+          {
+            id: "transport-monthly",
+            profile,
+            categoryId: "transport",
+            currencyCode: 980,
+            periodStart: "2026-05-01",
+            periodEnd: "2026-05-31",
+            amountLimit: 50000,
+            rollover: false,
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+        budgetPeriods: [
+          {
+            id: "groceries-2026-05",
+            profile,
+            budgetId: "groceries-monthly",
+            periodStart: "2026-05-01",
+            periodEnd: "2026-05-31",
+            plannedAmount: 100000,
+            actualAmount: 125000,
+            status: "open",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-17T08:00:00.000Z",
+          },
+          {
+            id: "transport-2026-05",
+            profile,
+            budgetId: "transport-monthly",
+            periodStart: "2026-05-01",
+            periodEnd: "2026-05-31",
+            plannedAmount: 50000,
+            actualAmount: 44000,
+            status: "open",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-17T08:00:00.000Z",
+          },
+        ],
+      });
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const progress = await queryService.listBudgetProgress();
+
+      assert.deepEqual(
+        progress.map((row) => [
+          row.budgetId,
+          row.categoryName,
+          row.actualAmount,
+          row.remainingAmount,
+          row.progressPercentage,
+          row.status,
+        ]),
+        [
+          ["groceries-monthly", "Groceries", 125000, -25000, 125, "overspent"],
+          ["transport-monthly", "Transport", 44000, 6000, 88, "near_limit"],
+        ],
+      );
+      assert.deepEqual(
+        await queryServices.budgets.listBudgetProgress(),
+        progress,
+      );
     } finally {
       await db.close();
     }
@@ -476,6 +580,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       assert.equal(typeof services.queries.budgets.listBudgets, "function");
       assert.equal(
         typeof services.queries.budgets.listBudgetPeriods,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.budgets.listBudgetProgress,
         "function",
       );
       assert.equal(

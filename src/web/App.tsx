@@ -3885,6 +3885,103 @@ function UpcomingRecurringPaymentsCard({
   );
 }
 
+function budgetProgressBadgeVariant(
+  status: LocalAppSnapshot["budgetProgress"][number]["status"],
+) {
+  switch (status) {
+    case "overspent":
+      return "destructive";
+    case "near_limit":
+      return "secondary";
+    case "on_track":
+      return "outline";
+  }
+}
+
+function budgetProgressStatusLabel(
+  status: LocalAppSnapshot["budgetProgress"][number]["status"],
+): string {
+  switch (status) {
+    case "overspent":
+      return "Overspent";
+    case "near_limit":
+      return "Near limit";
+    case "on_track":
+      return "On track";
+  }
+}
+
+function BudgetProgressCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  const rows = snapshot.budgetProgress.slice(0, 6);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Budget progress</CardTitle>
+        <CardDescription>
+          Current budget periods ranked by overspend risk.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No active budget periods found in the current ledger.
+          </p>
+        ) : (
+          rows.map((row) => {
+            const width = Math.min(Math.max(row.progressPercentage, 2), 100);
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              categoryId: row.categoryId,
+              dateFrom: row.periodStart,
+              dateTo: row.periodEnd,
+            });
+
+            return (
+              <a
+                className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={row.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {row.categoryName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.periodStart} through {row.periodEnd}
+                    </p>
+                  </div>
+                  <Badge variant={budgetProgressBadgeVariant(row.status)}>
+                    {budgetProgressStatusLabel(row.status)}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-muted-foreground">
+                    {formatMinorAmount(row.actualAmount, row.currencyCode)} /{" "}
+                    {formatMinorAmount(row.amountLimit, row.currencyCode)}
+                  </span>
+                  <span className="font-medium">{row.progressPercentage}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={
+                      row.status === "overspent"
+                        ? "h-full rounded-full bg-destructive"
+                        : "h-full rounded-full bg-primary"
+                    }
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function OverviewRoute({
   snapshot,
   loading,
@@ -4050,6 +4147,7 @@ function OverviewRoute({
             events={snapshot.webhookEvents}
             onRouteChange={onRouteChange}
           />
+          <BudgetProgressCard snapshot={snapshot} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard

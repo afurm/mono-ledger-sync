@@ -1,6 +1,7 @@
 import type {
   AccountBalance,
   Budget,
+  BudgetProgress,
   BudgetPeriod,
   LedgerAccount,
   LedgerEntry,
@@ -44,6 +45,7 @@ export interface LedgerCategoryQueryService {
 export interface LedgerBudgetQueryService {
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  listBudgetProgress(profile?: string): Promise<readonly BudgetProgress[]>;
 }
 
 export interface LedgerRecurringItemQueryService {
@@ -275,6 +277,88 @@ async function listUpcomingRecurringPayments(
     .slice(0, UPCOMING_RECURRING_PAYMENT_LIMIT);
 }
 
+async function listBudgetProgress(
+  db: SqliteLedgerDb,
+  profile: string,
+): Promise<readonly BudgetProgress[]> {
+  const [budgets, periods, categories] = await Promise.all([
+    db.listBudgets(profile),
+    db.listBudgetPeriods(profile),
+    db.listCategories(profile),
+  ]);
+  const categoryNames = new Map(
+    categories.map((category) => [category.id, category.name]),
+  );
+  const latestPeriodsByBudget = new Map<string, BudgetPeriod>();
+
+  for (const period of periods) {
+    const existing = latestPeriodsByBudget.get(period.budgetId);
+
+    if (
+      existing === undefined ||
+      period.periodStart > existing.periodStart ||
+      (period.periodStart === existing.periodStart &&
+        period.updatedAt > existing.updatedAt)
+    ) {
+      latestPeriodsByBudget.set(period.budgetId, period);
+    }
+  }
+
+  return budgets
+    .flatMap((budget): BudgetProgress[] => {
+      const period = latestPeriodsByBudget.get(budget.id);
+
+      if (period === undefined) {
+        return [];
+      }
+
+      const actualAmount = period.actualAmount ?? 0;
+      const amountLimit = period.plannedAmount || budget.amountLimit;
+      const progressPercentage =
+        amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
+      const remainingAmount = amountLimit - actualAmount;
+      const status =
+        actualAmount > amountLimit
+          ? "overspent"
+          : progressPercentage >= 85
+            ? "near_limit"
+            : "on_track";
+
+      return [
+        {
+          id: period.id,
+          budgetId: budget.id,
+          profile: budget.profile,
+          categoryId: budget.categoryId,
+          categoryName:
+            categoryNames.get(budget.categoryId) ?? budget.categoryId,
+          currencyCode: budget.currencyCode,
+          periodStart: period.periodStart,
+          periodEnd: period.periodEnd,
+          amountLimit,
+          actualAmount,
+          remainingAmount,
+          progressPercentage,
+          status,
+        },
+      ];
+    })
+    .sort((left, right) => {
+      const statusOrder: Record<BudgetProgress["status"], number> = {
+        overspent: 0,
+        near_limit: 1,
+        on_track: 2,
+      };
+      const statusDiff = statusOrder[left.status] - statusOrder[right.status];
+
+      if (statusDiff !== 0) {
+        return statusDiff;
+      }
+
+      return right.progressPercentage - left.progressPercentage;
+    });
+}
+
 export function createLedgerQueryService({
   db,
   defaultProfile,
@@ -303,6 +387,9 @@ export function createLedgerQueryService({
     },
     listBudgetPeriods(profile) {
       return db.listBudgetPeriods(coerceProfile(profile, defaultProfile));
+    },
+    listBudgetProgress(profile) {
+      return listBudgetProgress(db, coerceProfile(profile, defaultProfile));
     },
     listRecurringItems(profile) {
       return db.listRecurringItems(coerceProfile(profile, defaultProfile));
@@ -354,6 +441,7 @@ export function createLedgerQueryServices(
     budgets: {
       listBudgets: query.listBudgets,
       listBudgetPeriods: query.listBudgetPeriods,
+      listBudgetProgress: query.listBudgetProgress,
     },
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
