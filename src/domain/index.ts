@@ -308,6 +308,23 @@ export interface LedgerCategorySpending {
   transactionCount: number;
 }
 
+export interface UpcomingRecurringPayment {
+  id: string;
+  recurringItemId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+  lastSeenAt?: string;
+  nextDueAt: string;
+  daysUntilDue: number;
+  isOverdue: boolean;
+}
+
 export interface LedgerJar {
   id: string;
   title: string;

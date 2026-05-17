@@ -74,6 +74,29 @@ export interface LedgerCategorySpending {
   transactionCount: number;
 }
 
+export interface UpcomingRecurringPayment {
+  id: string;
+  recurringItemId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency:
+    | "daily"
+    | "weekly"
+    | "monthly"
+    | "quarterly"
+    | "yearly"
+    | "irregular";
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+  lastSeenAt?: string;
+  nextDueAt: string;
+  daysUntilDue: number;
+  isOverdue: boolean;
+}
+
 export interface LedgerAccount {
   id: string;
   type: string;
@@ -226,6 +249,7 @@ export interface LocalAppSnapshot {
   jars: readonly LedgerJar[];
   categories: readonly Category[];
   categorySpending: readonly LedgerCategorySpending[];
+  upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
   webhookEvents: readonly WebhookEvent[];
@@ -247,10 +271,11 @@ interface CachedLocalAppSnapshot {
 
 type PersistedLocalAppSnapshot = Omit<
   LocalAppSnapshot,
-  "jars" | "categorySpending"
+  "jars" | "categorySpending" | "upcomingRecurringPayments"
 > & {
   jars?: readonly LedgerJar[];
   categorySpending?: readonly LedgerCategorySpending[];
+  upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
   summary: Omit<LedgerSummary, "monthToDate"> & {
     monthToDate?: LedgerCashflowSummary;
   };
@@ -341,6 +366,7 @@ function normalizeCachedLocalAppSnapshot(
       },
       jars: snapshot.jars ?? [],
       categorySpending: snapshot.categorySpending ?? [],
+      upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
     },
   };
 }
@@ -749,6 +775,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       jars,
       categories,
       categorySpending,
+      upcomingRecurringPayments,
       transactions,
       syncRuns,
       webhookEvents,
@@ -760,6 +787,9 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<readonly Category[]>("/api/ledger/categories"),
       requestJson<readonly LedgerCategorySpending[]>(
         "/api/ledger/category-spending",
+      ),
+      requestJson<readonly UpcomingRecurringPayment[]>(
+        "/api/ledger/upcoming-recurring-payments",
       ),
       loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
@@ -781,6 +811,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       jars,
       categories,
       categorySpending,
+      upcomingRecurringPayments,
       transactions,
       syncRuns,
       webhookEvents,

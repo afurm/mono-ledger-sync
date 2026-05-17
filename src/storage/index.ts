@@ -23,6 +23,7 @@ import type {
   SyncRunStatus,
   StoredWebhookEvent,
   Tag,
+  UpcomingRecurringPayment,
   WebhookEventStatus,
   ledgerEntrySortDirections,
   ledgerEntrySortFields,
@@ -52,6 +53,7 @@ export type {
   SyncRunStatus,
   StoredWebhookEvent,
   Tag,
+  UpcomingRecurringPayment,
   LedgerWriteStats,
   WebhookEventStatus,
 } from "../domain/index.js";

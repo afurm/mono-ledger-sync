@@ -15,6 +15,7 @@ import type {
   RecurringItem,
   StoredWebhookEvent,
   SyncRun,
+  UpcomingRecurringPayment,
 } from "./index.js";
 
 import type { LedgerDbTransaction } from "./index.js";
@@ -47,6 +48,10 @@ export interface LedgerBudgetQueryService {
 
 export interface LedgerRecurringItemQueryService {
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  listUpcomingRecurringPayments(
+    profile?: string,
+    asOf?: Date,
+  ): Promise<readonly UpcomingRecurringPayment[]>;
 }
 
 export interface LedgerSyncStateQueryService {
@@ -110,9 +115,164 @@ interface CreateLedgerServicesOptions {
 }
 
 const DEFAULT_SYNC_LIST_LIMIT = 20;
+const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
 
 function coerceProfile(profile: string | undefined, fallback: string): string {
   return profile === undefined || profile.trim() === "" ? fallback : profile;
+}
+
+function startOfUtcDate(value: Date): Date {
+  return new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
+  );
+}
+
+function daysInUtcMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+}
+
+function addUtcMonths(value: Date, months: number): Date {
+  const year = value.getUTCFullYear();
+  const month = value.getUTCMonth() + months;
+  const day = Math.min(
+    value.getUTCDate(),
+    daysInUtcMonth(year + Math.floor(month / 12), ((month % 12) + 12) % 12),
+  );
+
+  return new Date(Date.UTC(year, month, day));
+}
+
+function addRecurringFrequency(
+  value: Date,
+  frequency: RecurringItem["frequency"],
+): Date {
+  const next = new Date(value);
+
+  switch (frequency) {
+    case "daily":
+      next.setUTCDate(next.getUTCDate() + 1);
+      return next;
+    case "weekly":
+      next.setUTCDate(next.getUTCDate() + 7);
+      return next;
+    case "monthly":
+      return addUtcMonths(next, 1);
+    case "quarterly":
+      return addUtcMonths(next, 3);
+    case "yearly":
+      return addUtcMonths(next, 12);
+    case "irregular":
+      return next;
+  }
+}
+
+function resolveNextRecurringDate(
+  item: RecurringItem,
+  asOf: Date,
+): Date | undefined {
+  const anchor = item.lastSeenAt ?? item.startedAt ?? item.createdAt;
+  const parsedAnchor = Date.parse(anchor);
+
+  if (!Number.isFinite(parsedAnchor)) {
+    return undefined;
+  }
+
+  let nextDueAt = startOfUtcDate(new Date(parsedAnchor));
+  const asOfDate = startOfUtcDate(asOf);
+
+  if (item.frequency === "irregular") {
+    return nextDueAt;
+  }
+
+  while (nextDueAt < asOfDate) {
+    const next = addRecurringFrequency(nextDueAt, item.frequency);
+
+    if (next.getTime() === nextDueAt.getTime()) {
+      return undefined;
+    }
+
+    nextDueAt = next;
+  }
+
+  return nextDueAt;
+}
+
+function daysBetweenUtcDates(left: Date, right: Date): number {
+  const millisecondsPerDay = 86_400_000;
+
+  return Math.round(
+    (startOfUtcDate(left).getTime() - startOfUtcDate(right).getTime()) /
+      millisecondsPerDay,
+  );
+}
+
+async function listUpcomingRecurringPayments(
+  db: SqliteLedgerDb,
+  profile: string,
+  asOf = new Date(),
+): Promise<readonly UpcomingRecurringPayment[]> {
+  const [items, accounts] = await Promise.all([
+    db.listRecurringItems(profile),
+    db.listAccounts(profile),
+  ]);
+  const accountCurrencyCodes = new Map(
+    accounts.map((account) => [account.id, account.currencyCode]),
+  );
+  const asOfDate = startOfUtcDate(asOf);
+
+  return items
+    .filter((item) => item.isActive)
+    .flatMap((item): UpcomingRecurringPayment[] => {
+      const nextDueAt = resolveNextRecurringDate(item, asOfDate);
+      const currencyCode = accountCurrencyCodes.get(item.accountId);
+
+      if (!nextDueAt || currencyCode === undefined) {
+        return [];
+      }
+
+      const daysUntilDue = daysBetweenUtcDates(nextDueAt, asOfDate);
+
+      return [
+        {
+          id: `${item.id}:${nextDueAt.toISOString().slice(0, 10)}`,
+          recurringItemId: item.id,
+          profile: item.profile,
+          accountId: item.accountId,
+          ...(item.categoryId === undefined
+            ? {}
+            : { categoryId: item.categoryId }),
+          ...(item.merchantName === undefined
+            ? {}
+            : { merchantName: item.merchantName }),
+          frequency: item.frequency,
+          ...(item.expectedAmountMin === undefined
+            ? {}
+            : { expectedAmountMin: item.expectedAmountMin }),
+          ...(item.expectedAmountMax === undefined
+            ? {}
+            : { expectedAmountMax: item.expectedAmountMax }),
+          currencyCode,
+          ...(item.lastSeenAt === undefined
+            ? {}
+            : { lastSeenAt: item.lastSeenAt }),
+          nextDueAt: nextDueAt.toISOString(),
+          daysUntilDue,
+          isOverdue: daysUntilDue < 0,
+        },
+      ];
+    })
+    .sort((left, right) => {
+      const dueDiff = Date.parse(left.nextDueAt) - Date.parse(right.nextDueAt);
+
+      if (dueDiff !== 0) {
+        return dueDiff;
+      }
+
+      return (left.merchantName ?? left.recurringItemId).localeCompare(
+        right.merchantName ?? right.recurringItemId,
+      );
+    })
+    .slice(0, UPCOMING_RECURRING_PAYMENT_LIMIT);
 }
 
 export function createLedgerQueryService({
@@ -146,6 +306,13 @@ export function createLedgerQueryService({
     },
     listRecurringItems(profile) {
       return db.listRecurringItems(coerceProfile(profile, defaultProfile));
+    },
+    listUpcomingRecurringPayments(profile, asOf) {
+      return listUpcomingRecurringPayments(
+        db,
+        coerceProfile(profile, defaultProfile),
+        asOf,
+      );
     },
     listLedgerEntries({ profile, ...query }) {
       return db.listLedgerEntries({
@@ -190,6 +357,7 @@ export function createLedgerQueryServices(
     },
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
+      listUpcomingRecurringPayments: query.listUpcomingRecurringPayments,
     },
     syncState: {
       listSyncRuns: query.listSyncRuns,
