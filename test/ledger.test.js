@@ -2334,7 +2334,6 @@ test("local API validates query strings and webhook payloads", async () => {
         },
       },
     };
-
     try {
       const configResponse = await server.inject({
         method: "GET",
@@ -2477,6 +2476,26 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
         },
       },
     };
+    const reorderedWebhookEventJson = JSON.stringify({
+      data: {
+        statementItem: {
+          hold: false,
+          balance: 97000,
+          cashbackAmount: 0,
+          commissionRate: 0,
+          currencyCode: 980,
+          operationAmount: -2500,
+          amount: -2500,
+          originalMcc: 4829,
+          mcc: 4829,
+          description: "Duplicate delivery transfer",
+          time: 1775031300,
+          id: "fixture-webhook-duplicate-test",
+        },
+        account: "fixture-account-uah-main",
+      },
+      type: "StatementItem",
+    });
 
     try {
       const configResponse = await server.inject({
@@ -2492,7 +2511,7 @@ test("local API deduplicates webhook deliveries by payload and delivery metadata
           "content-type": "application/json",
           "x-monobank-delivery-id": "delivery-111",
         },
-        body: JSON.stringify(webhookEvent),
+        body: reorderedWebhookEventJson,
       });
       const secondResponse = await server.inject({
         method: "POST",
