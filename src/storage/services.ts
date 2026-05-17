@@ -13,6 +13,7 @@ import type {
   LedgerCategorySpending,
   LedgerJar,
   Category,
+  CategoryRule,
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
@@ -41,6 +42,7 @@ export interface LedgerBalanceQueryService {
 
 export interface LedgerCategoryQueryService {
   listCategories(profile?: string): Promise<readonly Category[]>;
+  listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchantCleanupRules(
     profile?: string,
   ): Promise<readonly MerchantCleanupRule[]>;
@@ -398,6 +400,9 @@ export function createLedgerQueryService({
     listCategories(profile) {
       return db.listCategories(coerceProfile(profile, defaultProfile));
     },
+    listCategoryRules(profile) {
+      return db.listCategoryRules(coerceProfile(profile, defaultProfile));
+    },
     listMerchantCleanupRules(profile) {
       return db.listMerchantCleanupRules(
         coerceProfile(profile, defaultProfile),
@@ -461,6 +466,7 @@ export function createLedgerQueryServices(
     },
     categories: {
       listCategories: query.listCategories,
+      listCategoryRules: query.listCategoryRules,
       listCategorySpending: query.listCategorySpending,
       listMerchantCleanupRules: query.listMerchantCleanupRules,
     },

@@ -51,6 +51,7 @@ import {
 } from "../storage/index.js";
 import type {
   Category,
+  CategoryRule,
   BudgetProgress,
   LedgerAccount,
   LedgerCategorySpending,
@@ -463,6 +464,14 @@ const ledgerJarsResponseSchema = {
 } as const;
 
 const ledgerCategoriesResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const ledgerCategoryRulesResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2165,6 +2174,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listCategories(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/category-rules`,
+    {
+      schema: {
+        response: {
+          200: ledgerCategoryRulesResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly CategoryRule[]> => {
+      const services = await getServices();
+
+      return services.queryService.listCategoryRules(services.profile);
     },
   );
 

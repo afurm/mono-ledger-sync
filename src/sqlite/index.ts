@@ -44,6 +44,7 @@ import type {
   SyncRun,
   Tag,
 } from "../storage/index.js";
+import { categorizeStatementItem } from "../sync/index.js";
 
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3") as typeof BetterSqlite3;
@@ -218,6 +219,7 @@ interface SqliteLedgerEntryRow {
 
 interface SqliteRawStatementItemRow {
   payload_json: string;
+  updated_at: string;
 }
 
 interface SqliteSyncCursorRow {
@@ -317,6 +319,7 @@ interface SqliteCategorySpendingRow {
 interface SqliteCategoryRuleRow {
   id: string;
   category_id: string;
+  category_name?: string;
   name: string;
   priority: number;
   match_type: "condition" | "fallback";
@@ -1156,6 +1159,25 @@ const migrations: readonly SqliteMigration[] = [
         ON merchant_cleanup_rules(profile, is_enabled, priority, id);
     `,
   },
+  {
+    id: "0017_ledger_entry_manual_overrides",
+    description: "Track manual ledger category and merchant overrides",
+    sql: `
+      CREATE TABLE IF NOT EXISTS ledger_entry_manual_overrides (
+        profile TEXT NOT NULL,
+        ledger_entry_id TEXT NOT NULL,
+        has_category_override INTEGER NOT NULL DEFAULT 0,
+        has_merchant_override INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, ledger_entry_id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ledger_entry_manual_overrides_profile_entry
+        ON ledger_entry_manual_overrides(profile, ledger_entry_id);
+
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1468,6 +1490,64 @@ function normalizeLedgerEntryBulkEdit(update: LedgerEntryBulkEditUpdate): {
 
 function normalizeMerchantName(name: string): string {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function tokenizeRuleText(text: string): readonly string[] {
+  return normalizeMerchantName(text)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+function tokenSequenceIncludes(
+  textTokens: readonly string[],
+  termTokens: readonly string[],
+): boolean {
+  if (termTokens.length === 0 || termTokens.length > textTokens.length) {
+    return false;
+  }
+
+  return textTokens.some((_, startIndex) =>
+    termTokens.every(
+      (termToken, offset) => textTokens[startIndex + offset] === termToken,
+    ),
+  );
+}
+
+function ruleTermVariants(term: string): readonly string[] {
+  const normalizedTerm = normalizeMerchantName(term);
+  const variants = [
+    normalizedTerm,
+    `${normalizedTerm}s`,
+    `${normalizedTerm}es`,
+  ];
+
+  if (normalizedTerm.endsWith("y")) {
+    variants.push(`${normalizedTerm.slice(0, -1)}ies`);
+  }
+
+  return variants;
+}
+
+function textMatchesRuleTerm(text: string | undefined, term: string): boolean {
+  const normalizedText = normalizeMerchantName(text ?? "");
+  const normalizedTerm = normalizeMerchantName(term);
+
+  if (!normalizedText || !normalizedTerm) {
+    return false;
+  }
+
+  const textTokens = tokenizeRuleText(normalizedText);
+  const termTokens = tokenizeRuleText(normalizedTerm);
+
+  if (termTokens.length > 1) {
+    return tokenSequenceIncludes(textTokens, termTokens);
+  }
+
+  const textTokenSet = new Set(textTokens);
+
+  return ruleTermVariants(normalizedTerm).some((variant) =>
+    textTokenSet.has(variant),
+  );
 }
 
 function merchantIdForName(normalizedName: string): string {
@@ -1991,6 +2071,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       const recordMigration = this.#database.prepare(
         "INSERT INTO schema_migrations (id, description, applied_at) VALUES (?, ?, ?)",
       );
+      const hadMerchantCleanupMigration = Boolean(
+        hasMigration.get("0016_merchant_cleanup_rules"),
+      );
+      let appliedManualOverrideMigration = false;
 
       for (const migration of migrations) {
         if (hasMigration.get(migration.id)) {
@@ -1999,9 +2083,17 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
 
         this.#database.exec(migration.sql);
         recordMigration.run(migration.id, migration.description, nowIso());
+        appliedManualOverrideMigration ||=
+          migration.id === "0017_ledger_entry_manual_overrides";
       }
 
       this.ensureProfile();
+      if (appliedManualOverrideMigration) {
+        this.seedDefaultConfigurationForExistingProfiles();
+        this.backfillLegacyManualOverrideMarkers({
+          compareCleanedMerchants: hadMerchantCleanupMigration,
+        });
+      }
       this.seedDefaultCategories();
       this.seedDefaultCategoryRules();
       this.seedDefaultMerchantCleanupRules();
@@ -2358,7 +2450,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       WHERE profile = ? AND account_id = ? AND statement_item_id = ?
     `);
     const rawLookup = this.#database.prepare(`
-      SELECT payload_json
+      SELECT payload_json, updated_at
       FROM raw_statement_items
       WHERE profile = ? AND account_id = ? AND statement_item_id = ?
     `);
@@ -2388,17 +2480,53 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         const existed = Boolean(
           rawExists.get(this.profile, accountId, statementItemId),
         );
-        const previousPayload = (
-          rawLookup.get(this.profile, accountId, statementItemId) as
-            | SqliteRawStatementItemRow
-            | undefined
-        )?.payload_json;
+        const previousRaw = rawLookup.get(
+          this.profile,
+          accountId,
+          statementItemId,
+        ) as SqliteRawStatementItemRow | undefined;
+        const previousPayload = previousRaw?.payload_json;
 
-        if (existed && previousPayload === payloadJson) {
+        if (!entry) {
+          rawUpsert.run({
+            profile: this.profile,
+            accountId,
+            statementItemId,
+            time: item.time,
+            payloadJson,
+            updatedAt: nowIso(),
+          });
           stats.skipped += 1;
           continue;
         }
 
+        if (existed && previousPayload === payloadJson) {
+          const normalizedEntry = this.mergeManualLedgerEntryOverrides(
+            this.prepareLedgerEntryForWrite(entry, item),
+          );
+
+          if (this.ledgerEntryMatchesStoredEntry(normalizedEntry)) {
+            stats.skipped += 1;
+            continue;
+          }
+
+          const entryStats = this.upsertPreparedLedgerEntry(normalizedEntry);
+          rawUpsert.run({
+            profile: this.profile,
+            accountId,
+            statementItemId,
+            time: item.time,
+            payloadJson,
+            updatedAt: nowIso(),
+          });
+          stats = addWriteStats(stats, entryStats);
+          continue;
+        }
+
+        const normalizedEntry = this.mergeManualLedgerEntryOverrides(
+          this.prepareLedgerEntryForWrite(entry, item),
+        );
+        const entryStats = this.upsertPreparedLedgerEntry(normalizedEntry);
         rawUpsert.run({
           profile: this.profile,
           accountId,
@@ -2407,13 +2535,6 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           payloadJson,
           updatedAt: nowIso(),
         });
-
-        if (!entry) {
-          stats.skipped += 1;
-          continue;
-        }
-
-        const entryStats = this.upsertLedgerEntry(entry);
         stats = addWriteStats(stats, entryStats);
 
         if (existed && entryStats.inserted === 0 && entryStats.updated === 0) {
@@ -2865,6 +2986,34 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         WHERE profile = @profile AND id = @id
       `,
     );
+    const upsertManualOverride = this.#database.prepare(
+      `
+        INSERT INTO ledger_entry_manual_overrides (
+          profile,
+          ledger_entry_id,
+          has_category_override,
+          has_merchant_override,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @hasCategoryOverride,
+          @hasMerchantOverride,
+          @updatedAt
+        )
+        ON CONFLICT(profile, ledger_entry_id) DO UPDATE SET
+          has_category_override = CASE
+            WHEN excluded.has_category_override = 1 THEN 1
+            ELSE ledger_entry_manual_overrides.has_category_override
+          END,
+          has_merchant_override = CASE
+            WHEN excluded.has_merchant_override = 1 THEN 1
+            ELSE ledger_entry_manual_overrides.has_merchant_override
+          END,
+          updated_at = excluded.updated_at
+      `,
+    );
 
     for (const id of normalizedIds) {
       updateEntry.run({
@@ -2876,6 +3025,21 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         tagsJson: normalizedUpdate.tagsJson ?? null,
         updatedAt: timestamp,
       });
+
+      if (
+        normalizedUpdate.categoryId !== undefined ||
+        normalizedUpdate.merchantName !== undefined
+      ) {
+        upsertManualOverride.run({
+          profile,
+          id,
+          hasCategoryOverride:
+            normalizedUpdate.categoryId === undefined ? 0 : 1,
+          hasMerchantOverride:
+            normalizedUpdate.merchantName === undefined ? 0 : 1,
+          updatedAt: timestamp,
+        });
+      }
 
       const row = selectEntry.get(profile, id) as
         | SqliteLedgerEntryRow
@@ -3677,7 +3841,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .run(profile, nowIso());
   }
 
-  private seedDefaultCategories(): void {
+  private seedDefaultCategories(profile = this.profile): void {
     const seed = this.#database
       .prepare(
         `
@@ -3710,7 +3874,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     this.#database.transaction(() => {
       for (const category of seededCategories) {
         insertCategory.run({
-          profile: this.profile,
+          profile,
           id: category.id,
           name: category.name,
           color: category.color ?? null,
@@ -3721,7 +3885,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     })();
   }
 
-  private seedDefaultCategoryRules(): void {
+  private seedDefaultCategoryRules(profile = this.profile): void {
     const seed = this.#database
       .prepare(
         `
@@ -3780,7 +3944,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     this.#database.transaction(() => {
       for (const rule of seededCategoryRules) {
         insertRule.run({
-          profile: this.profile,
+          profile,
           id: rule.id,
           categoryId: rule.categoryId,
           name: rule.name,
@@ -3796,7 +3960,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     })();
   }
 
-  private seedDefaultMerchantCleanupRules(): void {
+  private seedDefaultMerchantCleanupRules(profile = this.profile): void {
     const seed = this.#database
       .prepare(
         `
@@ -3847,7 +4011,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     this.#database.transaction(() => {
       for (const rule of seededMerchantCleanupRules) {
         insertRule.run({
-          profile: this.profile,
+          profile,
           id: rule.id,
           name: rule.name,
           priority: rule.priority,
@@ -3857,6 +4021,169 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         });
       }
     })();
+  }
+
+  private seedDefaultConfigurationForExistingProfiles(): void {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT name
+          FROM profiles
+        `,
+      )
+      .all() as { name: string }[];
+
+    for (const row of rows) {
+      this.seedDefaultCategories(row.name);
+      this.seedDefaultCategoryRules(row.name);
+      this.seedDefaultMerchantCleanupRules(row.name);
+    }
+  }
+
+  private backfillLegacyManualOverrideMarkers({
+    compareCleanedMerchants,
+  }: {
+    compareCleanedMerchants: boolean;
+  }): void {
+    const tableExists = this.#database
+      .prepare(
+        `
+          SELECT 1
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'ledger_entry_manual_overrides'
+          LIMIT 1
+        `,
+      )
+      .get();
+
+    if (!tableExists) {
+      return;
+    }
+
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            ledger_entries.profile,
+            ledger_entries.id,
+            ledger_entries.account_id,
+            ledger_entries.time,
+            ledger_entries.description,
+            ledger_entries.amount,
+            ledger_entries.operation_amount,
+            ledger_entries.currency_code,
+            ledger_entries.category_id,
+            ledger_entries.category_name,
+            ledger_entries.merchant_name,
+            ledger_entries.raw_statement_item_id,
+            ledger_entries.hold,
+            ledger_entries.balance,
+            ledger_entries.note,
+            ledger_entries.tags_json,
+            ledger_entries.split_plan_json,
+            ledger_entries.created_at,
+            ledger_entries.updated_at,
+            raw_statement_items.payload_json
+          FROM ledger_entries
+          INNER JOIN raw_statement_items
+            ON raw_statement_items.profile = ledger_entries.profile
+            AND raw_statement_items.account_id = ledger_entries.account_id
+            AND raw_statement_items.statement_item_id = ledger_entries.raw_statement_item_id
+          LEFT JOIN ledger_entry_manual_overrides
+            ON ledger_entry_manual_overrides.profile = ledger_entries.profile
+            AND ledger_entry_manual_overrides.ledger_entry_id = ledger_entries.id
+          WHERE ledger_entry_manual_overrides.ledger_entry_id IS NULL
+        `,
+      )
+      .all() as (SqliteLedgerEntryRow & {
+      profile: string;
+      payload_json: string;
+    })[];
+
+    if (rows.length === 0) {
+      return;
+    }
+
+    const upsertManualOverride = this.#database.prepare(
+      `
+        INSERT INTO ledger_entry_manual_overrides (
+          profile,
+          ledger_entry_id,
+          has_category_override,
+          has_merchant_override,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @hasCategoryOverride,
+          @hasMerchantOverride,
+          @updatedAt
+        )
+        ON CONFLICT(profile, ledger_entry_id) DO NOTHING
+      `,
+    );
+
+    for (const row of rows) {
+      const statementItem = JSON.parse(
+        row.payload_json,
+      ) as MonobankStatementItem;
+      const rawGeneratedEntry = this.ledgerEntryFromStoredRaw(
+        row,
+        statementItem,
+      );
+      const generatedCategory = categorizeStatementItem(statementItem);
+      const generatedMerchantName = compareCleanedMerchants
+        ? this.applyMerchantCleanupRules(
+            rawGeneratedEntry.merchantName,
+            row.profile,
+          )
+        : rawGeneratedEntry.merchantName;
+      const hasCategoryOverride =
+        row.category_id !== generatedCategory.categoryId ||
+        row.category_name !== generatedCategory.categoryName;
+      const hasMerchantOverride =
+        row.merchant_name !== (generatedMerchantName ?? null);
+
+      if (!hasCategoryOverride && !hasMerchantOverride) {
+        continue;
+      }
+
+      upsertManualOverride.run({
+        profile: row.profile,
+        id: row.id,
+        hasCategoryOverride: hasCategoryOverride ? 1 : 0,
+        hasMerchantOverride: hasMerchantOverride ? 1 : 0,
+        updatedAt: row.updated_at,
+      });
+    }
+  }
+
+  private ledgerEntryFromStoredRaw(
+    row: SqliteLedgerEntryRow,
+    item: MonobankStatementItem,
+  ): LedgerEntry {
+    const entry: LedgerEntry = {
+      id: row.id,
+      accountId: row.account_id,
+      time: item.time,
+      description: item.description,
+      amount: item.amount,
+      currencyCode: item.currencyCode,
+      merchantName: item.counterName ?? item.description,
+      rawStatementItemId: row.raw_statement_item_id,
+      hold: item.hold,
+    };
+
+    if (item.operationAmount !== undefined) {
+      entry.operationAmount = item.operationAmount;
+    }
+
+    if (item.balance !== undefined) {
+      entry.balance = item.balance;
+    }
+
+    return entry;
   }
 
   private setSyncCursorSync(cursor: SyncCursor): void {
@@ -3885,14 +4212,21 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       });
   }
 
-  private upsertLedgerEntry(entry: LedgerEntry): LedgerWriteStats {
-    const cleanedMerchantName = this.applyMerchantCleanupRules(
-      entry.merchantName,
+  private upsertLedgerEntry(
+    entry: LedgerEntry,
+    statementItem?: MonobankStatementItem,
+  ): LedgerWriteStats {
+    const normalizedEntry = this.prepareLedgerEntryForWrite(
+      entry,
+      statementItem,
     );
-    const normalizedEntry: LedgerEntry =
-      cleanedMerchantName === undefined
-        ? { ...entry }
-        : { ...entry, merchantName: cleanedMerchantName };
+
+    return this.upsertPreparedLedgerEntry(normalizedEntry);
+  }
+
+  private upsertPreparedLedgerEntry(
+    normalizedEntry: LedgerEntry,
+  ): LedgerWriteStats {
     const existed = Boolean(
       this.#database
         .prepare("SELECT 1 FROM ledger_entries WHERE profile = ? AND id = ?")
@@ -3959,6 +4293,167 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     };
   }
 
+  private prepareLedgerEntryForWrite(
+    entry: LedgerEntry,
+    statementItem?: MonobankStatementItem,
+    profile = this.profile,
+  ): LedgerEntry {
+    const cleanedMerchantName = this.applyMerchantCleanupRules(
+      entry.merchantName,
+      profile,
+    );
+    const cleanedEntry =
+      cleanedMerchantName === undefined
+        ? { ...entry }
+        : { ...entry, merchantName: cleanedMerchantName };
+
+    if (statementItem === undefined) {
+      return cleanedEntry;
+    }
+
+    const entryWithManualMerchant = this.mergeManualLedgerEntryOverrides(
+      cleanedEntry,
+      { category: false, merchant: true },
+      profile,
+    );
+
+    return this.mergeManualLedgerEntryOverrides(
+      this.applyCategoryRules(entryWithManualMerchant, statementItem, profile),
+      { category: true, merchant: false },
+      profile,
+    );
+  }
+
+  private ledgerEntryManualOverrideState(
+    id: string,
+    profile = this.profile,
+  ):
+    | {
+        hasCategoryOverride: boolean;
+        hasMerchantOverride: boolean;
+      }
+    | undefined {
+    const row = this.#database
+      .prepare(
+        `
+          SELECT has_category_override, has_merchant_override
+          FROM ledger_entry_manual_overrides
+          WHERE profile = ? AND ledger_entry_id = ?
+        `,
+      )
+      .get(profile, id) as
+      | {
+          has_category_override: number;
+          has_merchant_override: number;
+        }
+      | undefined;
+
+    return row === undefined
+      ? undefined
+      : {
+          hasCategoryOverride: row.has_category_override === 1,
+          hasMerchantOverride: row.has_merchant_override === 1,
+        };
+  }
+
+  private mergeManualLedgerEntryOverrides(
+    entry: LedgerEntry,
+    fields: { category: boolean; merchant: boolean } = {
+      category: true,
+      merchant: true,
+    },
+    profile = this.profile,
+  ): LedgerEntry {
+    const overrideState = this.ledgerEntryManualOverrideState(
+      entry.id,
+      profile,
+    );
+
+    if (
+      overrideState === undefined ||
+      ((!fields.category || !overrideState.hasCategoryOverride) &&
+        (!fields.merchant || !overrideState.hasMerchantOverride))
+    ) {
+      return entry;
+    }
+
+    const row = this.#database
+      .prepare(
+        `
+          SELECT
+            id, account_id, time, description, amount, operation_amount,
+            currency_code, category_id, category_name, merchant_name,
+            raw_statement_item_id, hold, balance, note, tags_json,
+            split_plan_json, created_at, updated_at
+          FROM ledger_entries
+          WHERE profile = ? AND id = ?
+        `,
+      )
+      .get(profile, entry.id) as SqliteLedgerEntryRow | undefined;
+
+    if (row === undefined) {
+      return entry;
+    }
+
+    const mergedEntry = { ...entry };
+
+    if (fields.category && overrideState.hasCategoryOverride) {
+      if (row.category_id === null) {
+        delete mergedEntry.categoryId;
+      } else {
+        mergedEntry.categoryId = row.category_id;
+      }
+
+      if (row.category_name === null) {
+        delete mergedEntry.categoryName;
+      } else {
+        mergedEntry.categoryName = row.category_name;
+      }
+    }
+
+    if (fields.merchant && overrideState.hasMerchantOverride) {
+      if (row.merchant_name === null) {
+        delete mergedEntry.merchantName;
+      } else {
+        mergedEntry.merchantName = row.merchant_name;
+      }
+    }
+
+    return mergedEntry;
+  }
+
+  private ledgerEntryMatchesStoredEntry(entry: LedgerEntry): boolean {
+    const row = this.#database
+      .prepare(
+        `
+          SELECT
+            id, account_id, time, description, amount, operation_amount,
+            currency_code, category_id, category_name, merchant_name,
+            raw_statement_item_id, hold, balance, note, tags_json,
+            split_plan_json, created_at, updated_at
+          FROM ledger_entries
+          WHERE profile = ? AND id = ?
+        `,
+      )
+      .get(this.profile, entry.id) as SqliteLedgerEntryRow | undefined;
+
+    return (
+      row !== undefined &&
+      row.account_id === entry.accountId &&
+      row.time === entry.time &&
+      row.description === entry.description &&
+      row.amount === entry.amount &&
+      row.operation_amount === (entry.operationAmount ?? null) &&
+      row.currency_code === entry.currencyCode &&
+      row.category_id === (entry.categoryId ?? null) &&
+      row.category_name === (entry.categoryName ?? null) &&
+      row.merchant_name === (entry.merchantName ?? null) &&
+      row.raw_statement_item_id === entry.rawStatementItemId &&
+      row.hold === (entry.hold ? 1 : 0) &&
+      row.balance === (entry.balance ?? null)
+    );
+  }
+
   private upsertMerchantFromLedgerEntry(
     entry: LedgerEntry,
     timestamp: string,
@@ -3971,8 +4466,95 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     );
   }
 
+  private applyCategoryRules(
+    entry: LedgerEntry,
+    statementItem?: MonobankStatementItem,
+    profile = this.profile,
+  ): LedgerEntry {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            category_rules.id,
+            category_rules.category_id,
+            categories.name AS category_name,
+            category_rules.name,
+            category_rules.priority,
+            category_rules.match_type,
+            category_rules.merchant_contains,
+            category_rules.description_contains,
+            category_rules.mcc,
+            category_rules.amount_direction,
+            category_rules.is_system,
+            category_rules.is_enabled,
+            category_rules.created_at,
+            category_rules.updated_at
+          FROM category_rules
+          LEFT JOIN categories
+            ON categories.profile = category_rules.profile
+           AND categories.id = category_rules.category_id
+          WHERE category_rules.profile = ?
+            AND category_rules.is_enabled = 1
+          ORDER BY category_rules.priority, category_rules.id
+        `,
+      )
+      .all(profile) as SqliteCategoryRuleRow[];
+
+    for (const row of rows) {
+      if (!this.categoryRuleMatches(row, entry, statementItem)) {
+        continue;
+      }
+
+      return {
+        ...entry,
+        categoryId: row.category_id,
+        categoryName: row.category_name ?? row.category_id,
+      };
+    }
+
+    return entry;
+  }
+
+  private categoryRuleMatches(
+    rule: SqliteCategoryRuleRow,
+    entry: LedgerEntry,
+    statementItem?: MonobankStatementItem,
+  ): boolean {
+    if (rule.amount_direction === "income" && entry.amount <= 0) {
+      return false;
+    }
+
+    if (rule.amount_direction === "expense" && entry.amount >= 0) {
+      return false;
+    }
+
+    if (rule.match_type === "fallback") {
+      return true;
+    }
+
+    const hasCondition =
+      rule.mcc !== null ||
+      rule.merchant_contains !== null ||
+      rule.description_contains !== null;
+
+    if (!hasCondition) {
+      return true;
+    }
+
+    return (
+      (rule.mcc !== null &&
+        statementItem !== undefined &&
+        statementItem.mcc === rule.mcc) ||
+      (rule.merchant_contains !== null &&
+        textMatchesRuleTerm(entry.merchantName, rule.merchant_contains)) ||
+      (rule.description_contains !== null &&
+        textMatchesRuleTerm(entry.description, rule.description_contains))
+    );
+  }
+
   private applyMerchantCleanupRules(
     merchantName: string | undefined,
+    profile = this.profile,
   ): string | undefined {
     const name = merchantName?.trim();
 
@@ -3993,7 +4575,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           ORDER BY priority, id
         `,
       )
-      .all(this.profile) as Pick<
+      .all(profile) as Pick<
       SqliteMerchantCleanupRuleRow,
       "merchant_contains" | "canonical_name"
     >[];

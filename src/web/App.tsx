@@ -123,6 +123,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
+  type CategoryRule,
   type LedgerAccount,
   type LedgerEntry,
   type LedgerEntryPage,
@@ -612,11 +613,143 @@ const builtInRuleSummaries = [
   },
 ] as const;
 
-const ruleEditorTransactionTypeOptions = ["Income", "Expense", "Transfer"];
+const ruleEditorTransactionTypeOptions = [
+  "Income",
+  "Expense",
+  "Transfer",
+  "Any",
+];
 const ruleEditorAccountOptions = ["All accounts"];
 const ruleEditorDateOptions = ["Any date", "Current statement window"];
 
-type BuiltInRuleSummary = (typeof builtInRuleSummaries)[number];
+type CategoryRuleSummary = {
+  id: string;
+  label: string;
+  priority: number;
+  matchType: "condition" | "fallback";
+  conditions: string;
+  targetAction: string;
+  editor: {
+    merchantContains: string;
+    descriptionContains: string;
+    mcc: string;
+    amountRange: string;
+    transactionType: string;
+    account: string;
+    date: string;
+  };
+  isEnabled: boolean;
+  isSystem: boolean;
+};
+type RuleMatchSummary = {
+  id: string;
+  priority: number;
+  matchType: CategoryRuleSummary["matchType"];
+  editor: CategoryRuleSummary["editor"];
+  isEnabled: boolean;
+};
+
+const fallbackCategoryRuleSummary: CategoryRuleSummary = {
+  id: "income",
+  label: "Income",
+  priority: 10,
+  matchType: "condition",
+  conditions: "Positive amount",
+  targetAction: "Set category to Income",
+  editor: {
+    merchantContains: "Any merchant",
+    descriptionContains: "Any incoming description",
+    mcc: "Not required",
+    amountRange: "Greater than 0.00",
+    transactionType: "Income",
+    account: "All accounts",
+    date: "Any date",
+  },
+  isEnabled: true,
+  isSystem: true,
+};
+
+function categoryRuleConditions(rule: CategoryRule): string {
+  if (rule.matchType === "fallback") {
+    return "Fallback";
+  }
+
+  const conditions = [
+    rule.amountDirection === "income"
+      ? "income amount"
+      : rule.amountDirection === "expense"
+        ? "expense amount"
+        : undefined,
+    rule.mcc === undefined ? undefined : `MCC ${rule.mcc}`,
+    rule.merchantContains === undefined
+      ? undefined
+      : `merchant contains ${rule.merchantContains}`,
+    rule.descriptionContains === undefined
+      ? undefined
+      : `description contains ${rule.descriptionContains}`,
+  ].filter(Boolean);
+
+  return conditions.length > 0 ? conditions.join(" or ") : "Manual condition";
+}
+
+function categoryRuleTransactionType(rule: CategoryRule): string {
+  if (rule.amountDirection === "income") {
+    return "Income";
+  }
+
+  if (rule.amountDirection === "expense") {
+    return "Expense";
+  }
+
+  return "Any";
+}
+
+function categoryRuleSummariesFromSnapshot(
+  snapshot: LocalAppSnapshot | undefined,
+): readonly CategoryRuleSummary[] {
+  if (!snapshot?.categoryRules.length) {
+    return builtInRuleSummaries.map((rule) => ({
+      ...rule,
+      matchType: "condition",
+      isEnabled: true,
+      isSystem: true,
+    }));
+  }
+
+  const categoryNames = new Map(
+    snapshot.categories.map((category) => [category.id, category.name]),
+  );
+
+  return snapshot.categoryRules.map((rule) => {
+    const categoryName = categoryNames.get(rule.categoryId) ?? rule.categoryId;
+
+    return {
+      id: rule.id,
+      label: rule.name,
+      priority: rule.priority,
+      matchType: rule.matchType,
+      conditions: categoryRuleConditions(rule),
+      targetAction: `Set category to ${categoryName}`,
+      editor: {
+        merchantContains: rule.merchantContains ?? "Any merchant",
+        descriptionContains:
+          rule.descriptionContains ?? "Any transaction description",
+        mcc: rule.mcc === undefined ? "Not required" : String(rule.mcc),
+        amountRange:
+          rule.amountDirection === "income"
+            ? "Greater than 0.00"
+            : rule.amountDirection === "expense"
+              ? "Less than 0.00"
+              : "Any amount",
+        transactionType: categoryRuleTransactionType(rule),
+        account: "All accounts",
+        date: "Any date",
+      },
+      isEnabled: rule.isEnabled !== false,
+      isSystem: rule.isSystem === true,
+    };
+  });
+}
 
 interface RuleTestSample {
   merchantName: string;
@@ -637,7 +770,7 @@ interface RuleTestCheck {
 
 interface RuleConflictPreview {
   entry: LedgerEntry;
-  rules: readonly BuiltInRuleSummary[];
+  rules: readonly CategoryRuleSummary[];
 }
 
 function getInitialRoute(): RouteId {
@@ -5909,7 +6042,12 @@ function RuleEditorPreviewSelect({
 function ruleConstraintTerms(value: string): string[] {
   const normalizedValue = value.trim().toLowerCase();
 
-  if (normalizedValue.startsWith("any") || normalizedValue === "not required") {
+  if (
+    normalizedValue === "any merchant" ||
+    normalizedValue === "any incoming description" ||
+    normalizedValue === "any transaction description" ||
+    normalizedValue === "not required"
+  ) {
     return [];
   }
 
@@ -5982,7 +6120,7 @@ function textMatchesRuleConstraint(value: string, text: string): boolean {
 }
 
 function createRuleTestSample(
-  rule: BuiltInRuleSummary,
+  rule: CategoryRuleSummary,
   account: LedgerAccount | undefined,
 ): RuleTestSample {
   const transactionType = rule.editor.transactionType;
@@ -6013,7 +6151,7 @@ function createRuleTestSample(
 }
 
 function createRuleTestChecks(
-  rule: BuiltInRuleSummary,
+  rule: CategoryRuleSummary,
   sample: RuleTestSample,
 ): RuleTestCheck[] {
   const amountTypeMatches =
@@ -6109,7 +6247,7 @@ function RuleTestPanel({
   rule,
 }: {
   account: LedgerAccount | undefined;
-  rule: BuiltInRuleSummary;
+  rule: CategoryRuleSummary;
 }) {
   const sample = createRuleTestSample(rule, account);
   const checks = createRuleTestChecks(rule, sample);
@@ -6167,18 +6305,33 @@ function RuleTestPanel({
 
 function ledgerEntryMatchesRule(
   entry: LedgerEntry,
-  rule: BuiltInRuleSummary,
+  rule: RuleMatchSummary,
 ): boolean {
-  const merchantText = `${entry.merchantName ?? ""} ${entry.description}`;
+  if (!rule.isEnabled || rule.matchType === "fallback") {
+    return false;
+  }
+
+  const merchantText = entry.merchantName ?? "";
   const descriptionText = entry.description;
   const merchantTerms = ruleConstraintTerms(rule.editor.merchantContains);
   const descriptionTerms = ruleConstraintTerms(rule.editor.descriptionContains);
   const hasTextConstraint =
     merchantTerms.length > 0 || descriptionTerms.length > 0;
+  const hasMccConstraint = rule.editor.mcc !== "Not required";
+
+  if (hasMccConstraint && !hasTextConstraint) {
+    return false;
+  }
+
   const textMatches =
     !hasTextConstraint ||
-    textMatchesRuleConstraint(rule.editor.merchantContains, merchantText) ||
-    textMatchesRuleConstraint(rule.editor.descriptionContains, descriptionText);
+    (merchantTerms.length > 0 &&
+      textMatchesRuleConstraint(rule.editor.merchantContains, merchantText)) ||
+    (descriptionTerms.length > 0 &&
+      textMatchesRuleConstraint(
+        rule.editor.descriptionContains,
+        descriptionText,
+      ));
   const amountTypeMatches =
     rule.editor.transactionType === "Income"
       ? entry.amount > 0
@@ -6189,15 +6342,81 @@ function ledgerEntryMatchesRule(
   return textMatches && amountTypeMatches;
 }
 
+function ruleHasMccOnlyHistoryConstraint(rule: RuleMatchSummary): boolean {
+  return (
+    rule.editor.mcc !== "Not required" &&
+    ruleConstraintTerms(rule.editor.merchantContains).length === 0 &&
+    ruleConstraintTerms(rule.editor.descriptionContains).length === 0
+  );
+}
+
+function ledgerEntryMatchesRuleAmountType(
+  entry: LedgerEntry,
+  rule: RuleMatchSummary,
+): boolean {
+  return rule.editor.transactionType === "Income"
+    ? entry.amount > 0
+    : rule.editor.transactionType === "Expense"
+      ? entry.amount < 0
+      : true;
+}
+
+function rulePrecedes(
+  left: RuleMatchSummary,
+  right: RuleMatchSummary,
+): boolean {
+  return (
+    left.priority < right.priority ||
+    (left.priority === right.priority && left.id < right.id)
+  );
+}
+
+function findRuleHistoricalMatches(
+  entries: readonly LedgerEntry[],
+  rule: CategoryRuleSummary,
+  rules: readonly CategoryRuleSummary[],
+): readonly LedgerEntry[] {
+  if (!rule.isEnabled) {
+    return [];
+  }
+
+  if (ruleHasMccOnlyHistoryConstraint(rule)) {
+    return [];
+  }
+
+  if (rule.matchType !== "fallback") {
+    return entries.filter((entry) => ledgerEntryMatchesRule(entry, rule));
+  }
+
+  const earlierRules = rules.filter(
+    (candidate) =>
+      candidate.id !== rule.id &&
+      candidate.isEnabled &&
+      candidate.matchType !== "fallback" &&
+      rulePrecedes(candidate, rule),
+  );
+
+  return entries.filter(
+    (entry) =>
+      ledgerEntryMatchesRuleAmountType(entry, rule) &&
+      !earlierRules.some((candidate) =>
+        ledgerEntryMatchesRule(entry, candidate),
+      ),
+  );
+}
+
 function findRuleConflicts(
   entries: readonly LedgerEntry[],
+  rules: readonly CategoryRuleSummary[],
 ): RuleConflictPreview[] {
+  const activeRules = rules.filter(
+    (rule) => rule.isEnabled && rule.matchType !== "fallback",
+  );
+
   return entries
     .map((entry) => ({
       entry,
-      rules: builtInRuleSummaries.filter((rule) =>
-        ledgerEntryMatchesRule(entry, rule),
-      ),
+      rules: activeRules.filter((rule) => ledgerEntryMatchesRule(entry, rule)),
     }))
     .filter((preview) => preview.rules.length > 1);
 }
@@ -6214,26 +6433,37 @@ function RuleHistoryMetric({ label, value }: { label: string; value: string }) {
 function RuleHistoricalPreviewPanel({
   entries,
   rule,
+  rules,
   totalRows,
 }: {
   entries: readonly LedgerEntry[];
-  rule: BuiltInRuleSummary;
+  rule: CategoryRuleSummary;
+  rules: readonly CategoryRuleSummary[];
   totalRows: number;
 }) {
-  const matchedEntries = entries.filter((entry) =>
-    ledgerEntryMatchesRule(entry, rule),
+  const matchedEntries = useMemo(
+    () => findRuleHistoricalMatches(entries, rule, rules),
+    [entries, rule, rules],
   );
+  const mccOnlyPreviewUnavailable = ruleHasMccOnlyHistoryConstraint(rule);
   const previewEntries = matchedEntries.slice(0, 3);
+  const previewDescription = mccOnlyPreviewUnavailable
+    ? "MCC-only impact needs raw statement metadata that is not available in loaded ledger rows."
+    : rule.matchType === "fallback"
+      ? "Fallback estimate for rows that do not match earlier active rules."
+      : "Read-only impact estimate against loaded local rows.";
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Historical preview</CardTitle>
-        <CardDescription>
-          Read-only impact estimate against loaded local rows.
-        </CardDescription>
+        <CardDescription>{previewDescription}</CardDescription>
         <CardAction>
-          <Badge variant="secondary">{matchedEntries.length} affected</Badge>
+          <Badge variant="secondary">
+            {mccOnlyPreviewUnavailable
+              ? "MCC preview unavailable"
+              : `${matchedEntries.length} affected`}
+          </Badge>
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -6253,7 +6483,16 @@ function RuleHistoricalPreviewPanel({
             direction.
           </AlertDescription>
         </Alert>
-        {entries.length === 0 ? (
+        {mccOnlyPreviewUnavailable ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>MCC-only preview unavailable</AlertTitle>
+            <AlertDescription>
+              Sync can apply this rule from raw statement MCC values, but the
+              current history preview only has normalized ledger rows.
+            </AlertDescription>
+          </Alert>
+        ) : entries.length === 0 ? (
           <Alert>
             <AlertCircleIcon />
             <AlertTitle>No transactions loaded</AlertTitle>
@@ -6314,10 +6553,15 @@ function RuleHistoricalPreviewPanel({
 
 function RuleConflictDetectionPanel({
   entries,
+  rules,
 }: {
   entries: readonly LedgerEntry[];
+  rules: readonly CategoryRuleSummary[];
 }) {
-  const conflicts = useMemo(() => findRuleConflicts(entries), [entries]);
+  const conflicts = useMemo(
+    () => findRuleConflicts(entries, rules),
+    [entries, rules],
+  );
   const previewConflicts = conflicts.slice(0, 3);
 
   return (
@@ -6325,7 +6569,7 @@ function RuleConflictDetectionPanel({
       <CardHeader>
         <CardTitle>Rule conflicts</CardTitle>
         <CardDescription>
-          Loaded rows that match more than one built-in rule.
+          Loaded rows that match more than one active category rule.
         </CardDescription>
         <CardAction>
           <Badge variant="secondary">{conflicts.length} conflicts</Badge>
@@ -6354,7 +6598,7 @@ function RuleConflictDetectionPanel({
             <CheckCircle2Icon />
             <AlertTitle>No loaded rule conflicts</AlertTitle>
             <AlertDescription>
-              The currently loaded rows match at most one built-in rule each.
+              The currently loaded rows match at most one active rule each.
             </AlertDescription>
           </Alert>
         ) : (
@@ -6449,17 +6693,19 @@ function reviewCandidateBadgeVariant(
 
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const [rulesSearch, setRulesSearch] = useState("");
-  const [selectedRuleId, setSelectedRuleId] = useState<
-    (typeof builtInRuleSummaries)[number]["id"]
-  >(builtInRuleSummaries[0].id);
+  const [selectedRuleId, setSelectedRuleId] = useState<string>("income");
   const entries = snapshot?.transactions.entries ?? [];
   const normalizedRulesSearch = rulesSearch.trim().toLowerCase();
+  const categoryRuleSummaries = useMemo(
+    () => categoryRuleSummariesFromSnapshot(snapshot),
+    [snapshot],
+  );
   const filteredRules = useMemo(() => {
     if (!normalizedRulesSearch) {
-      return builtInRuleSummaries;
+      return categoryRuleSummaries;
     }
 
-    return builtInRuleSummaries.filter((rule) => {
+    return categoryRuleSummaries.filter((rule) => {
       const searchableText =
         `${rule.label} ${rule.conditions} ${rule.targetAction} ${Object.values(
           rule.editor,
@@ -6467,11 +6713,12 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
 
       return searchableText.includes(normalizedRulesSearch);
     });
-  }, [normalizedRulesSearch]);
+  }, [categoryRuleSummaries, normalizedRulesSearch]);
   const selectedRule =
-    builtInRuleSummaries.find((rule) => rule.id === selectedRuleId) ??
+    categoryRuleSummaries.find((rule) => rule.id === selectedRuleId) ??
     filteredRules[0] ??
-    builtInRuleSummaries[0];
+    categoryRuleSummaries[0] ??
+    fallbackCategoryRuleSummary;
   const categoryCount =
     snapshot?.categories.length ??
     new Set(entries.map((entry) => entry.categoryId ?? "uncategorized")).size;
@@ -6496,11 +6743,10 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const merchantCleanupRules = snapshot?.merchantCleanupRules ?? [];
 
   useEffect(() => {
-    if (
-      filteredRules.length > 0 &&
-      !filteredRules.some((rule) => rule.id === selectedRuleId)
-    ) {
-      setSelectedRuleId(filteredRules[0].id);
+    const nextRule = filteredRules[0];
+
+    if (nextRule && !filteredRules.some((rule) => rule.id === selectedRuleId)) {
+      setSelectedRuleId(nextRule.id);
     }
   }, [filteredRules, selectedRuleId]);
 
@@ -6521,9 +6767,9 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-4">
           <OverviewStatusItem
-            label="Built-in rules"
-            value={String(builtInRuleSummaries.length)}
-            detail="Read-only rules currently applied during sync"
+            label="Category rules"
+            value={String(categoryRuleSummaries.length)}
+            detail={`${categoryRuleSummaries.filter((rule) => !rule.isSystem).length} user-defined`}
           />
           <OverviewStatusItem
             label="Categories seen"
@@ -6569,7 +6815,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               <CardHeader>
                 <CardTitle>Categorization rules</CardTitle>
                 <CardDescription>
-                  Current built-in rules that assign initial local categories.
+                  Current local rules that assign initial local categories.
                 </CardDescription>
                 <CardAction>
                   <Button disabled size="sm" type="button" variant="outline">
@@ -6646,7 +6892,11 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                           <TableCell>{rule.conditions}</TableCell>
                           <TableCell>{rule.targetAction}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">Active</Badge>
+                            <Badge
+                              variant={rule.isEnabled ? "outline" : "secondary"}
+                            >
+                              {rule.isEnabled ? "Active" : "Disabled"}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             <DropdownMenu>
@@ -6790,9 +7040,13 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               <RuleHistoricalPreviewPanel
                 entries={entries}
                 rule={selectedRule}
+                rules={categoryRuleSummaries}
                 totalRows={snapshot?.transactions.total ?? entries.length}
               />
-              <RuleConflictDetectionPanel entries={entries} />
+              <RuleConflictDetectionPanel
+                entries={entries}
+                rules={categoryRuleSummaries}
+              />
             </div>
           </div>
         </TabsContent>
