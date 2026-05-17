@@ -156,7 +156,7 @@ test("exposes local webhook settings in app config", async () => {
 
     assert.equal(response.statusCode, 200);
     assert.equal(body.webhook.enabled, true);
-    assert.match(body.webhook.path, /^\/api\/webhooks\/monobank-[a-f0-9]{16}$/);
+    assert.match(body.webhook.path, /^\/api\/webhooks\/monobank-[a-f0-9]{32}$/);
     assert.equal(body.webhook.host, "127.0.0.1");
     assert.equal(body.webhook.port, 55443);
     assert.equal(

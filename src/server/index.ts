@@ -73,7 +73,7 @@ import {
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
 const defaultWebhookHost = "127.0.0.1";
-const defaultWebhookPathEntropyBytes = 8;
+const defaultWebhookPathEntropyBytes = 16;
 const webhookRouteIdPrefix = `${localApiRoutePrefix}/webhooks/monobank-`;
 type LocalWebhookRoutePath =
   `${typeof localApiRoutePrefix}/webhooks/monobank-${string}`;
@@ -327,7 +327,7 @@ const appConfigResponseSchema = {
         enabled: { type: "boolean" },
         path: {
           type: "string",
-          pattern: "^/api/webhooks/monobank-[a-f0-9]{16}$",
+          pattern: "^/api/webhooks/monobank-[a-f0-9]{32}$",
         },
         host: { type: "string" },
         port: { type: "number" },
