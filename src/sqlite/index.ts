@@ -18,6 +18,7 @@ import type {
   LedgerAccount,
   WebhookEventStatus,
   Category,
+  CategoryRule,
   LedgerDb,
   LedgerDbTransaction,
   LedgerEntry,
@@ -104,6 +105,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   ): Promise<LedgerEntry | undefined>;
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   listCategories(profile?: string): Promise<readonly Category[]>;
+  listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -224,11 +226,39 @@ interface SqliteCategoryRow {
   updated_at: string;
 }
 
+interface SqliteCategoryRuleRow {
+  id: string;
+  category_id: string;
+  name: string;
+  priority: number;
+  match_type: "condition" | "fallback";
+  merchant_contains: string | null;
+  description_contains: string | null;
+  mcc: number | null;
+  amount_direction: "income" | "expense" | "any" | null;
+  is_system: number;
+  is_enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface SeedCategory {
   id: string;
   name: string;
   color?: string;
   description?: string;
+}
+
+interface SeedCategoryRule {
+  id: string;
+  categoryId: string;
+  name: string;
+  priority: number;
+  matchType: "condition" | "fallback";
+  merchantContains?: string;
+  descriptionContains?: string;
+  mcc?: number;
+  amountDirection?: "income" | "expense" | "any";
 }
 
 const seededCategories: readonly SeedCategory[] = [
@@ -279,6 +309,85 @@ const seededCategories: readonly SeedCategory[] = [
     name: "Uncategorized",
     color: "#64748b",
     description: "Manual review required; no automatic category match yet.",
+  },
+];
+
+const seededCategoryRules: readonly SeedCategoryRule[] = [
+  {
+    id: "income-positive-amount",
+    categoryId: "income",
+    name: "Income by positive amount",
+    priority: 100,
+    matchType: "condition",
+    amountDirection: "income",
+  },
+  {
+    id: "groceries-mcc-or-text",
+    categoryId: "groceries",
+    name: "Groceries by MCC or text",
+    priority: 200,
+    matchType: "condition",
+    descriptionContains: "grocery",
+    mcc: 5411,
+    amountDirection: "expense",
+  },
+  {
+    id: "subscriptions-mcc-or-text",
+    categoryId: "subscriptions",
+    name: "Subscriptions by MCC or text",
+    priority: 300,
+    matchType: "condition",
+    descriptionContains: "subscription",
+    mcc: 5734,
+    amountDirection: "expense",
+  },
+  {
+    id: "transport-mcc-or-text",
+    categoryId: "transport",
+    name: "Transport by MCC or text",
+    priority: 400,
+    matchType: "condition",
+    descriptionContains: "metro",
+    mcc: 4111,
+    amountDirection: "expense",
+  },
+  {
+    id: "travel-mcc-or-text",
+    categoryId: "travel",
+    name: "Travel by MCC or text",
+    priority: 500,
+    matchType: "condition",
+    descriptionContains: "travel",
+    mcc: 4722,
+    amountDirection: "expense",
+  },
+  {
+    id: "dining-mcc-or-text",
+    categoryId: "dining",
+    name: "Dining by MCC or text",
+    priority: 600,
+    matchType: "condition",
+    descriptionContains: "coffee",
+    mcc: 5814,
+    amountDirection: "expense",
+  },
+  {
+    id: "transfers-mcc-or-text",
+    categoryId: "transfers",
+    name: "Transfers by MCC or text",
+    priority: 700,
+    matchType: "condition",
+    descriptionContains: "transfer",
+    mcc: 4829,
+    amountDirection: "any",
+  },
+  {
+    id: "uncategorized-fallback",
+    categoryId: "uncategorized",
+    name: "Uncategorized fallback",
+    priority: 9999,
+    matchType: "fallback",
+    amountDirection: "any",
   },
 ];
 
@@ -507,6 +616,37 @@ const migrations: readonly SqliteMigration[] = [
         updated_at TEXT NOT NULL,
         FOREIGN KEY (profile) REFERENCES profiles(name)
       );
+    `,
+  },
+  {
+    id: "0009_category_rules",
+    description: "Add category rule storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS category_rules (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        category_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        match_type TEXT NOT NULL,
+        merchant_contains TEXT,
+        description_contains TEXT,
+        mcc INTEGER,
+        amount_direction TEXT,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        is_enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name),
+        FOREIGN KEY (profile, category_id) REFERENCES categories(profile, id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_category_rules_profile_priority
+        ON category_rules(profile, priority, id);
+
+      CREATE INDEX IF NOT EXISTS idx_category_rules_category
+        ON category_rules(profile, category_id);
     `,
   },
 ];
@@ -746,6 +886,47 @@ function mapCategoryRow(row: SqliteCategoryRow): Category {
   }
 
   return category;
+}
+
+function mapCategoryRuleRow(row: SqliteCategoryRuleRow): CategoryRule {
+  const rule: CategoryRule = {
+    id: row.id,
+    categoryId: row.category_id,
+    name: row.name,
+    priority: row.priority,
+    matchType: row.match_type,
+    createdAt: row.created_at,
+  };
+
+  if (row.merchant_contains !== null) {
+    rule.merchantContains = row.merchant_contains;
+  }
+
+  if (row.description_contains !== null) {
+    rule.descriptionContains = row.description_contains;
+  }
+
+  if (row.mcc !== null) {
+    rule.mcc = row.mcc;
+  }
+
+  if (row.amount_direction !== null) {
+    rule.amountDirection = row.amount_direction;
+  }
+
+  if (row.is_system === 1) {
+    rule.isSystem = true;
+  }
+
+  if (row.is_enabled === 1) {
+    rule.isEnabled = true;
+  }
+
+  if (row.updated_at !== row.created_at) {
+    rule.updatedAt = row.updated_at;
+  }
+
+  return rule;
 }
 
 function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
@@ -1015,6 +1196,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
 
       this.ensureProfile();
       this.seedDefaultCategories();
+      this.seedDefaultCategoryRules();
       this.#database.exec("COMMIT");
     } catch (error) {
       this.#database.exec("ROLLBACK");
@@ -1471,6 +1653,36 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteCategoryRow[];
 
     return rows.map(mapCategoryRow);
+  }
+
+  async listCategoryRules(
+    profile = this.profile,
+  ): Promise<readonly CategoryRule[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            category_id,
+            name,
+            priority,
+            match_type,
+            merchant_contains,
+            description_contains,
+            mcc,
+            amount_direction,
+            is_system,
+            is_enabled,
+            created_at,
+            updated_at
+          FROM category_rules
+          WHERE profile = ?
+          ORDER BY priority, id
+        `,
+      )
+      .all(profile) as SqliteCategoryRuleRow[];
+
+    return rows.map(mapCategoryRuleRow);
   }
 
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {
@@ -1949,6 +2161,81 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           name: category.name,
           color: category.color ?? null,
           description: category.description ?? "",
+          timestamp,
+        });
+      }
+    })();
+  }
+
+  private seedDefaultCategoryRules(): void {
+    const seed = this.#database
+      .prepare(
+        `
+          SELECT 1
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'category_rules'
+          LIMIT 1
+        `,
+      )
+      .get();
+
+    if (!seed) {
+      return;
+    }
+
+    const insertRule = this.#database.prepare(
+      `
+        INSERT INTO category_rules (
+          profile,
+          id,
+          category_id,
+          name,
+          priority,
+          match_type,
+          merchant_contains,
+          description_contains,
+          mcc,
+          amount_direction,
+          is_system,
+          is_enabled,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @categoryId,
+          @name,
+          @priority,
+          @matchType,
+          @merchantContains,
+          @descriptionContains,
+          @mcc,
+          @amountDirection,
+          1,
+          1,
+          @timestamp,
+          @timestamp
+        )
+        ON CONFLICT(profile, id) DO NOTHING
+      `,
+    );
+
+    const timestamp = nowIso();
+
+    this.#database.transaction(() => {
+      for (const rule of seededCategoryRules) {
+        insertRule.run({
+          profile: this.profile,
+          id: rule.id,
+          categoryId: rule.categoryId,
+          name: rule.name,
+          priority: rule.priority,
+          matchType: rule.matchType,
+          merchantContains: rule.merchantContains ?? null,
+          descriptionContains: rule.descriptionContains ?? null,
+          mcc: rule.mcc ?? null,
+          amountDirection: rule.amountDirection ?? null,
           timestamp,
         });
       }

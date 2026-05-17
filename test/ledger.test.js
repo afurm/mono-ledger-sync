@@ -595,6 +595,51 @@ test("categorizes statement items by stable built-in rules", () => {
   });
 });
 
+test("seeds category rules for the current built-in categorization model", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const rules = await db.listCategoryRules(profile);
+
+      assert.deepEqual(
+        rules.map((rule) => rule.id),
+        [
+          "income-positive-amount",
+          "groceries-mcc-or-text",
+          "subscriptions-mcc-or-text",
+          "transport-mcc-or-text",
+          "travel-mcc-or-text",
+          "dining-mcc-or-text",
+          "transfers-mcc-or-text",
+          "uncategorized-fallback",
+        ],
+      );
+      assert.equal(rules[0].categoryId, "income");
+      assert.equal(rules[0].amountDirection, "income");
+      assert.equal(rules[1].mcc, 5411);
+      assert.equal(rules[1].descriptionContains, "grocery");
+      assert.equal(rules.at(-1)?.matchType, "fallback");
+      assert.equal(
+        rules.every((rule) => rule.isSystem),
+        true,
+      );
+      assert.equal(
+        rules.every((rule) => rule.isEnabled),
+        true,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("syncs a selected account and advances only that account cursor", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -967,11 +1012,13 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0006_categories",
         "0007_webhook_event_status",
         "0008_local_app_settings",
+        "0009_category_rules",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
       assert.equal((await db.listCategories(profile)).length, 8);
+      assert.equal((await db.listCategoryRules(profile)).length, 8);
 
       const accounts = await db.listAccounts(profile);
       assert.equal(accounts.length, 1);
