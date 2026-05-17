@@ -751,6 +751,55 @@ test("seeds category rules for the current built-in categorization model", async
   });
 });
 
+test("seeds default categories for Ukrainian personal finance use cases", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const categories = await db.listCategories(profile);
+
+      assert.deepEqual(
+        categories.map((category) => category.id),
+        [
+          "cash",
+          "charity",
+          "dining",
+          "education",
+          "fees",
+          "groceries",
+          "healthcare",
+          "household",
+          "income",
+          "shopping",
+          "subscriptions",
+          "taxes",
+          "transfers",
+          "transport",
+          "travel",
+          "uncategorized",
+          "utilities",
+        ],
+      );
+      assert.equal(
+        categories.find((category) => category.id === "utilities")?.description,
+        "Utility bills, mobile plans, internet, and communal services.",
+      );
+      assert.equal(
+        categories.find((category) => category.id === "healthcare")?.isSystem,
+        true,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("syncs a selected account and advances only that account cursor", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -1645,7 +1694,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
-      assert.equal((await db.listCategories(profile)).length, 8);
+      assert.equal((await db.listCategories(profile)).length, 17);
       assert.equal((await db.listCategoryRules(profile)).length, 8);
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
@@ -2225,14 +2274,23 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.deepEqual(
         categoriesResponse.json().map((category) => category.id),
         [
+          "cash",
+          "charity",
           "dining",
+          "education",
+          "fees",
           "groceries",
+          "healthcare",
+          "household",
           "income",
+          "shopping",
           "subscriptions",
+          "taxes",
           "transfers",
           "transport",
           "travel",
           "uncategorized",
+          "utilities",
         ],
       );
       assert.equal(categorySpendingResponse.statusCode, 200);
