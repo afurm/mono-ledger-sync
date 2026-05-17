@@ -151,6 +151,10 @@ import {
   formatMinorAmount,
 } from "./format";
 import { type RouteId, isRouteId, routes, secondaryRoutes } from "./navigation";
+import {
+  type LedgerEntryReviewCandidate,
+  findLedgerEntryReviewCandidates,
+} from "./review";
 
 type LoadState =
   | { status: "loading"; data?: LocalAppSnapshot; error?: undefined }
@@ -5051,27 +5055,6 @@ function AccountsRoute({
   );
 }
 
-function duplicateCandidateCount(entries: readonly LedgerEntry[]): number {
-  const counts = new Map<string, number>();
-
-  for (const entry of entries) {
-    const merchant = entry.merchantName ?? entry.description;
-    const key = `${merchant}:${entry.amount}:${entry.time}`;
-
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-
-  let candidates = 0;
-
-  for (const count of counts.values()) {
-    if (count > 1) {
-      candidates += count;
-    }
-  }
-
-  return candidates;
-}
-
 function RuleEditorPreviewField({
   id,
   label,
@@ -5581,6 +5564,30 @@ function RuleConflictDetectionPanel({
   );
 }
 
+function reviewCandidateLabel(candidate: LedgerEntryReviewCandidate): string {
+  switch (candidate.kind) {
+    case "duplicate":
+      return "Duplicate";
+    case "reversal":
+      return "Reversal";
+    case "refund":
+      return "Refund";
+  }
+}
+
+function reviewCandidateBadgeVariant(
+  candidate: LedgerEntryReviewCandidate,
+): "default" | "secondary" | "outline" {
+  switch (candidate.kind) {
+    case "duplicate":
+      return "secondary";
+    case "reversal":
+      return "outline";
+    case "refund":
+      return "default";
+  }
+}
+
 function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const [rulesSearch, setRulesSearch] = useState("");
   const [selectedRuleId, setSelectedRuleId] = useState<
@@ -5615,7 +5622,11 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const uncategorizedCount = entries.filter((entry) => {
     return !entry.categoryId || entry.categoryId === "uncategorized";
   }).length;
-  const duplicateCandidates = duplicateCandidateCount(entries);
+  const reviewCandidates = useMemo(
+    () => findLedgerEntryReviewCandidates(entries),
+    [entries],
+  );
+  const duplicateCandidates = reviewCandidates.length;
   const exportTargets = [
     "Accountant handoff",
     "Monthly personal finance",
@@ -5980,7 +5991,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 </Button>
               </CardAction>
             </CardHeader>
-            <CardContent>
+            <CardContent className="grid gap-4">
               <Alert>
                 {duplicateCandidates > 0 ? (
                   <AlertCircleIcon />
@@ -5993,11 +6004,61 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                     : "No duplicate candidates in the current local page"}
                 </AlertTitle>
                 <AlertDescription>
-                  The first pass checks local rows with the same merchant,
-                  amount, and time. Merge and ignore controls will be added
-                  after review writes are available.
+                  The read-only detector checks exact duplicates, short-window
+                  reversals, and later positive refunds. History is preserved
+                  until review writes are available.
                 </AlertDescription>
               </Alert>
+              {reviewCandidates.length > 0 && (
+                <div className="grid gap-2">
+                  {reviewCandidates.slice(0, 5).map((candidate) => {
+                    const primaryEntry = candidate.entries[0];
+                    const amount =
+                      primaryEntry === undefined
+                        ? ""
+                        : formatMinorAmount(
+                            primaryEntry.amount,
+                            primaryEntry.currencyCode,
+                          );
+                    const title =
+                      primaryEntry?.merchantName ??
+                      primaryEntry?.description ??
+                      "Ledger review candidate";
+
+                    return (
+                      <div
+                        className="grid gap-2 rounded-md border border-border px-3 py-2"
+                        key={`${candidate.kind}:${candidate.entries
+                          .map((entry) => entry.id)
+                          .join(":")}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">
+                              {title}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {candidate.reason}
+                            </div>
+                          </div>
+                          <Badge
+                            variant={reviewCandidateBadgeVariant(candidate)}
+                          >
+                            {reviewCandidateLabel(candidate)}
+                          </Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          <span>{candidate.entries.length} records</span>
+                          {amount && <span>{amount}</span>}
+                          {primaryEntry && (
+                            <span>{formatDateTime(primaryEntry.time)}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
