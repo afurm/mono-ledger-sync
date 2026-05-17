@@ -404,6 +404,41 @@ function shouldFetchAccount(
   return !accountIds?.length || accountIds.includes(accountId);
 }
 
+function windowsForRange(
+  source: "fixture" | "monobank",
+  from: number,
+  to: number,
+  sliceSeconds: number | undefined,
+): readonly StatementSyncWindow[] {
+  if (source === "monobank" || sliceSeconds !== undefined) {
+    return createStatementSyncWindows(from, to, sliceSeconds);
+  }
+
+  return to < from ? [] : [{ from, to }];
+}
+
+function mergeStatementWindows(
+  windows: readonly StatementSyncWindow[],
+): readonly StatementSyncWindow[] {
+  const sortedWindows = [...windows].sort((left, right) => {
+    return left.from - right.from || left.to - right.to;
+  });
+  const mergedWindows: StatementSyncWindow[] = [];
+
+  for (const window of sortedWindows) {
+    const previousWindow = mergedWindows.at(-1);
+
+    if (!previousWindow || window.from > previousWindow.to) {
+      mergedWindows.push({ ...window });
+      continue;
+    }
+
+    previousWindow.to = Math.max(previousWindow.to, window.to);
+  }
+
+  return mergedWindows;
+}
+
 export async function syncLedgerWithMonobank(
   options: SyncLedgerOptions,
 ): Promise<SyncLedgerResult> {
@@ -464,12 +499,36 @@ export async function syncLedgerWithMonobank(
         options.source,
         cursor?.statementTo,
       );
+      const pendingWebhookWindows =
+        options.from === undefined && options.to === undefined
+          ? await options.db.listPendingWebhookStatementWindows(
+              options.profile,
+              account.id,
+            )
+          : [];
       const from = options.from ?? defaultWindow.from;
       const to = options.to ?? defaultWindow.to;
-      const windows =
-        options.source === "monobank" || options.sliceSeconds !== undefined
-          ? createStatementSyncWindows(from, to, options.sliceSeconds)
-          : [{ from, to }];
+      const mergedWindows = mergeStatementWindows([
+        ...windowsForRange(options.source, from, to, options.sliceSeconds),
+        ...pendingWebhookWindows.flatMap((window) =>
+          windowsForRange(
+            options.source,
+            window.from,
+            window.to,
+            options.sliceSeconds,
+          ),
+        ),
+      ]);
+      const windows = mergedWindows.flatMap((window) => {
+        return windowsForRange(
+          options.source,
+          window.from,
+          window.to,
+          options.sliceSeconds,
+        );
+      });
+      const accountFrom = windows[0]?.from ?? from;
+      const accountTo = windows.at(-1)?.to ?? to;
       let accountStats = emptyWriteStats();
       let accountItemsSeen = 0;
       let accountCompletedWindowCount = 0;
@@ -504,16 +563,18 @@ export async function syncLedgerWithMonobank(
             entries,
           );
 
-          await options.db.transaction(async (tx) => {
-            await tx.setSyncCursor({
-              profile: options.profile,
-              accountId: account.id,
-              source: options.source,
-              statementFrom: window.from,
-              statementTo: window.to,
-              updatedAt: nowIso(),
+          if (cursor === undefined || window.to > cursor.statementTo) {
+            await options.db.transaction(async (tx) => {
+              await tx.setSyncCursor({
+                profile: options.profile,
+                accountId: account.id,
+                source: options.source,
+                statementFrom: window.from,
+                statementTo: window.to,
+                updatedAt: nowIso(),
+              });
             });
-          });
+          }
 
           accountCompletedWindowCount += 1;
         }
@@ -538,8 +599,8 @@ export async function syncLedgerWithMonobank(
 
       accountResults.push({
         accountId: account.id,
-        from,
-        to,
+        from: accountFrom,
+        to: accountTo,
         windowsFetched: windows.length,
         itemsSeen: accountItemsSeen,
         writeStats: accountStats,
