@@ -186,6 +186,13 @@ export interface LedgerEntrySplitPlanUpdate {
   }[];
 }
 
+export interface LedgerEntryBulkEditUpdate {
+  ids: readonly string[];
+  categoryId?: string;
+  merchantName?: string;
+  tags?: readonly string[];
+}
+
 export interface LedgerEntryPage {
   entries: readonly LedgerEntry[];
   total: number;
@@ -778,6 +785,21 @@ export async function updateLedgerTransactionAnnotation(
 ): Promise<LedgerEntry> {
   return requestJson<LedgerEntry>(
     `/api/ledger/transactions/${encodeURIComponent(id)}/annotation`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(update),
+    },
+  );
+}
+
+export async function updateLedgerTransactionsBulk(
+  update: LedgerEntryBulkEditUpdate,
+): Promise<readonly LedgerEntry[]> {
+  return requestJson<readonly LedgerEntry[]>(
+    "/api/ledger/transactions/bulk-edit",
     {
       method: "PATCH",
       headers: {

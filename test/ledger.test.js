@@ -2128,6 +2128,17 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         url: "/api/ledger/transactions?sortBy=merchant&sortDirection=asc",
       });
       const firstTransaction = sortedMerchantResponse.json().entries[0];
+      const secondTransaction = sortedMerchantResponse.json().entries[1];
+      const bulkEditResponse = await server.inject({
+        method: "PATCH",
+        url: "/api/ledger/transactions/bulk-edit",
+        body: {
+          ids: [firstTransaction.id, secondTransaction.id],
+          categoryId: "subscriptions",
+          merchantName: "Bulk Merchant",
+          tags: ["bulk", "bulk", "queued"],
+        },
+      });
       const annotationResponse = await server.inject({
         method: "PATCH",
         url: `/api/ledger/transactions/${firstTransaction.id}/annotation`,
@@ -2280,6 +2291,34 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           .json()
           .entries.map((entry) => entry.merchantName ?? entry.description)
           .sort((left, right) => left.localeCompare(right)),
+      );
+      assert.equal(bulkEditResponse.statusCode, 200);
+      assert.deepEqual(
+        bulkEditResponse
+          .json()
+          .map((entry) => [
+            entry.id,
+            entry.categoryId,
+            entry.categoryName,
+            entry.merchantName,
+            entry.tags,
+          ]),
+        [
+          [
+            firstTransaction.id,
+            "subscriptions",
+            "Subscriptions",
+            "Bulk Merchant",
+            ["bulk", "queued"],
+          ],
+          [
+            secondTransaction.id,
+            "subscriptions",
+            "Subscriptions",
+            "Bulk Merchant",
+            ["bulk", "queued"],
+          ],
+        ],
       );
       assert.equal(annotationResponse.statusCode, 200);
       assert.equal(annotationResponse.json().note, "Monthly review note");

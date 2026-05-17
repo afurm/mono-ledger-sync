@@ -320,6 +320,71 @@ test("write service delegates annotation and split-plan updates", async () => {
   });
 });
 
+test("write service delegates bulk transaction edits", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+      });
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const entries = (
+        await queryService.listLedgerEntries({
+          limit: 2,
+          sortBy: "time",
+          sortDirection: "asc",
+        })
+      ).entries;
+
+      assert.equal(entries.length, 2);
+
+      const updated = await writeService.updateTransactionsBulk(
+        entries.map((entry) => entry.id),
+        {
+          categoryId: "subscriptions",
+          merchantName: "Service Bulk Merchant",
+          tags: ["service", "service", "bulk"],
+        },
+      );
+
+      assert.deepEqual(
+        updated.map((entry) => [
+          entry.id,
+          entry.categoryId,
+          entry.categoryName,
+          entry.merchantName,
+          entry.tags,
+        ]),
+        entries.map((entry) => [
+          entry.id,
+          "subscriptions",
+          "Subscriptions",
+          "Service Bulk Merchant",
+          ["service", "bulk"],
+        ]),
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("query service projects upcoming recurring payments", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -499,6 +564,19 @@ test("write service runs transaction edits inside explicit boundaries", async ()
             rawStatementItemId: "raw",
           };
         },
+        async updateLedgerEntriesBulkEdit(profile, ids, update) {
+          calls.push({ type: "bulk", profile, ids, update });
+          return ids.map((id) => ({
+            id,
+            accountId: "account",
+            time: 1,
+            description: "entry",
+            amount: 1,
+            currencyCode: 980,
+            rawStatementItemId: "raw",
+            ...update,
+          }));
+        },
         async updateLedgerEntrySplitPlan(profile, id, update) {
           calls.push({ type: "split", profile, id, update });
           return {
@@ -526,6 +604,15 @@ test("write service runs transaction edits inside explicit boundaries", async ()
 
   await writeService.updateTransactionNote("entry-1", "Reviewed");
   await writeService.updateTransactionTags("entry-1", ["reviewed"], " ");
+  await writeService.updateTransactionsBulk(
+    ["entry-1", "entry-2"],
+    {
+      categoryId: "groceries",
+      merchantName: "Bulk Merchant",
+      tags: ["bulk"],
+    },
+    " ",
+  );
   await writeService.updateTransactionSplitPlan("entry-1", {
     lines: [{ category: "Groceries", amount: 100 }],
   });
@@ -538,6 +625,9 @@ test("write service runs transaction edits inside explicit boundaries", async ()
       "commit",
       "begin",
       "annotation",
+      "commit",
+      "begin",
+      "bulk",
       "commit",
       "begin",
       "split",
@@ -557,6 +647,16 @@ test("write service runs transaction edits inside explicit boundaries", async ()
     update: { tags: ["reviewed"] },
   });
   assert.deepEqual(calls[7], {
+    type: "bulk",
+    profile: "demo",
+    ids: ["entry-1", "entry-2"],
+    update: {
+      categoryId: "groceries",
+      merchantName: "Bulk Merchant",
+      tags: ["bulk"],
+    },
+  });
+  assert.deepEqual(calls[10], {
     type: "split",
     profile: "demo",
     id: "entry-1",

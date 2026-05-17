@@ -56,6 +56,7 @@ import type {
   LedgerCategorySpending,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntrySortDirection,
@@ -515,6 +516,28 @@ const ledgerEntryAnnotationBodySchema = {
   minProperties: 1,
   properties: {
     note: { type: "string", maxLength: 2000 },
+    tags: {
+      type: "array",
+      maxItems: 12,
+      items: { type: "string", minLength: 1, maxLength: 40 },
+    },
+  },
+} as const;
+
+const ledgerEntriesBulkEditBodySchema = {
+  type: "object",
+  required: ["ids"],
+  additionalProperties: false,
+  minProperties: 2,
+  properties: {
+    ids: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      items: { type: "string", minLength: 1, maxLength: 200 },
+    },
+    categoryId: { type: "string", minLength: 1, maxLength: 120 },
+    merchantName: { type: "string", minLength: 1, maxLength: 200 },
     tags: {
       type: "array",
       maxItems: 12,
@@ -1056,6 +1079,43 @@ function readLedgerEntryAnnotationUpdate(
   }
 
   return update;
+}
+
+function readLedgerEntryBulkEditUpdate(body: unknown): {
+  ids: readonly string[];
+  update: LedgerEntryBulkEditUpdate;
+} {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ids: [], update: {} };
+  }
+
+  const record = body as Record<string, unknown>;
+  const update: LedgerEntryBulkEditUpdate = {};
+  const ids = Array.isArray(record.ids)
+    ? record.ids.filter((id): id is string => typeof id === "string")
+    : [];
+
+  if (
+    Object.hasOwn(record, "categoryId") &&
+    typeof record.categoryId === "string"
+  ) {
+    update.categoryId = record.categoryId;
+  }
+
+  if (
+    Object.hasOwn(record, "merchantName") &&
+    typeof record.merchantName === "string"
+  ) {
+    update.merchantName = record.merchantName;
+  }
+
+  if (Object.hasOwn(record, "tags") && Array.isArray(record.tags)) {
+    update.tags = record.tags.filter((tag): tag is string => {
+      return typeof tag === "string";
+    });
+  }
+
+  return { ids, update };
 }
 
 function readLedgerEntrySplitPlanUpdate(
@@ -2232,6 +2292,31 @@ function registerLocalApiRoutes(
       }
 
       return services.queryService.listLedgerEntries(entryQuery);
+    },
+  );
+
+  app.patch(
+    `${localApiRoutePrefix}/ledger/transactions/bulk-edit`,
+    {
+      schema: {
+        body: ledgerEntriesBulkEditBodySchema,
+        response: {
+          200: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+    },
+    async (request): Promise<readonly LedgerEntry[]> => {
+      const services = await getServices();
+      const { ids, update } = readLedgerEntryBulkEditUpdate(request.body);
+
+      return services.writeService.updateTransactionsBulk(
+        ids,
+        update,
+        services.profile,
+      );
     },
   );
 
