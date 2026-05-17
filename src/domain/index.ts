@@ -291,6 +291,16 @@ export interface LedgerAccount {
   updatedAt: string;
 }
 
+export interface LedgerJar {
+  id: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  balance: number;
+  goal: number;
+  updatedAt: string;
+}
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
