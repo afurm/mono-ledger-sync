@@ -132,8 +132,8 @@ export function createLedgerQueryService({
     listBudgetPeriods(profile) {
       return db.listBudgetPeriods(coerceProfile(profile, defaultProfile));
     },
-    async listRecurringItems() {
-      return [];
+    listRecurringItems(profile) {
+      return db.listRecurringItems(coerceProfile(profile, defaultProfile));
     },
     listLedgerEntries({ profile, ...query }) {
       return db.listLedgerEntries({

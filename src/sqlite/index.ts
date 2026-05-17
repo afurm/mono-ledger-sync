@@ -34,6 +34,7 @@ import type {
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
+  RecurringItem,
   StoredWebhookEvent,
   SyncCursor,
   SyncRun,
@@ -112,6 +113,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -281,6 +283,22 @@ interface SqliteBudgetPeriodRow {
   planned_amount: number;
   actual_amount: number | null;
   status: "open" | "closed";
+  created_at: string;
+  updated_at: string;
+}
+
+interface SqliteRecurringItemRow {
+  id: string;
+  profile: string;
+  account_id: string;
+  category_id: string | null;
+  merchant_name: string | null;
+  frequency: RecurringItem["frequency"];
+  expected_amount_min: number | null;
+  expected_amount_max: number | null;
+  is_active: number;
+  started_at: string | null;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -771,6 +789,37 @@ const migrations: readonly SqliteMigration[] = [
         ON budget_periods(profile, status, period_start);
     `,
   },
+  {
+    id: "0013_recurring_items",
+    description: "Add recurring item storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS recurring_items (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        category_id TEXT,
+        merchant_name TEXT,
+        frequency TEXT NOT NULL,
+        expected_amount_min INTEGER,
+        expected_amount_max INTEGER,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        started_at TEXT,
+        last_seen_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name),
+        FOREIGN KEY (profile, account_id) REFERENCES accounts(profile, id),
+        FOREIGN KEY (profile, category_id) REFERENCES categories(profile, id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_recurring_items_profile_active
+        ON recurring_items(profile, is_active, frequency);
+
+      CREATE INDEX IF NOT EXISTS idx_recurring_items_profile_account
+        ON recurring_items(profile, account_id);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1107,6 +1156,28 @@ function mapBudgetPeriodRow(row: SqliteBudgetPeriodRow): BudgetPeriod {
     plannedAmount: row.planned_amount,
     ...(row.actual_amount === null ? {} : { actualAmount: row.actual_amount }),
     status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapRecurringItemRow(row: SqliteRecurringItemRow): RecurringItem {
+  return {
+    id: row.id,
+    profile: row.profile,
+    accountId: row.account_id,
+    ...(row.category_id === null ? {} : { categoryId: row.category_id }),
+    ...(row.merchant_name === null ? {} : { merchantName: row.merchant_name }),
+    frequency: row.frequency,
+    ...(row.expected_amount_min === null
+      ? {}
+      : { expectedAmountMin: row.expected_amount_min }),
+    ...(row.expected_amount_max === null
+      ? {}
+      : { expectedAmountMax: row.expected_amount_max }),
+    isActive: row.is_active === 1,
+    ...(row.started_at === null ? {} : { startedAt: row.started_at }),
+    ...(row.last_seen_at === null ? {} : { lastSeenAt: row.last_seen_at }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1941,6 +2012,36 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteBudgetPeriodRow[];
 
     return rows.map(mapBudgetPeriodRow);
+  }
+
+  async listRecurringItems(
+    profile = this.profile,
+  ): Promise<readonly RecurringItem[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            profile,
+            account_id,
+            category_id,
+            merchant_name,
+            frequency,
+            expected_amount_min,
+            expected_amount_max,
+            is_active,
+            started_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          FROM recurring_items
+          WHERE profile = ?
+          ORDER BY is_active DESC, frequency, merchant_name, id
+        `,
+      )
+      .all(profile) as SqliteRecurringItemRow[];
+
+    return rows.map(mapRecurringItemRow);
   }
 
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {

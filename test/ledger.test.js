@@ -1027,6 +1027,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0010_merchants",
         "0011_budgets",
         "0012_budget_periods",
+        "0013_recurring_items",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1035,6 +1036,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.equal((await db.listCategoryRules(profile)).length, 8);
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
+      assert.deepEqual(await db.listRecurringItems(profile), []);
 
       const accounts = await db.listAccounts(profile);
       assert.equal(accounts.length, 1);
