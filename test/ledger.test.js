@@ -50,7 +50,7 @@ async function withTempLedger(callback) {
   }
 }
 
-async function withLegacyFirstMigrationDb(callback) {
+async function withLegacyFirstMigrationDb(callback, options = {}) {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-legacy-db-"));
 
   try {
@@ -216,6 +216,99 @@ async function withLegacyFirstMigrationDb(callback) {
           '{"fixture":"legacy"}',
           '2026-05-16T08:00:00.000Z'
         )`);
+
+      if (options.seedLedger) {
+        database.exec(`
+          INSERT INTO raw_statement_items (
+            profile, account_id, statement_item_id, time, payload_json, updated_at
+          ) VALUES
+            (
+              'legacy',
+              'legacy-account-uah-main',
+              'legacy-statement-1',
+              1775001600,
+              '{"id":"legacy-statement-1","time":1775001600,"description":"Fixture Grocery LLC","amount":-2450,"operationAmount":-2450,"currencyCode":980,"commissionRate":0,"cashbackAmount":0,"balance":97550,"hold":false}',
+              '2026-05-16T08:01:00.000Z'
+            ),
+            (
+              'legacy',
+              'legacy-account-uah-main',
+              'legacy-statement-2',
+              1775088000,
+              '{"id":"legacy-statement-2","time":1775088000,"description":"Fixture Salary","amount":500000,"operationAmount":500000,"currencyCode":980,"commissionRate":0,"cashbackAmount":0,"balance":597550,"hold":false}',
+              '2026-05-16T08:02:00.000Z'
+            );
+
+          INSERT INTO ledger_entries (
+            profile, id, account_id, time, description, amount,
+            operation_amount, currency_code, category_id, category_name,
+            merchant_name, raw_statement_item_id, hold, balance, created_at, updated_at
+          ) VALUES
+            (
+              'legacy',
+              'legacy-entry-grocery',
+              'legacy-account-uah-main',
+              1775001600,
+              'Fixture Grocery LLC',
+              -2450,
+              -2450,
+              980,
+              'groceries',
+              'Groceries',
+              'Fixture Grocery LLC',
+              'legacy-statement-1',
+              0,
+              97550,
+              '2026-05-16T08:01:00.000Z',
+              '2026-05-16T08:01:00.000Z'
+            ),
+            (
+              'legacy',
+              'legacy-entry-income',
+              'legacy-account-uah-main',
+              1775088000,
+              'Fixture Salary',
+              500000,
+              500000,
+              980,
+              'income',
+              'Income',
+              'Fixture Employer',
+              'legacy-statement-2',
+              0,
+              597550,
+              '2026-05-16T08:02:00.000Z',
+              '2026-05-16T08:02:00.000Z'
+            );
+
+          INSERT INTO sync_cursors (
+            profile, account_id, source, statement_from, statement_to, updated_at
+          ) VALUES (
+            'legacy',
+            'legacy-account-uah-main',
+            'fixture',
+            1775001600,
+            1775088000,
+            '2026-05-16T08:03:00.000Z'
+          );
+
+          INSERT INTO sync_runs (
+            id, profile, source, status, started_at, finished_at,
+            items_seen, items_inserted, items_updated, items_skipped
+          ) VALUES (
+            'legacy-sync-run-1',
+            'legacy',
+            'fixture',
+            'success',
+            '2026-05-16T08:00:00.000Z',
+            '2026-05-16T08:03:00.000Z',
+            2,
+            2,
+            0,
+            0
+          );
+        `);
+      }
 
       return await callback({ tempRoot, databasePath });
     } finally {
@@ -1056,6 +1149,78 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       await db.close();
     }
   });
+});
+
+test("migrates prior fixture ledger data to the latest sqlite schema", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const profile = "legacy";
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile,
+      });
+
+      try {
+        const beforeMigration = await db.getDatabaseInfo(profile);
+        assert.equal(beforeMigration.ledgerEntries, 2);
+        assert.deepEqual(beforeMigration.migrations, ["0001_local_ledger"]);
+
+        await db.migrate();
+
+        const afterMigration = await db.getDatabaseInfo(profile);
+        assert.equal(afterMigration.ledgerEntries, 2);
+        assert.equal(afterMigration.syncRuns, 1);
+        assert.equal(
+          afterMigration.migrations.at(-1),
+          "0015_query_performance_indexes",
+        );
+
+        const summary = await db.getLedgerSummary(profile);
+        assert.equal(summary.ledgerEntries, 2);
+        assert.equal(summary.income, 500000);
+        assert.equal(summary.expenses, 2450);
+        assert.equal(summary.net, 497550);
+        assert.equal(summary.lastSyncedAt, "2026-05-16T08:03:00.000Z");
+
+        const groceryPage = await db.listLedgerEntries({
+          profile,
+          accountId: "legacy-account-uah-main",
+          categoryId: "groceries",
+          from: 1775001600,
+          to: 1775001600,
+          limit: 20,
+        });
+        assert.equal(groceryPage.total, 1);
+        assert.equal(groceryPage.entries[0].id, "legacy-entry-grocery");
+        assert.equal(
+          groceryPage.entries[0].merchantName,
+          "Fixture Grocery LLC",
+        );
+
+        const annotated = await db.updateLedgerEntryAnnotation(
+          profile,
+          "legacy-entry-grocery",
+          {
+            note: "Migrated fixture smoke test",
+            tags: ["migration", "fixture"],
+          },
+        );
+        assert.equal(annotated?.note, "Migrated fixture smoke test");
+        assert.deepEqual(
+          (await db.listTags(profile)).map((tag) => tag.name),
+          ["fixture", "migration"],
+        );
+
+        const runs = await db.listSyncRuns(profile);
+        assert.equal(runs.length, 1);
+        assert.equal(runs[0].itemsSeen, 2);
+        assert.equal(runs[0].apiCalls, 0);
+      } finally {
+        await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
 });
 
 test("creates ledger and budget query performance indexes", async () => {
