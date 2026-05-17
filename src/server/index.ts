@@ -1635,14 +1635,20 @@ function registerLocalApiRoutes(
     string,
     { windowStart: number; requestCount: number }
   >();
+  const malformedWebhookRateLimitState = new Map<
+    string,
+    { windowStart: number; requestCount: number }
+  >();
 
-  function isWebhookRateLimited(profile: string, accountId: string): boolean {
-    const key = `${profile}:${accountId}`;
+  function isWebhookRateLimited(
+    stateByKey: Map<string, { windowStart: number; requestCount: number }>,
+    key: string,
+  ): boolean {
     const current = now();
-    const state = webhookRateLimitState.get(key);
+    const state = stateByKey.get(key);
 
     if (!state || current - state.windowStart >= webhookRateLimitWindowMs) {
-      webhookRateLimitState.set(key, {
+      stateByKey.set(key, {
         windowStart: current,
         requestCount: 1,
       });
@@ -1657,6 +1663,23 @@ function registerLocalApiRoutes(
     state.requestCount += 1;
 
     return false;
+  }
+
+  function isMalformedWebhookRateLimited(profile: string, ip: string): boolean {
+    return isWebhookRateLimited(
+      malformedWebhookRateLimitState,
+      `${profile}:malformed:${ip}`,
+    );
+  }
+
+  function isWebhookAccountRateLimited(
+    profile: string,
+    accountId: string,
+  ): boolean {
+    return isWebhookRateLimited(
+      webhookRateLimitState,
+      `${profile}:account:${accountId}`,
+    );
   }
 
   function webhookDeliveryMetadata(
@@ -2238,6 +2261,16 @@ function registerLocalApiRoutes(
         assertMonobankPersonalWebhookEvent(webhookEvent, "request.body");
       } catch (error) {
         if (error instanceof MonobankValidationError) {
+          if (isMalformedWebhookRateLimited(services.profile, request.ip)) {
+            reply.code(429);
+
+            return {
+              error: "webhook_rate_limit_exceeded",
+              message:
+                "Webhook endpoint rate limit exceeded. Retry with a short delay.",
+            };
+          }
+
           const logOptions =
             options.logSink === undefined ? {} : { logger: options.logSink };
 
@@ -2266,7 +2299,10 @@ function registerLocalApiRoutes(
       const typedWebhookEvent = webhookEvent as MonobankPersonalWebhookEvent;
 
       if (
-        isWebhookRateLimited(services.profile, typedWebhookEvent.data.account)
+        isWebhookAccountRateLimited(
+          services.profile,
+          typedWebhookEvent.data.account,
+        )
       ) {
         reply.code(429);
 

@@ -2691,6 +2691,24 @@ test("local API rate limits webhook delivery endpoint", async () => {
         },
         body: JSON.stringify(webhookEvent),
       });
+      const otherAccountResponse = await server.inject({
+        method: "POST",
+        url: webhookPath,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...webhookEvent,
+          data: {
+            ...webhookEvent.data,
+            account: "fixture-account-uah-secondary",
+            statementItem: {
+              ...webhookEvent.data.statementItem,
+              id: "fixture-webhook-rate-limit-other-account",
+            },
+          },
+        }),
+      });
       now += 60;
       const thirdResponse = await server.inject({
         method: "POST",
@@ -2714,11 +2732,66 @@ test("local API rate limits webhook delivery endpoint", async () => {
       assert.equal(firstResponse.json().accepted, true);
       assert.equal(secondResponse.statusCode, 429);
       assert.equal(secondResponse.json().error, "webhook_rate_limit_exceeded");
+      assert.equal(otherAccountResponse.statusCode, 200);
+      assert.equal(otherAccountResponse.json().accepted, true);
       assert.match(
         secondResponse.body,
         /Webhook endpoint rate limit exceeded/i,
       );
       assert.equal(thirdResponse.statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("local API rate limits malformed webhook requests before repeated logging", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const logs = [];
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+      webhookRateLimitWindowMs: 60_000,
+      webhookRateLimitMaxRequests: 1,
+      logSink: (line) => logs.push(line),
+    });
+    const malformedWebhookEvent = {
+      type: "StatementItem",
+      data: {
+        account: "fixture-account-uah-main",
+      },
+    };
+
+    try {
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const webhookPath = configResponse.json().webhook.path;
+
+      const firstResponse = await server.inject({
+        method: "POST",
+        url: webhookPath,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(malformedWebhookEvent),
+      });
+      const secondResponse = await server.inject({
+        method: "POST",
+        url: webhookPath,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(malformedWebhookEvent),
+      });
+
+      assert.equal(firstResponse.statusCode, 400);
+      assert.equal(firstResponse.json().error, "invalid_webhook_payload");
+      assert.equal(secondResponse.statusCode, 429);
+      assert.equal(secondResponse.json().error, "webhook_rate_limit_exceeded");
+      assert.equal(logs.length, 1);
     } finally {
       await server.close();
     }
