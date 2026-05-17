@@ -58,6 +58,18 @@ export interface SyncLedgerStats {
   rateLimited: number;
 }
 
+export type ProcessInterruptSignal = "SIGINT" | "SIGTERM";
+
+export interface ProcessSignalTarget {
+  on(signal: ProcessInterruptSignal, listener: () => void): unknown;
+  off(signal: ProcessInterruptSignal, listener: () => void): unknown;
+}
+
+export interface ProcessSignalAbortController {
+  signal: AbortSignal;
+  dispose(): void;
+}
+
 const fixtureSyncTo = 4_102_444_800;
 const liveSyncWindowSeconds = 31 * 24 * 60 * 60;
 
@@ -318,7 +330,43 @@ function throwIfAborted(signal?: AbortSignal): void {
     return;
   }
 
+  if (signal.reason instanceof Error) {
+    throw signal.reason;
+  }
+
   throw new DOMException("Sync was interrupted", "AbortError");
+}
+
+export function createProcessSignalAbortController(
+  target: ProcessSignalTarget = process,
+): ProcessSignalAbortController {
+  const controller = new AbortController();
+  const listeners = new Map<ProcessInterruptSignal, () => void>();
+  const signals: readonly ProcessInterruptSignal[] = ["SIGINT", "SIGTERM"];
+
+  for (const signal of signals) {
+    const listener = (): void => {
+      if (!controller.signal.aborted) {
+        controller.abort(
+          new DOMException(`Sync was interrupted by ${signal}`, "AbortError"),
+        );
+      }
+    };
+
+    listeners.set(signal, listener);
+    target.on(signal, listener);
+  }
+
+  return {
+    signal: controller.signal,
+    dispose() {
+      for (const [signal, listener] of listeners) {
+        target.off(signal, listener);
+      }
+
+      listeners.clear();
+    },
+  };
 }
 
 async function callAdapter<T>(

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -19,6 +20,7 @@ import {
   categorizeStatementItem,
   createStatementSyncWindows,
   createLedgerEntryFromStatementItem,
+  createProcessSignalAbortController,
   monobankPersonalStatementWindowMaxSeconds,
   syncLedgerWithMonobank,
 } from "../dist/sync/index.js";
@@ -917,6 +919,26 @@ test("records a partial run when sync is interrupted and keeps cursor untouched"
       await db.close();
     }
   });
+});
+
+test("process signal controller aborts sync work and removes listeners", () => {
+  const target = new EventEmitter();
+  const controller = createProcessSignalAbortController(target);
+
+  assert.equal(controller.signal.aborted, false);
+  assert.equal(target.listenerCount("SIGINT"), 1);
+  assert.equal(target.listenerCount("SIGTERM"), 1);
+
+  target.emit("SIGINT");
+
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(controller.signal.reason.name, "AbortError");
+  assert.match(controller.signal.reason.message, /SIGINT/);
+
+  controller.dispose();
+
+  assert.equal(target.listenerCount("SIGINT"), 0);
+  assert.equal(target.listenerCount("SIGTERM"), 0);
 });
 
 test("migrates legacy first-migration sqlite DB and preserves baseline queries", async () => {

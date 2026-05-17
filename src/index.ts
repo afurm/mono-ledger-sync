@@ -82,8 +82,12 @@ export {
 export {
   categorizeStatementItem,
   createLedgerEntryFromStatementItem,
+  createProcessSignalAbortController,
   syncLedgerWithMonobank,
   type LedgerCategoryMatch,
+  type ProcessInterruptSignal,
+  type ProcessSignalAbortController,
+  type ProcessSignalTarget,
   type SyncLedgerAccountResult,
   type SyncLedgerOptions,
   type SyncLedgerResult,
