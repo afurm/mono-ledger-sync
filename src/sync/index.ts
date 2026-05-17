@@ -472,7 +472,7 @@ export async function syncLedgerWithMonobank(
           : [{ from, to }];
       let accountStats = emptyWriteStats();
       let accountItemsSeen = 0;
-      let accountCompletedWindow: { from: number; to: number } | undefined;
+      let accountCompletedWindowCount = 0;
 
       for (const window of windows) {
         throwIfAborted(options.signal);
@@ -504,10 +504,18 @@ export async function syncLedgerWithMonobank(
             entries,
           );
 
-          accountCompletedWindow = {
-            from: window.from,
-            to: window.to,
-          };
+          await options.db.transaction(async (tx) => {
+            await tx.setSyncCursor({
+              profile: options.profile,
+              accountId: account.id,
+              source: options.source,
+              statementFrom: window.from,
+              statementTo: window.to,
+              updatedAt: nowIso(),
+            });
+          });
+
+          accountCompletedWindowCount += 1;
         }
 
         accountItemsSeen += statementItems.length;
@@ -518,23 +526,8 @@ export async function syncLedgerWithMonobank(
         );
       }
 
-      if (
-        !options.dryRun &&
-        accountCompletedWindow !== undefined &&
-        windows.length > 0
-      ) {
+      if (!options.dryRun && accountCompletedWindowCount > 0) {
         const webhookProcessedAt = nowIso();
-
-        await options.db.transaction(async (tx) => {
-          await tx.setSyncCursor({
-            profile: options.profile,
-            accountId: account.id,
-            source: options.source,
-            statementFrom: accountCompletedWindow.from,
-            statementTo: accountCompletedWindow.to,
-            updatedAt: nowIso(),
-          });
-        });
 
         await options.db.markWebhookEventsAsProcessed(
           options.profile,
