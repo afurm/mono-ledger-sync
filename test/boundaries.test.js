@@ -56,6 +56,39 @@ test("documents the minimum local product flow", async () => {
   assert.match(readme, /minimum local product flow/);
 });
 
+test("documents the shared domain model contract", async () => {
+  const domainSource = await readFile("src/domain/index.ts", "utf8");
+  const domainDoc = await readFile("docs/domain-model.md", "utf8");
+  const readme = await readFile("README.md", "utf8");
+  const typeNames = [
+    "Profile",
+    "LedgerSource",
+    "MonobankAccount",
+    "MonobankJar",
+    "MonobankStatementItem",
+    "MonobankRawEvent",
+    "LedgerAccount",
+    "LedgerEntry",
+    "SyncCursor",
+    "SyncRun",
+    "Category",
+    "Budget",
+    "RecurringItem",
+    "DomainError",
+    "LocalActivityEvent",
+  ];
+
+  for (const typeName of typeNames) {
+    assert.match(
+      domainSource,
+      new RegExp(`export (interface|class|type) ${typeName}\\b`),
+    );
+    assert.match(domainDoc, new RegExp(`\\b${typeName}\\b`));
+  }
+
+  assert.match(readme, /docs\/domain-model\.md/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 

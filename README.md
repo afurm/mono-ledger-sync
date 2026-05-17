@@ -107,6 +107,7 @@ Use `npm run web:dev` when working on the Vite UI; it starts the same local API
 server and proxies browser requests through `http://127.0.0.1:5173`.
 
 Release automation is documented in [docs/release.md](docs/release.md).
+Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).
 Common local workflows are documented in
 [examples/sample-workflows](examples/sample-workflows).
 Start with the
