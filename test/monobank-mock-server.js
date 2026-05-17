@@ -79,22 +79,64 @@ export function createMonobankMockHttpHandler({
   };
 }
 
-export async function withMockMonobankServer(handler, callback) {
+export function createMonobankMockServer(handler) {
   const server = createServer(handler);
+  let baseUrl;
+
+  return {
+    get url() {
+      if (baseUrl === undefined) {
+        throw new Error("Monobank mock server has not started.");
+      }
+
+      return baseUrl;
+    },
+    async listen() {
+      if (baseUrl !== undefined) {
+        return baseUrl;
+      }
+
+      const port = await new Promise((resolve) => {
+        server.listen(0, "127.0.0.1", () => {
+          const address = server.address();
+
+          resolve(address.port);
+        });
+      });
+
+      baseUrl = `http://127.0.0.1:${port}`;
+
+      return baseUrl;
+    },
+    async close() {
+      if (baseUrl === undefined) {
+        return;
+      }
+
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+
+      baseUrl = undefined;
+    },
+  };
+}
+
+export async function withMockMonobankServer(handler, callback) {
+  const mockServer = createMonobankMockServer(handler);
 
   try {
-    const port = await new Promise((resolve) => {
-      server.listen(0, "127.0.0.1", () => {
-        const address = server.address();
+    const baseUrl = await mockServer.listen();
 
-        resolve(address.port);
-      });
-    });
-
-    return await callback(`http://127.0.0.1:${port}`);
+    return await callback(baseUrl);
   } finally {
-    await new Promise((resolve) => {
-      server.close(resolve);
-    });
+    await mockServer.close();
   }
 }

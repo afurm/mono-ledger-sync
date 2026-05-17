@@ -24,6 +24,7 @@ import { createLedgerQueryService } from "../dist/storage/index.js";
 import { syncLedgerWithMonobank } from "../dist/sync/index.js";
 import {
   createMonobankMockHttpHandler,
+  createMonobankMockServer,
   withMockMonobankServer,
 } from "./monobank-mock-server.js";
 
@@ -1050,6 +1051,36 @@ test("monobank mock server helper serves standard fixture endpoints", async () =
     );
     assert.equal(requestLog.includes("POST /personal/webhook"), true);
   });
+});
+
+test("monobank mock server supports explicit integration-test lifecycle", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const handler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+  });
+  const mockServer = createMonobankMockServer(handler);
+
+  assert.throws(() => mockServer.url, /has not started/);
+
+  const baseUrl = await mockServer.listen();
+
+  try {
+    assert.equal(mockServer.url, baseUrl);
+
+    const clientInfoResponse = await fetch(`${baseUrl}/personal/client-info`);
+    const ratesResponse = await fetch(`${mockServer.url}/bank/currency`);
+
+    assert.equal(clientInfoResponse.status, 200);
+    assert.equal(ratesResponse.status, 200);
+    assert.deepEqual(await clientInfoResponse.json(), clientInfo);
+    assert.deepEqual(await ratesResponse.json(), currencyRates);
+  } finally {
+    await mockServer.close();
+  }
+
+  assert.throws(() => mockServer.url, /has not started/);
 });
 
 test("http adapter redacts token-bearing API errors", async () => {
