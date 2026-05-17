@@ -94,6 +94,7 @@ npm install
 npm run dev
 npm run typecheck
 npm test
+npm run test:live-monobank
 npm run coverage
 npm run format
 ```
@@ -105,6 +106,11 @@ endpoints, sync run endpoints, webhook hint ingestion, and CSV/JSON/JSONL export
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
 Use `npm run web:dev` when working on the Vite UI; it starts the same local API
 server and proxies browser requests through `http://127.0.0.1:5173`.
+
+`npm run test:live-monobank` is an opt-in smoke test for the real Monobank
+adapter. It skips unless `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1` and
+`MONOBANK_TOKEN` are set, so default local and pull-request validation never
+calls the live API.
 
 Release automation is documented in [docs/release.md](docs/release.md).
 Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).

@@ -28,5 +28,11 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm test
+      - name: Live Monobank adapter smoke
+        if: ${{ github.event_name == 'push' }}
+        run: npm run test:live-monobank
+        env:
+          MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS: "1"
+          MONOBANK_TOKEN: ${{ secrets.MONOBANK_TOKEN }}
       - run: npm run coverage
       - run: npm run format

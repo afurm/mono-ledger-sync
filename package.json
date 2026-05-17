@@ -66,6 +66,7 @@
     "lint": "npm run typecheck",
     "prepublishOnly": "npm run typecheck && npm test",
     "test": "npm run build && node --test test/*.test.js",
+    "test:live-monobank": "npm run build:lib && node --test test/live-monobank.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "web:dev": "npm run build:lib && node dist/server/web-dev.js",
     "web:vite": "vite --host 127.0.0.1"
