@@ -8,6 +8,7 @@ import type {
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
+  LedgerJar,
   Category,
   LedgerSummary,
   RecurringItem,
@@ -28,6 +29,7 @@ export interface LedgerBalanceQueryService {
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   getAccountBalances(profile?: string): Promise<readonly AccountBalance[]>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
+  listJars(profile?: string): Promise<readonly LedgerJar[]>;
 }
 
 export interface LedgerCategoryQueryService {
@@ -123,6 +125,9 @@ export function createLedgerQueryService({
     listAccounts(profile) {
       return db.listAccounts(coerceProfile(profile, defaultProfile));
     },
+    listJars(profile) {
+      return db.listJars(coerceProfile(profile, defaultProfile));
+    },
     listCategories(profile) {
       return db.listCategories(coerceProfile(profile, defaultProfile));
     },
@@ -166,6 +171,7 @@ export function createLedgerQueryServices(
       getLedgerSummary: query.getLedgerSummary,
       getAccountBalances: query.getAccountBalances,
       listAccounts: query.listAccounts,
+      listJars: query.listJars,
     },
     categories: {
       listCategories: query.listCategories,

@@ -29,6 +29,7 @@ import type {
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySortField,
+  LedgerJar,
   LedgerSummary,
   LedgerWriteStats,
   LocalAppSettings,
@@ -113,6 +114,7 @@ export interface SqliteLedgerDb extends LedgerDb {
     entries: readonly LedgerEntry[],
   ): Promise<LedgerWriteStats>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
+  listJars(profile?: string): Promise<readonly LedgerJar[]>;
   listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage>;
   updateLedgerEntryAnnotation(
     profile: string,
@@ -169,6 +171,16 @@ interface SqliteAccountRow {
   balance: number;
   credit_limit: number;
   masked_pan_json: string | null;
+  updated_at: string;
+}
+
+interface SqliteJarRow {
+  id: string;
+  title: string;
+  description: string;
+  currency_code: number;
+  balance: number;
+  goal: number;
   updated_at: string;
 }
 
@@ -1221,6 +1233,18 @@ function mapAccountRow(row: SqliteAccountRow): LedgerAccount {
   return account;
 }
 
+function mapJarRow(row: SqliteJarRow): LedgerJar {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    currencyCode: row.currency_code,
+    balance: row.balance,
+    goal: row.goal,
+    updatedAt: row.updated_at,
+  };
+}
+
 function mapCategoryRow(row: SqliteCategoryRow): Category {
   const category: Category = {
     id: row.id,
@@ -2073,6 +2097,28 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteAccountRow[];
 
     return rows.map(mapAccountRow);
+  }
+
+  async listJars(profile = this.profile): Promise<readonly LedgerJar[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            title,
+            description,
+            currency_code,
+            balance,
+            goal,
+            updated_at
+          FROM jars
+          WHERE profile = ?
+          ORDER BY title, id
+        `,
+      )
+      .all(profile) as SqliteJarRow[];
+
+    return rows.map(mapJarRow);
   }
 
   async listCategories(profile = this.profile): Promise<readonly Category[]> {

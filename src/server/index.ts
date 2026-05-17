@@ -58,6 +58,7 @@ import type {
   LedgerEntryPage,
   LedgerEntrySortDirection,
   LedgerEntrySortField,
+  LedgerJar,
   LedgerSummary,
   StoredWebhookEvent,
   SyncRun,
@@ -411,6 +412,14 @@ const ledgerSummaryResponseSchema = {
 } as const;
 
 const ledgerAccountsResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const ledgerJarsResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -1982,6 +1991,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listAccounts(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/jars`,
+    {
+      schema: {
+        response: {
+          200: ledgerJarsResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly LedgerJar[]> => {
+      const services = await getServices();
+
+      return services.queryService.listJars(services.profile);
     },
   );
 

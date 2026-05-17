@@ -2075,6 +2075,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/categories",
       });
+      const jarsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/jars",
+      });
       const transactionsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/transactions?search=Silpo",
@@ -2182,6 +2186,12 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           "uncategorized",
         ],
       );
+      assert.equal(jarsResponse.statusCode, 200);
+      assert.deepEqual(
+        jarsResponse.json().map((jar) => jar.id),
+        ["fixture-jar-emergency-fund"],
+      );
+      assert.equal(jarsResponse.json()[0].title, "Emergency fund");
       assert.equal(transactionsResponse.statusCode, 200);
       assert.equal(transactionsResponse.json().total, 1);
       assert.match(

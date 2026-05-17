@@ -66,6 +66,16 @@ export interface LedgerAccount {
   updatedAt: string;
 }
 
+export interface LedgerJar {
+  id: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  balance: number;
+  goal: number;
+  updatedAt: string;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -195,6 +205,7 @@ export interface LocalAppSnapshot {
   config: LocalApiAppConfig;
   summary: LedgerSummary;
   accounts: readonly LedgerAccount[];
+  jars: readonly LedgerJar[];
   categories: readonly Category[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
@@ -214,6 +225,10 @@ interface CachedLocalAppSnapshot {
   cachedAt: string;
   snapshot: LocalAppSnapshot;
 }
+
+type PersistedLocalAppSnapshot = Omit<LocalAppSnapshot, "jars"> & {
+  jars?: readonly LedgerJar[];
+};
 
 const LOCAL_APP_SNAPSHOT_CACHE_PREFIX =
   "mono-ledger-sync:local-app-snapshot:v1:";
@@ -277,10 +292,26 @@ function cacheableSnapshot(snapshot: LocalAppSnapshot): LocalAppSnapshot {
   return cacheable;
 }
 
+function normalizeCachedLocalAppSnapshot(
+  cached: CachedLocalAppSnapshot,
+): CachedLocalAppSnapshot {
+  const snapshot = cached.snapshot as PersistedLocalAppSnapshot;
+
+  return {
+    ...cached,
+    snapshot: {
+      ...snapshot,
+      jars: snapshot.jars ?? [],
+    },
+  };
+}
+
 function readCachedLocalAppSnapshot(
   cacheKey: string,
 ): CachedLocalAppSnapshot | undefined {
-  return readCachedJson<CachedLocalAppSnapshot>(cacheKey);
+  const cached = readCachedJson<CachedLocalAppSnapshot>(cacheKey);
+
+  return cached ? normalizeCachedLocalAppSnapshot(cached) : undefined;
 }
 
 function readCachedActiveSnapshotKey(): string | undefined {
@@ -676,6 +707,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       health,
       summary,
       accounts,
+      jars,
       categories,
       transactions,
       syncRuns,
@@ -684,6 +716,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<LocalApiHealth>("/api/health"),
       requestJson<LedgerSummary>("/api/ledger/summary"),
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
+      requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
       requestJson<readonly Category[]>("/api/ledger/categories"),
       loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
@@ -702,6 +735,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       config,
       summary,
       accounts,
+      jars,
       categories,
       transactions,
       syncRuns,

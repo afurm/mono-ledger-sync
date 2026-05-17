@@ -12,6 +12,7 @@ import type {
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
   LedgerWriteStats,
+  LedgerJar,
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
@@ -29,6 +30,7 @@ import type {
 export type {
   AccountBalance,
   LedgerAccount,
+  LedgerJar,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntrySplitPlanUpdate,
@@ -114,6 +116,7 @@ export interface LedgerDb {
   ): Promise<LocalAppSettings>;
   recordSyncRun(run: SyncRun): Promise<void>;
   listCategories(profile?: string): Promise<readonly Category[]>;
+  listJars(profile?: string): Promise<readonly LedgerJar[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;

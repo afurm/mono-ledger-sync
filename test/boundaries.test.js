@@ -161,6 +161,8 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(apiSource, /readCachedActiveSnapshotKey/);
   assert.match(apiSource, /writeCachedLocalAppSnapshot/);
   assert.match(apiSource, /readCachedLocalAppSnapshot/);
+  assert.match(apiSource, /normalizeCachedLocalAppSnapshot/);
+  assert.match(apiSource, /jars: snapshot\.jars \?\? \[\]/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
   assert.doesNotMatch(apiSource, /LEDGER_TRANSACTION_CACHE_PREFIX/);

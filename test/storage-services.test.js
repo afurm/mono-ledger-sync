@@ -56,6 +56,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       });
       const summary = await queryService.getLedgerSummary();
       const accounts = await queryService.listAccounts();
+      const jars = await queryService.listJars();
       const balances = await queryService.getAccountBalances();
       const page = await queryService.listLedgerEntries({
         limit: 3,
@@ -74,6 +75,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         sortDirection: "desc",
       });
       const groupedBalances = await queryServices.balances.getAccountBalances();
+      const groupedJars = await queryServices.balances.listJars();
       const groupedCategories = await queryServices.categories.listCategories();
       const groupedBudgets = await queryServices.budgets.listBudgets();
       const groupedBudgetPeriods =
@@ -85,6 +87,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(summary.profile, profile);
       assert.equal(summary.ledgerEntries, 7);
       assert.equal(accounts.length, 2);
+      assert.equal(jars.length, 1);
       assert.equal(balances.length, 2);
       assert.equal(page.limit, 3);
       assert.equal(page.entries.length, 3);
@@ -101,6 +104,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.ok(Array.isArray(events));
       assert.equal(groupedPage.entries.length, 2);
       assert.equal(groupedBalances.length, balances.length);
+      assert.equal(groupedJars.length, jars.length);
       assert.deepEqual(
         groupedCategories.map((category) => category.id),
         categoryIds,

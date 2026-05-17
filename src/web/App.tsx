@@ -126,6 +126,7 @@ import {
   type LedgerAccount,
   type LedgerEntry,
   type LedgerEntryPage,
+  type LedgerJar,
   type LedgerTransactionFilters,
   type LedgerTransactionSortDirection,
   type LedgerTransactionSortField,
@@ -5206,6 +5207,45 @@ function AccountCard({ account }: { account: LedgerAccount }) {
   );
 }
 
+function JarCard({ jar }: { jar: LedgerJar }) {
+  const progress =
+    jar.goal > 0
+      ? Math.min(100, Math.max(0, (jar.balance / jar.goal) * 100))
+      : 0;
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{jar.id}</CardDescription>
+        <CardTitle>{jar.title}</CardTitle>
+        <CardAction>
+          <Badge variant="outline">{currencyLabel(jar.currencyCode)}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <AccountDetailRow
+          label="Balance"
+          value={formatMinorAmount(jar.balance, jar.currencyCode)}
+        />
+        <AccountDetailRow
+          label="Goal"
+          value={formatMinorAmount(jar.goal, jar.currencyCode)}
+        />
+        <div className="h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-emerald-500"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">{jar.description}</p>
+      </CardContent>
+      <CardFooter className="text-xs text-muted-foreground">
+        Updated {formatDateTime(jar.updatedAt)}
+      </CardFooter>
+    </Card>
+  );
+}
+
 function AccountsRoute({
   snapshot,
 }: {
@@ -5227,8 +5267,13 @@ function AccountsRoute({
     );
   }
 
-  const jarCount = snapshot.fixtures?.jars ?? 0;
+  const latestRun = snapshot.syncRuns[0];
+  const jarCount = snapshot.jars.length;
   const currencies = snapshot.summary.currencies.map(currencyLabel).join(", ");
+  const syncHealth =
+    latestRun === undefined
+      ? "No sync run recorded"
+      : `${latestRun.status}: ${latestSyncRunSummary(latestRun)}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -5249,14 +5294,27 @@ function AccountsRoute({
             detail={`${snapshot.summary.accounts} accounts in ledger summary`}
           />
           <OverviewStatusItem
-            label="Fixture jars"
+            label="Local jars"
             value={String(jarCount)}
-            detail="Jar coverage from bundled fixture client info"
+            detail="Local jars loaded from the profile ledger"
           />
           <OverviewStatusItem
             label="Currencies"
             value={currencies || "None"}
             detail="Currency set present in local ledger rows"
+          />
+          <OverviewStatusItem
+            label="Latest sync"
+            value={formatDateTime(snapshot.summary.lastSyncedAt)}
+            detail={dataFreshnessLabel(snapshot.summary.lastSyncedAt)}
+            badge={latestRun?.status ?? "none"}
+            badgeVariant={statusVariant(latestRun?.status ?? "")}
+          />
+          <OverviewStatusItem
+            label="Sync health"
+            value={latestRun?.status ?? "none"}
+            detail={syncHealth}
+            badge={snapshot.config.source}
           />
         </CardContent>
       </Card>
@@ -5273,6 +5331,14 @@ function AccountsRoute({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {snapshot.accounts.map((account) => (
             <AccountCard account={account} key={account.id} />
+          ))}
+        </div>
+      )}
+
+      {snapshot.jars.length === 0 ? null : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {snapshot.jars.map((jar) => (
+            <JarCard jar={jar} key={jar.id} />
           ))}
         </div>
       )}
