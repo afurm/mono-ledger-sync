@@ -6,6 +6,7 @@ import type {
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
@@ -85,6 +86,11 @@ export interface LedgerQueryService
     LedgerSyncStateQueryService {}
 
 export interface LedgerWriteService {
+  updateTransactionsBulk(
+    ids: readonly string[],
+    update: LedgerEntryBulkEditUpdate,
+    profile?: string,
+  ): Promise<readonly LedgerEntry[]>;
   updateTransactionNote(
     id: string,
     note: string | undefined,
@@ -488,6 +494,11 @@ export function createLedgerWriteService({
   }
 
   return {
+    updateTransactionsBulk(ids, update, profile) {
+      return withProfileTransaction(profile, (tx, resolvedProfile) =>
+        tx.updateLedgerEntriesBulkEdit(resolvedProfile, ids, update),
+      );
+    },
     updateTransactionNote(id, note, profile) {
       return updateTransactionAnnotation(
         id,

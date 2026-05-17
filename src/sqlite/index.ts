@@ -25,6 +25,7 @@ import type {
   LedgerDbTransaction,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntryQuery,
@@ -125,6 +126,11 @@ export interface SqliteLedgerDb extends LedgerDb {
     id: string,
     update: LedgerEntryAnnotationUpdate,
   ): Promise<LedgerEntry | undefined>;
+  updateLedgerEntriesBulkEdit(
+    profile: string,
+    ids: readonly string[],
+    update: LedgerEntryBulkEditUpdate,
+  ): Promise<readonly LedgerEntry[]>;
   updateLedgerEntrySplitPlan(
     profile: string,
     id: string,
@@ -1211,6 +1217,42 @@ function normalizeLedgerEntryAnnotation(update: LedgerEntryAnnotationUpdate): {
   };
 }
 
+function normalizeLedgerEntryBulkEdit(update: LedgerEntryBulkEditUpdate): {
+  categoryId: string | null | undefined;
+  merchantName: string | null | undefined;
+  tagsJson: string | null | undefined;
+} {
+  const categoryId =
+    update.categoryId === undefined ? undefined : update.categoryId.trim();
+  const merchantName =
+    update.merchantName === undefined ? undefined : update.merchantName.trim();
+  const tags =
+    update.tags === undefined
+      ? undefined
+      : [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))];
+
+  return {
+    categoryId:
+      categoryId === undefined
+        ? undefined
+        : categoryId === ""
+          ? null
+          : categoryId,
+    merchantName:
+      merchantName === undefined
+        ? undefined
+        : merchantName === ""
+          ? null
+          : merchantName,
+    tagsJson:
+      tags === undefined
+        ? undefined
+        : tags.length === 0
+          ? null
+          : JSON.stringify(tags),
+  };
+}
+
 function normalizeMerchantName(name: string): string {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -1747,6 +1789,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       },
       updateLedgerEntryAnnotation: (profile, id, update) =>
         this.updateLedgerEntryAnnotation(profile, id, update),
+      updateLedgerEntriesBulkEdit: (profile, ids, update) =>
+        this.updateLedgerEntriesBulkEdit(profile, ids, update),
       updateLedgerEntrySplitPlan: (profile, id, update) =>
         this.updateLedgerEntrySplitPlan(profile, id, update),
     };
@@ -2476,6 +2520,116 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     }
 
     return row ? mapLedgerEntryRow(row) : undefined;
+  }
+
+  async updateLedgerEntriesBulkEdit(
+    profile: string,
+    ids: readonly string[],
+    update: LedgerEntryBulkEditUpdate,
+  ): Promise<readonly LedgerEntry[]> {
+    const normalizedIds = [
+      ...new Set(ids.map((id) => id.trim()).filter(Boolean)),
+    ];
+    const normalizedUpdate = normalizeLedgerEntryBulkEdit(update);
+    const timestamp = nowIso();
+    const categoryName =
+      normalizedUpdate.categoryId === undefined ||
+      normalizedUpdate.categoryId === null
+        ? normalizedUpdate.categoryId
+        : ((
+            this.#database
+              .prepare(
+                `
+                  SELECT name
+                  FROM categories
+                  WHERE profile = ? AND id = ?
+                `,
+              )
+              .get(profile, normalizedUpdate.categoryId) as
+              | { name: string }
+              | undefined
+          )?.name ?? normalizedUpdate.categoryId);
+    const selectEntry = this.#database.prepare(
+      `
+        SELECT
+          id, account_id, time, description, amount, operation_amount,
+          currency_code, category_id, category_name, merchant_name,
+          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
+          created_at, updated_at
+        FROM ledger_entries
+        WHERE profile = ? AND id = ?
+      `,
+    );
+    const setClauses: string[] = [];
+
+    if (normalizedUpdate.categoryId !== undefined) {
+      setClauses.push("category_id = @categoryId");
+      setClauses.push("category_name = @categoryName");
+    }
+
+    if (normalizedUpdate.merchantName !== undefined) {
+      setClauses.push("merchant_name = @merchantName");
+    }
+
+    if (normalizedUpdate.tagsJson !== undefined) {
+      setClauses.push("tags_json = @tagsJson");
+    }
+
+    const updatedRows: SqliteLedgerEntryRow[] = [];
+
+    if (normalizedIds.length === 0) {
+      return [];
+    }
+
+    if (setClauses.length === 0) {
+      return normalizedIds
+        .map(
+          (id) =>
+            selectEntry.get(profile, id) as SqliteLedgerEntryRow | undefined,
+        )
+        .filter((row): row is SqliteLedgerEntryRow => row !== undefined)
+        .map(mapLedgerEntryRow);
+    }
+
+    const updateEntry = this.#database.prepare(
+      `
+        UPDATE ledger_entries
+        SET
+          ${setClauses.join(",\n          ")},
+          updated_at = @updatedAt
+        WHERE profile = @profile AND id = @id
+      `,
+    );
+
+    for (const id of normalizedIds) {
+      updateEntry.run({
+        profile,
+        id,
+        categoryId: normalizedUpdate.categoryId ?? null,
+        categoryName: categoryName ?? null,
+        merchantName: normalizedUpdate.merchantName ?? null,
+        tagsJson: normalizedUpdate.tagsJson ?? null,
+        updatedAt: timestamp,
+      });
+
+      const row = selectEntry.get(profile, id) as
+        | SqliteLedgerEntryRow
+        | undefined;
+
+      if (row) {
+        if (normalizedUpdate.tagsJson !== undefined) {
+          this.upsertTagsFromLedgerEntry(profile, row, timestamp);
+        }
+
+        if (normalizedUpdate.merchantName !== undefined) {
+          this.upsertMerchantFromLedgerEntryRow(profile, row, timestamp);
+        }
+
+        updatedRows.push(row);
+      }
+    }
+
+    return updatedRows.map(mapLedgerEntryRow);
   }
 
   async updateLedgerEntrySplitPlan(
@@ -3474,7 +3628,29 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     entry: LedgerEntry,
     timestamp: string,
   ): void {
-    const name = entry.merchantName?.trim();
+    this.upsertMerchantName(
+      this.profile,
+      entry.merchantName,
+      entry.time,
+      timestamp,
+    );
+  }
+
+  private upsertMerchantFromLedgerEntryRow(
+    profile: string,
+    row: SqliteLedgerEntryRow,
+    timestamp: string,
+  ): void {
+    this.upsertMerchantName(profile, row.merchant_name, row.time, timestamp);
+  }
+
+  private upsertMerchantName(
+    profile: string,
+    merchantName: string | null | undefined,
+    lastSeenAt: number,
+    timestamp: string,
+  ): void {
+    const name = merchantName?.trim();
 
     if (!name) {
       return;
@@ -3521,12 +3697,12 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `,
       )
       .run({
-        profile: this.profile,
+        profile,
         id: merchantIdForName(normalizedName),
         name,
         normalizedName,
-        firstSeenAt: entry.time,
-        lastSeenAt: entry.time,
+        firstSeenAt: lastSeenAt,
+        lastSeenAt,
         createdAt: timestamp,
         updatedAt: timestamp,
       });

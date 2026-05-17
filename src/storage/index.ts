@@ -6,6 +6,7 @@ import type {
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntryPage,
   Category,
   CategoryRule,
@@ -40,6 +41,7 @@ export type {
   LedgerJar,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   Category,
@@ -104,6 +106,11 @@ export interface LedgerDbTransaction {
     id: string,
     update: LedgerEntryAnnotationUpdate,
   ): Promise<LedgerEntry | undefined>;
+  updateLedgerEntriesBulkEdit(
+    profile: string,
+    ids: readonly string[],
+    update: LedgerEntryBulkEditUpdate,
+  ): Promise<readonly LedgerEntry[]>;
   updateLedgerEntrySplitPlan(
     profile: string,
     id: string,

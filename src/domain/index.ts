@@ -392,6 +392,12 @@ export interface LedgerEntryAnnotationUpdate {
   tags?: readonly string[];
 }
 
+export interface LedgerEntryBulkEditUpdate {
+  categoryId?: string;
+  merchantName?: string;
+  tags?: readonly string[];
+}
+
 export interface LedgerEntrySplitPlanUpdate {
   lines?: readonly {
     category: string;
