@@ -2602,7 +2602,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           FROM webhook_events
           WHERE profile = @profile
             AND account_id = @accountId
-            AND status = 'pending'
+            AND status IN ('pending', 'failed')
         `,
       )
       .all({ profile, accountId }) as SqliteWebhookPayloadRow[];
@@ -2640,7 +2640,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           FROM webhook_events
           WHERE profile = @profile
             AND account_id = @accountId
-            AND status = 'pending'
+            AND status IN ('pending', 'failed')
             AND received_at <= @receivedBefore
         `,
       )

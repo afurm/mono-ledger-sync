@@ -1148,6 +1148,96 @@ test("sync reconcile re-fetches the affected statement window for pending webhoo
   });
 });
 
+test("sync reconcile retries failed webhook events with valid payloads", async () => {
+  const fixtureSet = await loadMonobankFixtureSet();
+  const account = fixtureSet.clientInfo.accounts[0];
+  const now = Math.floor(Date.now() / 1000);
+  const statementTime = now - 15 * 24 * 60 * 60;
+  const webhookStatementItem = {
+    ...fixtureSet.statements[account.id][0],
+    id: "fixture-webhook-retry-failed-event",
+    time: statementTime,
+  };
+  const requestedWindows = [];
+  const adapter = {
+    async getClientInfo() {
+      return {
+        ...fixtureSet.clientInfo,
+        accounts: [account],
+      };
+    },
+    async getStatement(window) {
+      requestedWindows.push(window);
+
+      if (statementTime >= window.from && statementTime <= window.to) {
+        return [webhookStatementItem];
+      }
+
+      return [];
+    },
+    async getCurrency() {
+      return fixtureSet.currencyRates;
+    },
+    async setWebhook() {
+      return undefined;
+    },
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      const failedRecord = await db.recordWebhookEvent({
+        type: "StatementItem",
+        data: {
+          account: account.id,
+          statementItem: webhookStatementItem,
+        },
+      });
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase
+          .prepare(
+            "UPDATE webhook_events SET status = 'failed', processed_at = ? WHERE id = ?",
+          )
+          .run("2026-05-17T00:00:00.000Z", failedRecord.id);
+      } finally {
+        rawDatabase.close();
+      }
+
+      const result = await syncLedgerWithMonobank({
+        profile,
+        source: "monobank",
+        adapter,
+        db,
+        accountIds: [account.id],
+      });
+      const webhookEvents = await db.listWebhookEvents(profile, 20);
+      const retriedEvent = webhookEvents.find((event) => {
+        return event.id === failedRecord.id;
+      });
+
+      assert.equal(result.run.status, "success");
+      assert.equal(
+        requestedWindows.some((window) => {
+          return statementTime >= window.from && statementTime <= window.to;
+        }),
+        true,
+      );
+      assert.equal(retriedEvent?.status, "processed");
+      assert.equal(typeof retriedEvent?.processedAt, "string");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("sync reconcile does not regress cursor when old webhook replay is interrupted", async () => {
   const fixtureSet = await loadMonobankFixtureSet();
   const account = fixtureSet.clientInfo.accounts[0];
