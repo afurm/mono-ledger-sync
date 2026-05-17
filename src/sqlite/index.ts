@@ -18,6 +18,7 @@ import type {
   LedgerAccount,
   WebhookEventStatus,
   Budget,
+  BudgetPeriod,
   Category,
   CategoryRule,
   LedgerDb,
@@ -110,6 +111,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
+  listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -266,6 +268,19 @@ interface SqliteBudgetRow {
   amount_limit: number;
   rollover: number;
   include_inflows: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SqliteBudgetPeriodRow {
+  id: string;
+  profile: string;
+  budget_id: string;
+  period_start: string;
+  period_end: string;
+  planned_amount: number;
+  actual_amount: number | null;
+  status: "open" | "closed";
   created_at: string;
   updated_at: string;
 }
@@ -729,6 +744,33 @@ const migrations: readonly SqliteMigration[] = [
         ON budgets(profile, category_id);
     `,
   },
+  {
+    id: "0012_budget_periods",
+    description: "Add budget period storage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS budget_periods (
+        profile TEXT NOT NULL,
+        id TEXT NOT NULL,
+        budget_id TEXT NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        planned_amount INTEGER NOT NULL,
+        actual_amount INTEGER,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name),
+        FOREIGN KEY (profile, budget_id) REFERENCES budgets(profile, id)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_periods_budget_period
+        ON budget_periods(profile, budget_id, period_start, period_end);
+
+      CREATE INDEX IF NOT EXISTS idx_budget_periods_profile_status
+        ON budget_periods(profile, status, period_start);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1050,6 +1092,21 @@ function mapBudgetRow(row: SqliteBudgetRow): Budget {
     amountLimit: row.amount_limit,
     rollover: row.rollover === 1,
     ...(row.include_inflows === 1 ? { includeInflows: true } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapBudgetPeriodRow(row: SqliteBudgetPeriodRow): BudgetPeriod {
+  return {
+    id: row.id,
+    profile: row.profile,
+    budgetId: row.budget_id,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    plannedAmount: row.planned_amount,
+    ...(row.actual_amount === null ? {} : { actualAmount: row.actual_amount }),
+    status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1857,6 +1914,33 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteBudgetRow[];
 
     return rows.map(mapBudgetRow);
+  }
+
+  async listBudgetPeriods(
+    profile = this.profile,
+  ): Promise<readonly BudgetPeriod[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            profile,
+            budget_id,
+            period_start,
+            period_end,
+            planned_amount,
+            actual_amount,
+            status,
+            created_at,
+            updated_at
+          FROM budget_periods
+          WHERE profile = ?
+          ORDER BY period_start DESC, budget_id, id
+        `,
+      )
+      .all(profile) as SqliteBudgetPeriodRow[];
+
+    return rows.map(mapBudgetPeriodRow);
   }
 
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {

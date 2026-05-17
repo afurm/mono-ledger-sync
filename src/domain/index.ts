@@ -455,6 +455,19 @@ export interface Budget {
   updatedAt: string;
 }
 
+export interface BudgetPeriod {
+  id: string;
+  profile: string;
+  budgetId: string;
+  periodStart: string;
+  periodEnd: string;
+  plannedAmount: number;
+  actualAmount?: number;
+  status: "open" | "closed";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RecurringItem {
   id: string;
   profile: string;

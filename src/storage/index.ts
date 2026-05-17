@@ -1,6 +1,7 @@
 import type {
   AccountBalance,
   Budget,
+  BudgetPeriod,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -34,6 +35,7 @@ export type {
   Category,
   CategoryRule,
   Budget,
+  BudgetPeriod,
   LedgerEntryQuery,
   LedgerSummary,
   LocalAppSettings,
@@ -113,6 +115,7 @@ export interface LedgerDb {
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
+  listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,

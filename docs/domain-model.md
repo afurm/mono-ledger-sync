@@ -39,6 +39,8 @@ configuration, and direct filesystem behavior.
   ledger rows for cleanup rules and filters.
 - `Budget` defines the planned category-period budget contract before richer
   budget storage and UI are enabled.
+- `BudgetPeriod` defines per-period budget tracking rows before monthly close
+  and reopen workflows are enabled.
 - `RecurringItem` defines the recurring transaction detection contract before
   recurring calendars and alerts are enabled.
 
