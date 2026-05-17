@@ -418,7 +418,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       assert.equal(transactions.total, 7);
       assert.equal(merchants.length > 0, true);
       assert.ok(
-        merchants.some((merchant) => merchant.name === "Fixture Grocery LLC"),
+        merchants.some((merchant) => merchant.name === "Fixture Grocery"),
       );
       assert.equal(
         merchants.every(
@@ -430,6 +430,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         transactions.entries.some((entry) => {
           return (
             entry.rawStatementItemId === "fixture-stmt-2026-04-02-silpo" &&
+            entry.merchantName === "Fixture Grocery" &&
             entry.categoryId === "groceries"
           );
         }),
@@ -827,6 +828,42 @@ test("seeds category rules for the current built-in categorization model", async
         9311,
       );
       assert.equal(rules.at(-1)?.matchType, "fallback");
+      assert.equal(
+        rules.every((rule) => rule.isSystem),
+        true,
+      );
+      assert.equal(
+        rules.every((rule) => rule.isEnabled),
+        true,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("seeds merchant cleanup rules for built-in merchant normalization", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const rules = await db.listMerchantCleanupRules(profile);
+
+      assert.deepEqual(
+        rules.map((rule) => rule.id),
+        [
+          "fixture-grocery-cleanup",
+          "kyiv-metro-cleanup",
+          "cloud-subscription-cleanup",
+        ],
+      );
+      assert.equal(rules[0].canonicalName, "Fixture Grocery");
       assert.equal(
         rules.every((rule) => rule.isSystem),
         true,
@@ -1780,12 +1817,14 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0013_recurring_items",
         "0014_tags",
         "0015_query_performance_indexes",
+        "0016_merchant_cleanup_rules",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
       assert.equal((await db.listCategories(profile)).length, 17);
       assert.equal((await db.listCategoryRules(profile)).length, 17);
+      assert.equal((await db.listMerchantCleanupRules(profile)).length, 3);
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
       assert.deepEqual(await db.listRecurringItems(profile), []);
@@ -1824,7 +1863,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(afterMigration.syncRuns, 1);
         assert.equal(
           afterMigration.migrations.at(-1),
-          "0015_query_performance_indexes",
+          "0016_merchant_cleanup_rules",
         );
 
         const summary = await db.getLedgerSummary(profile);
@@ -1860,6 +1899,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
           groceryPage.entries[0].merchantName,
           "Fixture Grocery LLC",
         );
+        assert.equal((await db.listMerchantCleanupRules(profile)).length, 3);
 
         const annotated = await db.updateLedgerEntryAnnotation(
           profile,
@@ -2226,6 +2266,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/categories",
       });
+      const merchantCleanupRulesResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/merchant-cleanup-rules",
+      });
       const categorySpendingResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/category-spending",
@@ -2381,6 +2425,17 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           "travel",
           "uncategorized",
           "utilities",
+        ],
+      );
+      assert.equal(merchantCleanupRulesResponse.statusCode, 200);
+      assert.deepEqual(
+        merchantCleanupRulesResponse
+          .json()
+          .map((rule) => [rule.id, rule.canonicalName]),
+        [
+          ["fixture-grocery-cleanup", "Fixture Grocery"],
+          ["kyiv-metro-cleanup", "Kyiv Metro"],
+          ["cloud-subscription-cleanup", "Cloud Subscription"],
         ],
       );
       assert.equal(categorySpendingResponse.statusCode, 200);

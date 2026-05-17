@@ -155,6 +155,18 @@ export interface Category {
   updatedAt?: string;
 }
 
+export interface MerchantCleanupRule {
+  id: string;
+  name: string;
+  priority: number;
+  merchantContains: string;
+  canonicalName: string;
+  isSystem?: boolean;
+  isEnabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
@@ -284,6 +296,7 @@ export interface LocalAppSnapshot {
   accounts: readonly LedgerAccount[];
   jars: readonly LedgerJar[];
   categories: readonly Category[];
+  merchantCleanupRules: readonly MerchantCleanupRule[];
   categorySpending: readonly LedgerCategorySpending[];
   budgetProgress: readonly BudgetProgress[];
   upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
@@ -313,12 +326,14 @@ type PersistedLocalAppSnapshot = Omit<
   | "categorySpending"
   | "budgetProgress"
   | "upcomingRecurringPayments"
+  | "merchantCleanupRules"
 > & {
   netWorthTrend?: NetWorthTrend;
   jars?: readonly LedgerJar[];
   categorySpending?: readonly LedgerCategorySpending[];
   budgetProgress?: readonly BudgetProgress[];
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
+  merchantCleanupRules?: readonly MerchantCleanupRule[];
   summary: Omit<LedgerSummary, "monthToDate"> & {
     monthToDate?: LedgerCashflowSummary;
   };
@@ -416,6 +431,7 @@ function normalizeCachedLocalAppSnapshot(
       categorySpending: snapshot.categorySpending ?? [],
       budgetProgress: snapshot.budgetProgress ?? [],
       upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
+      merchantCleanupRules: snapshot.merchantCleanupRules ?? [],
     },
   };
 }
@@ -839,6 +855,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       accounts,
       jars,
       categories,
+      merchantCleanupRules,
       categorySpending,
       budgetProgress,
       upcomingRecurringPayments,
@@ -852,6 +869,9 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
       requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
       requestJson<readonly Category[]>("/api/ledger/categories"),
+      requestJson<readonly MerchantCleanupRule[]>(
+        "/api/ledger/merchant-cleanup-rules",
+      ),
       requestJson<readonly LedgerCategorySpending[]>(
         "/api/ledger/category-spending",
       ),
@@ -879,6 +899,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       accounts,
       jars,
       categories,
+      merchantCleanupRules,
       categorySpending,
       budgetProgress,
       upcomingRecurringPayments,

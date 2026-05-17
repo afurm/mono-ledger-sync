@@ -63,6 +63,7 @@ import type {
   LedgerEntrySortField,
   LedgerJar,
   LedgerSummary,
+  MerchantCleanupRule,
   NetWorthTrend,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
@@ -462,6 +463,14 @@ const ledgerJarsResponseSchema = {
 } as const;
 
 const ledgerCategoriesResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const merchantCleanupRulesResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2156,6 +2165,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listCategories(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/merchant-cleanup-rules`,
+    {
+      schema: {
+        response: {
+          200: merchantCleanupRulesResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly MerchantCleanupRule[]> => {
+      const services = await getServices();
+
+      return services.queryService.listMerchantCleanupRules(services.profile);
     },
   );
 

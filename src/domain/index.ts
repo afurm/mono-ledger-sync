@@ -529,6 +529,18 @@ export interface Merchant {
   updatedAt?: string;
 }
 
+export interface MerchantCleanupRule {
+  id: string;
+  name: string;
+  priority: number;
+  merchantContains: string;
+  canonicalName: string;
+  isSystem?: boolean;
+  isEnabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface Budget {
   id: string;
   profile: string;
