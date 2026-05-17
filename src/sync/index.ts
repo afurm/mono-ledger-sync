@@ -179,10 +179,139 @@ function statsFromWriteStats(
   };
 }
 
+const expenseCategoryMappings: readonly {
+  categoryId: string;
+  categoryName: string;
+  mccs: readonly number[];
+  descriptionTerms: readonly string[];
+}[] = [
+  {
+    categoryId: "groceries",
+    categoryName: "Groceries",
+    mccs: [5411],
+    descriptionTerms: ["grocery"],
+  },
+  {
+    categoryId: "utilities",
+    categoryName: "Utilities",
+    mccs: [4900],
+    descriptionTerms: ["utility"],
+  },
+  {
+    categoryId: "healthcare",
+    categoryName: "Healthcare",
+    mccs: [5912],
+    descriptionTerms: ["pharmacy"],
+  },
+  {
+    categoryId: "shopping",
+    categoryName: "Shopping",
+    mccs: [5311],
+    descriptionTerms: ["marketplace"],
+  },
+  {
+    categoryId: "household",
+    categoryName: "Household",
+    mccs: [5200],
+    descriptionTerms: ["household"],
+  },
+  {
+    categoryId: "education",
+    categoryName: "Education",
+    mccs: [8299],
+    descriptionTerms: ["education"],
+  },
+  {
+    categoryId: "subscriptions",
+    categoryName: "Subscriptions",
+    mccs: [5734],
+    descriptionTerms: ["subscription"],
+  },
+  {
+    categoryId: "transport",
+    categoryName: "Transport",
+    mccs: [4111],
+    descriptionTerms: ["metro"],
+  },
+  {
+    categoryId: "travel",
+    categoryName: "Travel",
+    mccs: [4722],
+    descriptionTerms: ["travel"],
+  },
+  {
+    categoryId: "dining",
+    categoryName: "Dining",
+    mccs: [5814],
+    descriptionTerms: ["coffee"],
+  },
+  {
+    categoryId: "taxes",
+    categoryName: "Taxes",
+    mccs: [9311],
+    descriptionTerms: ["tax"],
+  },
+  {
+    categoryId: "charity",
+    categoryName: "Charity",
+    mccs: [8398],
+    descriptionTerms: ["donation"],
+  },
+  {
+    categoryId: "cash",
+    categoryName: "Cash",
+    mccs: [6011],
+    descriptionTerms: ["atm"],
+  },
+  {
+    categoryId: "fees",
+    categoryName: "Fees",
+    mccs: [6012],
+    descriptionTerms: ["fee"],
+  },
+  {
+    categoryId: "transfers",
+    categoryName: "Transfers",
+    mccs: [4829],
+    descriptionTerms: ["transfer"],
+  },
+];
+
+function descriptionTermVariants(term: string): readonly string[] {
+  const normalizedTerm = term.toLowerCase();
+  const variants = [
+    normalizedTerm,
+    `${normalizedTerm}s`,
+    `${normalizedTerm}es`,
+  ];
+
+  if (normalizedTerm.endsWith("y")) {
+    variants.push(`${normalizedTerm.slice(0, -1)}ies`);
+  }
+
+  return variants;
+}
+
+function tokenizeCategoryText(text: string): readonly string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+function descriptionMatchesTerm(
+  descriptionTokens: readonly string[],
+  term: string,
+): boolean {
+  const tokenSet = new Set(descriptionTokens);
+
+  return descriptionTermVariants(term).some((variant) => tokenSet.has(variant));
+}
+
 export function categorizeStatementItem(
   item: MonobankStatementItem,
 ): LedgerCategoryMatch {
-  const description = item.description.toLowerCase();
+  const descriptionTokens = tokenizeCategoryText(item.description);
 
   if (item.amount > 0) {
     return {
@@ -191,46 +320,18 @@ export function categorizeStatementItem(
     };
   }
 
-  if (item.mcc === 5411 || description.includes("grocery")) {
-    return {
-      categoryId: "groceries",
-      categoryName: "Groceries",
-    };
-  }
-
-  if (item.mcc === 5734 || description.includes("subscription")) {
-    return {
-      categoryId: "subscriptions",
-      categoryName: "Subscriptions",
-    };
-  }
-
-  if (item.mcc === 4111 || description.includes("metro")) {
-    return {
-      categoryId: "transport",
-      categoryName: "Transport",
-    };
-  }
-
-  if (item.mcc === 4722 || description.includes("travel")) {
-    return {
-      categoryId: "travel",
-      categoryName: "Travel",
-    };
-  }
-
-  if (item.mcc === 5814 || description.includes("coffee")) {
-    return {
-      categoryId: "dining",
-      categoryName: "Dining",
-    };
-  }
-
-  if (item.mcc === 4829 || description.includes("transfer")) {
-    return {
-      categoryId: "transfers",
-      categoryName: "Transfers",
-    };
+  for (const mapping of expenseCategoryMappings) {
+    if (
+      mapping.mccs.includes(item.mcc) ||
+      mapping.descriptionTerms.some((term) =>
+        descriptionMatchesTerm(descriptionTokens, term),
+      )
+    ) {
+      return {
+        categoryId: mapping.categoryId,
+        categoryName: mapping.categoryName,
+      };
+    }
   }
 
   return {
