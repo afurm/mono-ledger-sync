@@ -1499,6 +1499,75 @@ test("local API token endpoint saves and deletes monobank token state", async ()
   });
 });
 
+test("local API can switch between fixture and monobank sources at runtime", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createLocalApiServer({
+      profile: "demo",
+      source: "fixture",
+      dataDir: tempRoot,
+      monobankToken: "",
+      host: "127.0.0.1",
+      port: 55667,
+    });
+
+    try {
+      const fixtureConfig = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const switchToMonobank = await server.inject({
+        method: "POST",
+        url: "/api/app/source",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          source: "monobank",
+        }),
+      });
+      const monobankConfig = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const monobankRun = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+      const switchBackToFixture = await server.inject({
+        method: "POST",
+        url: "/api/app/source",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          source: "fixture",
+        }),
+      });
+      const fixtureRun = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+
+      assert.equal(fixtureConfig.statusCode, 200);
+      assert.equal(fixtureConfig.json().source, "fixture");
+      assert.equal(switchToMonobank.statusCode, 200);
+      assert.equal(monobankConfig.statusCode, 200);
+      assert.equal(monobankConfig.json().source, "monobank");
+      assert.equal(switchToMonobank.json().source, "monobank");
+      assert.equal(monobankRun.statusCode, 400);
+      assert.deepEqual(monobankRun.json(), {
+        error: "auth_required",
+        message:
+          "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+      });
+      assert.equal(switchBackToFixture.statusCode, 200);
+      assert.equal(fixtureRun.statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("local API validates query strings and webhook payloads", async () => {
   await withTempLedger(async ({ tempRoot }) => {
     const server = createLocalApiServer({

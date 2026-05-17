@@ -336,6 +336,15 @@ const monobankTokenBodySchema = {
   additionalProperties: false,
 } as const;
 
+const appSourceBodySchema = {
+  type: "object",
+  required: ["source"],
+  properties: {
+    source: { enum: ["fixture", "monobank"] },
+  },
+  additionalProperties: false,
+} as const;
+
 const monobankTokenResponseSchema = {
   type: "object",
   required: ["hasToken"],
@@ -785,11 +794,11 @@ export function resolveLocalLedgerDatabasePath(
 
 async function createServices(
   options: LocalApiServerOptions,
+  source: LedgerSource,
   monobankToken: string | undefined,
   monobankBaseUrl: string | undefined,
 ): Promise<LocalAppServices> {
   const profile = resolveProfile(options);
-  const source = resolveSource(options);
   const dataDir = resolveDataDir(options);
   const databasePath = resolveLocalLedgerDatabasePath(options);
   const adapter =
@@ -1535,6 +1544,7 @@ function registerLocalApiRoutes(
   getMonobankToken: () => string | undefined,
   saveMonobankToken: (token: string) => Promise<LocalApiMonobankTokenStatus>,
   removeMonobankToken: () => Promise<LocalApiMonobankTokenStatus>,
+  setSource: (source: LedgerSource) => Promise<void>,
   localWebhookRoutePath: LocalWebhookRoutePath,
   resolveWebhookSettings: () => Omit<
     LocalApiWebhookSettings,
@@ -1617,6 +1627,27 @@ function registerLocalApiRoutes(
     return metadata;
   }
 
+  async function readAppConfig(): Promise<LocalApiAppConfig> {
+    const services = await getServices();
+    const monobankToken = getMonobankToken();
+
+    return {
+      profile: services.profile,
+      source: services.source,
+      dataDir: services.dataDir,
+      databasePath: services.databasePath,
+      localOnly: true,
+      token: {
+        hasToken: monobankToken !== undefined,
+      },
+      webhook: {
+        enabled: true,
+        path: localWebhookRoutePath,
+        ...resolveWebhookSettings(),
+      },
+    };
+  }
+
   app.get("/", async (_request, reply): Promise<string> => {
     const builtWebIndex = await readBuiltWebIndex();
 
@@ -1679,25 +1710,24 @@ function registerLocalApiRoutes(
         },
       },
     },
-    async (): Promise<LocalApiAppConfig> => {
-      const services = await getServices();
-      const monobankToken = getMonobankToken();
+    async (): Promise<LocalApiAppConfig> => readAppConfig(),
+  );
 
-      return {
-        profile: services.profile,
-        source: services.source,
-        dataDir: services.dataDir,
-        databasePath: services.databasePath,
-        localOnly: true,
-        token: {
-          hasToken: monobankToken !== undefined,
+  app.post(
+    `${localApiRoutePrefix}/app/source`,
+    {
+      schema: {
+        body: appSourceBodySchema,
+        response: {
+          200: appConfigResponseSchema,
         },
-        webhook: {
-          enabled: true,
-          path: localWebhookRoutePath,
-          ...resolveWebhookSettings(),
-        },
-      };
+      },
+    },
+    async (request, _reply): Promise<LocalApiAppConfig> => {
+      const body = request.body as { source: LedgerSource };
+
+      await setSource(body.source);
+      return readAppConfig();
     },
   );
 
@@ -1968,12 +1998,10 @@ function registerLocalApiRoutes(
       _request,
       reply,
     ): Promise<SyncLedgerResult | { error: string; message: string }> => {
+      const services = await getServices();
       const monobankToken = getMonobankToken();
 
-      if (
-        resolveSource(options) === "monobank" &&
-        monobankToken === undefined
-      ) {
+      if (services.source === "monobank" && monobankToken === undefined) {
         reply.code(400);
 
         return {
@@ -1983,7 +2011,6 @@ function registerLocalApiRoutes(
         };
       }
 
-      const services = await getServices();
       const syncAbortController = new AbortController();
       const handleInterrupt = (): void => {
         syncAbortController.abort();
@@ -2255,6 +2282,7 @@ export function createLocalApiServer(
   let servicesPromise: Promise<LocalAppServices> | undefined;
   let monobankToken = resolveMonobankToken(options);
   const monobankBaseUrl = resolveMonobankBaseUrl(options);
+  let source = resolveSource(options);
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
   let webhookHost: NonNullable<LocalApiServerOptions["host"]> =
@@ -2293,7 +2321,12 @@ export function createLocalApiServer(
   }
 
   function getServices(): Promise<LocalAppServices> {
-    servicesPromise ??= createServices(options, monobankToken, monobankBaseUrl);
+    servicesPromise ??= createServices(
+      options,
+      source,
+      monobankToken,
+      monobankBaseUrl,
+    );
 
     return servicesPromise;
   }
@@ -2332,6 +2365,15 @@ export function createLocalApiServer(
     servicesPromise = undefined;
   }
 
+  async function updateSource(nextSource: LedgerSource): Promise<void> {
+    if (source === nextSource) {
+      return;
+    }
+
+    source = nextSource;
+    await rebuildServices();
+  }
+
   registerLocalApiRoutes(
     app,
     options,
@@ -2339,6 +2381,7 @@ export function createLocalApiServer(
     getMonobankToken,
     saveMonobankToken,
     removeMonobankToken,
+    updateSource,
     localWebhookRoutePath,
     resolveWebhookSettings,
   );

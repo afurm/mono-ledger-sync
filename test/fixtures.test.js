@@ -18,7 +18,9 @@ import {
   createMonobankHttpAdapter,
   loadMonobankFixtureSet,
 } from "../dist/monobank/index.js";
+import { createLedgerExport } from "../dist/exports/index.js";
 import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
+import { createLedgerQueryService } from "../dist/storage/index.js";
 import { syncLedgerWithMonobank } from "../dist/sync/index.js";
 import {
   createMonobankMockHttpHandler,
@@ -127,6 +129,34 @@ async function withTempLedger(callback) {
       recursive: true,
     });
   }
+}
+
+function sumAmounts(rows) {
+  return rows.reduce((total, row) => total + row.amount, 0);
+}
+
+async function readAllEntries(queryService, query) {
+  const pageLimit = 500;
+  const all = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await queryService.listLedgerEntries({
+      ...query,
+      limit: pageLimit,
+      offset,
+    });
+
+    all.push(...page.entries);
+
+    if (page.entries.length === 0 || all.length >= page.total) {
+      break;
+    }
+
+    offset += page.entries.length;
+  }
+
+  return all;
 }
 
 test("fixtures stay synthetic and avoid real-looking sensitive values", async () => {
@@ -302,6 +332,212 @@ test("large fixture statement snapshot supports precise time-window filtering", 
       (item) => item.time >= windowStart && item.time <= windowEnd,
     ),
   );
+});
+
+test("large fixture snapshot powers pagination, filters, and export/report workflows", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const largeStatement = await readFixture(
+    "statements/uah-main-2026-04-large.json",
+  );
+
+  const largeAccount = {
+    ...clientInfo.accounts[0],
+    id: "fixture-account-uah-main-large",
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "fixture-large-snapshot";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    const queryService = createLedgerQueryService({
+      db,
+      defaultProfile: profile,
+    });
+
+    try {
+      await db.migrate();
+      const syncResult = await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: createFixtureMonobankAdapter({
+          clientInfo: {
+            ...clientInfo,
+            accounts: [largeAccount],
+          },
+          currencyRates,
+          statements: {
+            [largeAccount.id]: largeStatement,
+          },
+        }),
+        db,
+      });
+      const allEntries = await readAllEntries(queryService, {
+        sortBy: "time",
+        sortDirection: "asc",
+      });
+
+      assert.equal(syncResult.stats.itemsSeen, largeStatement.length);
+      assert.equal(syncResult.summary.ledgerEntries, largeStatement.length);
+      assert.equal(allEntries.length, largeStatement.length);
+
+      const page1 = await queryService.listLedgerEntries({
+        limit: 25,
+        sortBy: "time",
+        sortDirection: "desc",
+      });
+      const page2 = await queryService.listLedgerEntries({
+        limit: 25,
+        offset: 25,
+        sortBy: "time",
+        sortDirection: "desc",
+      });
+      const searchResult = await queryService.listLedgerEntries({
+        search: "Fixture transaction 011",
+        limit: 5,
+      });
+      const holdResult = await queryService.listLedgerEntries({
+        status: "hold",
+        limit: 500,
+      });
+      const incomeResult = await queryService.listLedgerEntries({
+        amountMin: 0,
+        limit: 500,
+      });
+      const expenseResult = await queryService.listLedgerEntries({
+        amountMax: -1,
+        limit: 500,
+      });
+      const groceriesResult = await queryService.listLedgerEntries({
+        categoryId: "groceries",
+        limit: 500,
+      });
+
+      const windowFrom = allEntries[12].time;
+      const windowTo = allEntries[88].time;
+      const windowResult = await queryService.listLedgerEntries({
+        from: windowFrom,
+        to: windowTo,
+        limit: 500,
+      });
+
+      assert.equal(page1.limit, 25);
+      assert.equal(page1.entries.length, 25);
+      assert.equal(page1.total, largeStatement.length);
+      assert.equal(page2.entries.length, 25);
+      assert.equal(page2.total, largeStatement.length);
+      assert.notEqual(page1.entries[0].id, page2.entries[0].id);
+
+      assert.equal(searchResult.total, 1);
+      assert.equal(
+        holdResult.total,
+        largeStatement.filter((item) => item.hold).length,
+      );
+      assert.equal(
+        incomeResult.total,
+        largeStatement.filter((item) => item.amount >= 0).length,
+      );
+      assert.equal(
+        expenseResult.total,
+        largeStatement.filter((item) => item.amount < 0).length,
+      );
+      assert.equal(
+        groceriesResult.total,
+        largeStatement.filter((item) => item.mcc === 5411).length,
+      );
+      assert.equal(
+        windowResult.total,
+        largeStatement.filter(
+          (item) => item.time >= windowFrom && item.time <= windowTo,
+        ).length,
+      );
+
+      const categoryIds = new Set(
+        allEntries.map((entry) => entry.categoryId).filter(Boolean),
+      );
+      assert.equal(categoryIds.has("income"), true);
+      assert.equal(categoryIds.has("groceries"), true);
+      assert.equal(categoryIds.has("dining"), true);
+
+      const dayTotals = new Map();
+      for (const entry of allEntries) {
+        const day = new Date(entry.time * 1000).toISOString().slice(0, 10);
+        dayTotals.set(day, (dayTotals.get(day) ?? 0) + entry.amount);
+      }
+      assert.equal(dayTotals.size >= 2, true);
+      assert.equal(dayTotals.size >= 20, true);
+
+      const currencyTotals = new Map();
+      for (const entry of allEntries) {
+        currencyTotals.set(
+          entry.currencyCode,
+          (currencyTotals.get(entry.currencyCode) ?? 0) + entry.amount,
+        );
+      }
+      assert.equal(currencyTotals.size >= 2, true);
+
+      const windowInflow = sumAmounts(
+        allEntries.filter((entry) => entry.amount > 0),
+      );
+      assert.equal(
+        windowInflow,
+        largeStatement
+          .filter((item) => item.amount > 0)
+          .reduce((total, item) => total + item.amount, 0),
+      );
+
+      const holdInflow = sumAmounts(allEntries.filter((entry) => entry.hold));
+      assert.equal(
+        holdInflow,
+        largeStatement
+          .filter((item) => item.hold)
+          .reduce((total, item) => total + item.amount, 0),
+      );
+
+      const jsonExport = await createLedgerExport(db, {
+        profile,
+        format: "json",
+        accountIds: [largeAccount.id],
+        from: windowFrom,
+        to: windowTo,
+      });
+      const parsedJsonExport = JSON.parse(jsonExport.body);
+      const groceriesJsonlExport = await createLedgerExport(db, {
+        profile,
+        format: "jsonl",
+        accountIds: [largeAccount.id],
+        categoryIds: ["groceries"],
+      });
+      const csvExport = await createLedgerExport(db, {
+        profile,
+        format: "csv",
+        accountIds: [largeAccount.id],
+      });
+      const groceriesRows = groceriesJsonlExport.body
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      assert.equal(parsedJsonExport.total, windowResult.total);
+      assert.equal(parsedJsonExport.filters.accountIds[0], largeAccount.id);
+      assert.equal(parsedJsonExport.filters.from, windowFrom);
+      assert.equal(parsedJsonExport.filters.to, windowTo);
+      assert.equal(csvExport.contentType, "text/csv; charset=utf-8");
+      assert.ok(csvExport.body.startsWith("id,accountId,time,date"));
+      assert.equal(
+        groceriesRows.every((row) => row.categoryId === "groceries"),
+        true,
+      );
+      assert.equal(
+        groceriesRows.length,
+        largeStatement.filter((item) => item.mcc === 5411).length,
+      );
+    } finally {
+      await db.close();
+    }
+  });
 });
 
 test("fixture validation reports the failing field path", () => {

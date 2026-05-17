@@ -559,3 +559,15 @@ export async function clearMonobankToken(): Promise<LocalApiMonobankTokenStatus>
     method: "DELETE",
   });
 }
+
+export async function setMonobankSource(
+  source: LocalAppSnapshot["config"]["source"],
+): Promise<LocalAppSnapshot["config"]> {
+  return requestJson<LocalAppSnapshot["config"]>("/api/app/source", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ source }),
+  });
+}
