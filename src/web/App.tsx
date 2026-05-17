@@ -2293,8 +2293,8 @@ function MetricCard({
 
 function MetricLoadingGrid() {
   return (
-    <div className="grid gap-4 md:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      {Array.from({ length: 5 }).map((_, index) => (
         <Card key={index}>
           <CardHeader>
             <Skeleton className="h-4 w-24" />
@@ -3734,14 +3734,25 @@ function OverviewRoute({
   const transactionsHref = buildTransactionFiltersHash(
     defaultTransactionFilters(),
   );
-  const incomeHref = buildTransactionFiltersHash({
+  const monthToDate = snapshot.summary.monthToDate;
+  const monthFilters = {
     ...defaultTransactionFilters(),
+    dateFrom: monthToDate.from === "cached" ? "" : monthToDate.from,
+    dateTo: monthToDate.to === "cached" ? "" : monthToDate.to,
+  };
+  const incomeHref = buildTransactionFiltersHash({
+    ...monthFilters,
     amountMin: "0.01",
   });
   const expensesHref = buildTransactionFiltersHash({
-    ...defaultTransactionFilters(),
+    ...monthFilters,
     amountMax: "-0.01",
   });
+  const monthHref = buildTransactionFiltersHash(monthFilters);
+  const monthDetail =
+    monthToDate.from === "cached"
+      ? "Cached snapshot totals"
+      : `${monthToDate.from} through ${monthToDate.to}`;
   const freshness = dataFreshnessLabel(snapshot.summary.lastSyncedAt);
   const webhookHints = snapshot.fixtures?.webhookEvents ?? 0;
   const databaseHealth = snapshot.health.status;
@@ -3757,7 +3768,7 @@ function OverviewRoute({
         />
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           title="Accounts"
           value={String(snapshot.summary.accounts)}
@@ -3775,20 +3786,28 @@ function OverviewRoute({
           drillDownLabel="Review rows"
         />
         <MetricCard
-          title="Income"
-          value={formatMinorAmount(snapshot.summary.income)}
-          description="Synced into the local ledger"
+          title="MTD income"
+          value={formatMinorAmount(monthToDate.income)}
+          description={monthDetail}
           freshness={freshness}
           drillDownHref={incomeHref}
-          drillDownLabel="Review income"
+          drillDownLabel="Review MTD income"
         />
         <MetricCard
-          title="Expenses"
-          value={formatMinorAmount(snapshot.summary.expenses)}
-          description="Categorized from fixture rules"
+          title="MTD expenses"
+          value={formatMinorAmount(monthToDate.expenses)}
+          description={monthDetail}
           freshness={freshness}
           drillDownHref={expensesHref}
-          drillDownLabel="Review expenses"
+          drillDownLabel="Review MTD expenses"
+        />
+        <MetricCard
+          title="MTD net cashflow"
+          value={formatMinorAmount(monthToDate.net)}
+          description={monthDetail}
+          freshness={monthToDate.month}
+          drillDownHref={monthHref}
+          drillDownLabel="Review month"
         />
       </div>
 

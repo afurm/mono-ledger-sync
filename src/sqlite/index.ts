@@ -274,6 +274,16 @@ interface SqliteSummaryRow {
   oldest_sync_cursor_updated_at: string | null;
 }
 
+interface SqliteLatestEntryTimeRow {
+  latest_entry_time: number | null;
+}
+
+interface SqliteCashflowRow {
+  income: number | null;
+  expenses: number | null;
+  net: number | null;
+}
+
 interface SqliteCategoryRow {
   id: string;
   profile: string;
@@ -1213,6 +1223,27 @@ function tagIdForName(normalizedName: string): string {
     .slice(0, 16);
 
   return `tag-${digest}`;
+}
+
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function localMonthKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  return `${year}-${month}`;
+}
+
+function localMonthStartEpoch(date: Date): number {
+  return Math.floor(
+    new Date(date.getFullYear(), date.getMonth(), 1).getTime() / 1000,
+  );
 }
 
 function mapAccountRow(row: SqliteAccountRow): LedgerAccount {
@@ -2471,6 +2502,33 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       )
       .get({ profile }) as SqliteSummaryRow;
     const currencies = JSON.parse(row.currencies_json) as unknown;
+    const latestEntryTimeRow = this.#database
+      .prepare(
+        `
+          SELECT MAX(time) AS latest_entry_time
+          FROM ledger_entries
+          WHERE profile = ?
+        `,
+      )
+      .get(profile) as SqliteLatestEntryTimeRow;
+    const anchorTime =
+      latestEntryTimeRow.latest_entry_time ?? Math.floor(Date.now() / 1000);
+    const anchorDate = new Date(anchorTime * 1000);
+    const monthStart = localMonthStartEpoch(anchorDate);
+    const monthToDateRow = this.#database
+      .prepare(
+        `
+          SELECT
+            SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income,
+            SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS expenses,
+            SUM(amount) AS net
+          FROM ledger_entries
+          WHERE profile = @profile
+            AND time >= @monthStart
+            AND time <= @anchorTime
+        `,
+      )
+      .get({ profile, monthStart, anchorTime }) as SqliteCashflowRow;
 
     return {
       profile,
@@ -2479,6 +2537,14 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       income: row.income ?? 0,
       expenses: row.expenses ?? 0,
       net: row.net ?? 0,
+      monthToDate: {
+        month: localMonthKey(anchorDate),
+        from: localDateKey(new Date(monthStart * 1000)),
+        to: localDateKey(anchorDate),
+        income: monthToDateRow.income ?? 0,
+        expenses: monthToDateRow.expenses ?? 0,
+        net: monthToDateRow.net ?? 0,
+      },
       currencies: Array.isArray(currencies)
         ? currencies.filter((currency): currency is number => {
             return typeof currency === "number";

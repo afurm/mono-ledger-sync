@@ -396,6 +396,7 @@ const ledgerSummaryResponseSchema = {
     "income",
     "expenses",
     "net",
+    "monthToDate",
     "currencies",
   ],
   properties: {
@@ -405,6 +406,18 @@ const ledgerSummaryResponseSchema = {
     income: { type: "number" },
     expenses: { type: "number" },
     net: { type: "number" },
+    monthToDate: {
+      type: "object",
+      required: ["month", "from", "to", "income", "expenses", "net"],
+      properties: {
+        month: { type: "string" },
+        from: { type: "string" },
+        to: { type: "string" },
+        income: { type: "number" },
+        expenses: { type: "number" },
+        net: { type: "number" },
+      },
+    },
     currencies: { type: "array", items: { type: "number" } },
     lastSyncedAt: { type: "string" },
     oldestSyncCursorUpdatedAt: { type: "string" },
