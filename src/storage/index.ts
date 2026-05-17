@@ -41,6 +41,7 @@ export type {
   LedgerCategorySpending,
   LedgerJar,
   LedgerEntry,
+  LedgerEntryCategorySource,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
   LedgerEntrySplitPlanUpdate,

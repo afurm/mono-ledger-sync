@@ -176,6 +176,10 @@ test("rules UI keeps current rule previews and conflicts aligned", async () => {
     appSource,
     /function findRuleConflicts\(\s*entries:[\s\S]*rules:/,
   );
+  assert.match(appSource, /entry\.categorySource === "manual"/);
+  assert.match(appSource, /entry\.categorySource === "user_rule"/);
+  assert.match(appSource, /entry\.categorySource === "system_rule"/);
+  assert.match(appSource, /entry\.categoryRuleVersion/);
   assert.match(appSource, /findRuleConflicts\(entries, rules\)/);
   assert.match(appSource, /rules=\{categoryRuleSummaries\}/);
   assert.doesNotMatch(

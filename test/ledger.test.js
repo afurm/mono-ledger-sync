@@ -921,6 +921,64 @@ test("applies user-defined category rules before built-in sync categories", asyn
       assert.equal(transactions.total, 1);
       assert.equal(transactions.entries[0].categoryId, "utilities");
       assert.equal(transactions.entries[0].categoryName, "Utilities");
+      assert.equal(transactions.entries[0].categorySource, "user_rule");
+      assert.equal(
+        transactions.entries[0].categoryRuleId,
+        "grocery-utilities-override",
+      );
+      assert.equal(
+        transactions.entries[0].categoryRuleVersion,
+        "2026-05-01T00:00:00.000Z",
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("stores system category rule metadata on synced ledger entries", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "system-grocery-rule-match",
+        time: 1_775_001_880,
+        description: "Fixture Grocery LLC",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -2450,
+        operationAmount: -2450,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 97_550,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [createLedgerEntryFromStatementItem(accountId, statementItem)],
+      );
+
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(page.entries[0]?.categoryId, "groceries");
+      assert.equal(page.entries[0]?.categoryName, "Groceries");
+      assert.equal(page.entries[0]?.categorySource, "system_rule");
+      assert.equal(page.entries[0]?.categoryRuleId, "groceries-mcc-or-text");
+      assert.match(
+        page.entries[0]?.categoryRuleVersion ?? "",
+        /^\d{4}-\d{2}-\d{2}T/,
+      );
     } finally {
       await db.close();
     }
@@ -1192,6 +1250,9 @@ test("keeps manual transaction edits when unchanged statement items resync", asy
       assert.equal(secondRun.skipped, 1);
       assert.equal(page.entries[0]?.categoryId, "travel");
       assert.equal(page.entries[0]?.categoryName, "Travel");
+      assert.equal(page.entries[0]?.categorySource, "manual");
+      assert.equal(page.entries[0]?.categoryRuleId, undefined);
+      assert.equal(page.entries[0]?.categoryRuleVersion, undefined);
       assert.equal(page.entries[0]?.merchantName, "Manual Book Merchant");
     } finally {
       await db.close();
@@ -2683,6 +2744,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0015_query_performance_indexes",
         "0016_merchant_cleanup_rules",
         "0017_ledger_entry_manual_overrides",
+        "0018_ledger_entry_category_rule_metadata",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -2728,7 +2790,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(afterMigration.syncRuns, 1);
         assert.equal(
           afterMigration.migrations.at(-1),
-          "0017_ledger_entry_manual_overrides",
+          "0018_ledger_entry_category_rule_metadata",
         );
 
         const summary = await db.getLedgerSummary(profile);
@@ -3651,6 +3713,8 @@ test("creates ledger and budget query performance indexes", async () => {
       assert.ok(indexes.includes("idx_ledger_entries_profile_time"));
       assert.ok(indexes.includes("idx_ledger_entries_profile_category_time"));
       assert.ok(indexes.includes("idx_ledger_entries_profile_time_category"));
+      assert.ok(indexes.includes("idx_ledger_entries_category_source"));
+      assert.ok(indexes.includes("idx_ledger_entries_category_rule"));
       assert.ok(indexes.includes("idx_budgets_profile_category_period"));
       assert.ok(indexes.includes("idx_budget_periods_profile_period"));
     } finally {
