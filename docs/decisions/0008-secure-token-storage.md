@@ -40,10 +40,16 @@ that limitation in the local UI.
 
 ## Consequences
 
-The TypeScript server can keep using an in-memory token while the project is a
-local web app package. Packaged desktop work should add the platform adapters
-behind the secure-storage boundary instead of widening SQLite tables or writing
-tokens to app config files.
+The TypeScript server uses the secure-storage boundary for tokens saved through
+the local API. Linux can use Secret Service directly because `secret-tool store`
+accepts the secret through stdin. macOS and Windows continue through the
+session-only fallback until a packaged desktop host can bridge Keychain Services
+and Credential Manager without passing secrets through shell arguments or adding
+a native dependency to the core package.
+
+Packaged desktop work should add or replace platform adapters behind the
+secure-storage boundary instead of widening SQLite tables or writing tokens to
+app config files.
 
 Tests and CI stay fixture-first. Any live adapter check must remain opt-in and
 credential-driven through environment variables so pull-request validation does

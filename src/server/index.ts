@@ -61,6 +61,10 @@ import type {
 } from "../storage/index.js";
 import type { SyncLedgerResult } from "../sync/index.js";
 import { logStructured } from "../logging/index.js";
+import {
+  createDefaultMonobankTokenStore,
+  type MonobankTokenStore,
+} from "../security/index.js";
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
@@ -91,6 +95,7 @@ export interface LocalApiServerOptions {
   openBrowser?: boolean;
   monobankToken?: string;
   monobankBaseUrl?: string;
+  monobankTokenStore?: MonobankTokenStore;
   now?: () => number;
   webhookRateLimitMaxRequests?: number;
   webhookRateLimitWindowMs?: number;
@@ -2332,6 +2337,12 @@ export function createLocalApiServer(
   let url: string | undefined;
   let servicesPromise: Promise<LocalAppServices> | undefined;
   let monobankToken = resolveMonobankToken(options);
+  const shouldLoadStoredMonobankToken =
+    options.monobankToken === undefined &&
+    (process.env.MONOBANK_TOKEN === undefined ||
+      process.env.MONOBANK_TOKEN.trim() === "");
+  const monobankTokenStore =
+    options.monobankTokenStore ?? createDefaultMonobankTokenStore();
   const monobankBaseUrl = resolveMonobankBaseUrl(options);
   const configuredSource = resolveConfiguredSource(options);
   let source = configuredSource ?? "fixture";
@@ -2376,6 +2387,12 @@ export function createLocalApiServer(
   async function loadStoredSettings(): Promise<void> {
     storedSettingsLoadPromise ??= (async () => {
       if (configuredSource !== undefined) {
+        if (shouldLoadStoredMonobankToken && monobankToken === undefined) {
+          monobankToken = await monobankTokenStore.getToken(
+            resolveProfile(options),
+          );
+        }
+
         return;
       }
 
@@ -2391,6 +2408,10 @@ export function createLocalApiServer(
 
         if (settings?.source !== undefined) {
           source = settings.source;
+        }
+
+        if (shouldLoadStoredMonobankToken && monobankToken === undefined) {
+          monobankToken = await monobankTokenStore.getToken(profile);
         }
       } finally {
         await db.close();
@@ -2440,11 +2461,14 @@ export function createLocalApiServer(
   }
 
   async function removeMonobankToken(): Promise<LocalApiMonobankTokenStatus> {
+    const profile = resolveProfile(options);
+
+    await monobankTokenStore.deleteToken(profile);
     monobankToken = undefined;
     await rebuildServices();
 
     return {
-      profile: resolveProfile(options),
+      profile,
       hasToken: false,
     };
   }
@@ -2453,6 +2477,7 @@ export function createLocalApiServer(
     token: string,
     profile: string,
   ): Promise<LocalApiMonobankTokenStatus> {
+    await monobankTokenStore.setToken(profile, token);
     monobankToken = token;
     await rebuildServices();
 

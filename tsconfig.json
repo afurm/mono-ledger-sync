@@ -23,6 +23,7 @@
     "src/exports/**/*.ts",
     "src/monobank/**/*.ts",
     "src/privacy/**/*.ts",
+    "src/security/**/*.ts",
     "src/server/**/*.ts",
     "src/sqlite/**/*.ts",
     "src/storage/**/*.ts",

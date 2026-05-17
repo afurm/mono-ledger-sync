@@ -30,6 +30,10 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
+    "./security": {
+      "types": "./dist/security/index.d.ts",
+      "import": "./dist/security/index.js"
+    },
     "./sqlite": {
       "types": "./dist/sqlite/index.d.ts",
       "import": "./dist/sqlite/index.js"
