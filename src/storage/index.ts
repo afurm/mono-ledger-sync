@@ -116,6 +116,7 @@ export interface LedgerDb {
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,

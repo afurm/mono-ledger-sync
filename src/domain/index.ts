@@ -486,4 +486,6 @@ export interface RecurringItem {
   isActive: boolean;
   startedAt?: string;
   lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
