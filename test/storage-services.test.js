@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3");
 
 import { createBundledFixtureMonobankAdapter } from "../dist/monobank/index.js";
 import {
@@ -197,6 +201,166 @@ test("write service delegates annotation and split-plan updates", async () => {
       assert.equal(split?.splitPlan?.length, 1);
       assert.equal(split?.splitPlan?.[0]?.category, "testing");
       assert.equal(split?.splitPlan?.[0]?.amount, 250);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("query service projects upcoming recurring payments", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const database = new Database(databasePath);
+
+      try {
+        database.pragma("foreign_keys = ON");
+        database.exec(`
+          INSERT INTO accounts (
+            profile,
+            id,
+            type,
+            currency_code,
+            balance,
+            credit_limit,
+            masked_pan_json,
+            raw_json,
+            updated_at
+          ) VALUES (
+            'demo',
+            'account-uah',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{}',
+            '2026-05-17T08:00:00.000Z'
+          );
+
+          INSERT INTO recurring_items (
+            profile,
+            id,
+            account_id,
+            category_id,
+            merchant_name,
+            frequency,
+            expected_amount_min,
+            expected_amount_max,
+            is_active,
+            started_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          ) VALUES
+            (
+              'demo',
+              'weekly-gym',
+              'account-uah',
+              'subscriptions',
+              'Fixture Gym',
+              'weekly',
+              15000,
+              15000,
+              1,
+              '2026-04-01T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z',
+              '2026-04-01T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'monthly-internet',
+              'account-uah',
+              'subscriptions',
+              'Fixture Internet',
+              'monthly',
+              42000,
+              46000,
+              1,
+              '2026-01-20T00:00:00.000Z',
+              '2026-04-20T08:00:00.000Z',
+              '2026-01-20T00:00:00.000Z',
+              '2026-04-20T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'inactive-plan',
+              'account-uah',
+              'subscriptions',
+              'Inactive Plan',
+              'monthly',
+              1000,
+              1000,
+              0,
+              '2026-01-01T00:00:00.000Z',
+              '2026-04-01T00:00:00.000Z',
+              '2026-01-01T00:00:00.000Z',
+              '2026-04-01T00:00:00.000Z'
+            );
+        `);
+      } finally {
+        database.close();
+      }
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const upcoming = await queryService.listUpcomingRecurringPayments(
+        undefined,
+        new Date("2026-05-17T12:00:00.000Z"),
+      );
+
+      assert.deepEqual(
+        upcoming.map((payment) => [
+          payment.recurringItemId,
+          payment.nextDueAt,
+          payment.daysUntilDue,
+          payment.expectedAmountMin,
+          payment.expectedAmountMax,
+          payment.currencyCode,
+          payment.isOverdue,
+        ]),
+        [
+          [
+            "weekly-gym",
+            "2026-05-17T00:00:00.000Z",
+            0,
+            15000,
+            15000,
+            980,
+            false,
+          ],
+          [
+            "monthly-internet",
+            "2026-05-20T00:00:00.000Z",
+            3,
+            42000,
+            46000,
+            980,
+            false,
+          ],
+        ],
+      );
+      assert.deepEqual(
+        await queryServices.recurringItems.listUpcomingRecurringPayments(
+          undefined,
+          new Date("2026-05-17T12:00:00.000Z"),
+        ),
+        upcoming,
+      );
     } finally {
       await db.close();
     }

@@ -20,6 +20,7 @@ export {
   type StoredWebhookEvent,
   type SyncCursor,
   type SyncRun,
+  type UpcomingRecurringPayment,
 } from "./storage/index.js";
 export {
   type DomainErrorCategory,
@@ -46,6 +47,7 @@ export {
   type RecurringItem,
   type SyncCursor as DomainSyncCursor,
   type SyncRun as DomainSyncRun,
+  type UpcomingRecurringPayment as DomainUpcomingRecurringPayment,
 } from "./domain/index.js";
 export {
   bundledMonobankFixturesDir,

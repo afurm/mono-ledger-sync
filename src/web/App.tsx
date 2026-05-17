@@ -3780,6 +3780,111 @@ function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
+function recurringPaymentAmountLabel(
+  payment: LocalAppSnapshot["upcomingRecurringPayments"][number],
+): string {
+  if (
+    payment.expectedAmountMin !== undefined &&
+    payment.expectedAmountMax !== undefined &&
+    payment.expectedAmountMin !== payment.expectedAmountMax
+  ) {
+    return `${formatMinorAmount(
+      payment.expectedAmountMin,
+      payment.currencyCode,
+    )} - ${formatMinorAmount(payment.expectedAmountMax, payment.currencyCode)}`;
+  }
+
+  const amount = payment.expectedAmountMax ?? payment.expectedAmountMin;
+
+  return amount === undefined
+    ? currencyLabel(payment.currencyCode)
+    : formatMinorAmount(amount, payment.currencyCode);
+}
+
+function recurringPaymentDueLabel(
+  payment: LocalAppSnapshot["upcomingRecurringPayments"][number],
+): string {
+  if (payment.daysUntilDue < 0) {
+    return `${Math.abs(payment.daysUntilDue)}d overdue`;
+  }
+
+  if (payment.daysUntilDue === 0) {
+    return "Due today";
+  }
+
+  return `Due in ${payment.daysUntilDue}d`;
+}
+
+function UpcomingRecurringPaymentsCard({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot;
+}) {
+  const rows = snapshot.upcomingRecurringPayments.slice(0, 6);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Upcoming recurring payments</CardTitle>
+        <CardDescription>
+          Active recurring charges projected from local schedule data.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No active recurring payments found in the current ledger.
+          </p>
+        ) : (
+          rows.map((payment) => {
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              accountId: payment.accountId,
+              ...(payment.categoryId === undefined
+                ? {}
+                : { categoryId: payment.categoryId }),
+              ...(payment.merchantName === undefined
+                ? {}
+                : { merchantName: payment.merchantName }),
+            });
+
+            return (
+              <a
+                className="flex items-start justify-between gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={payment.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <FileClockIcon className="size-4 shrink-0 text-primary" />
+                    <p className="truncate text-sm font-medium">
+                      {payment.merchantName ?? payment.recurringItemId}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatDate(Date.parse(payment.nextDueAt) / 1000)} ·{" "}
+                    {payment.frequency}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold">
+                    {recurringPaymentAmountLabel(payment)}
+                  </p>
+                  <Badge
+                    variant={payment.isOverdue ? "destructive" : "secondary"}
+                  >
+                    {recurringPaymentDueLabel(payment)}
+                  </Badge>
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function OverviewRoute({
   snapshot,
   loading,
@@ -3945,6 +4050,7 @@ function OverviewRoute({
             events={snapshot.webhookEvents}
             onRouteChange={onRouteChange}
           />
+          <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard
             runs={snapshot.syncRuns}

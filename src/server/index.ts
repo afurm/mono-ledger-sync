@@ -61,6 +61,7 @@ import type {
   LedgerEntrySortField,
   LedgerJar,
   LedgerSummary,
+  UpcomingRecurringPayment,
   StoredWebhookEvent,
   SyncRun,
 } from "../storage/index.js";
@@ -450,6 +451,14 @@ const ledgerCategoriesResponseSchema = {
 } as const;
 
 const ledgerCategorySpendingResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const upcomingRecurringPaymentsResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2061,6 +2070,24 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listCategorySpending(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/upcoming-recurring-payments`,
+    {
+      schema: {
+        response: {
+          200: upcomingRecurringPaymentsResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly UpcomingRecurringPayment[]> => {
+      const services = await getServices();
+
+      return services.queryService.listUpcomingRecurringPayments(
+        services.profile,
+      );
     },
   );
 

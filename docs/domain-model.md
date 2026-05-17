@@ -44,6 +44,8 @@ configuration, and direct filesystem behavior.
   and reopen workflows are enabled.
 - `RecurringItem` defines the recurring transaction detection contract before
   recurring calendars and alerts are enabled.
+- `UpcomingRecurringPayment` defines the projected recurring payment row used by
+  local schedule views.
 
 ## Error and activity contracts
 
