@@ -283,6 +283,22 @@ function formatSyncRunTimestamp(run: SyncRun): string {
     : (run.finishedAt ?? run.startedAt);
 }
 
+function syncRunCanRefreshReports(run: SyncRun): boolean {
+  return run.status === "success" || run.status === "partial";
+}
+
+function syncRunLedgerWriteCount(run: SyncRun): number {
+  return run.itemsInserted + run.itemsUpdated;
+}
+
+function syncRunLedgerWriteSeverity(run: SyncRun): LocalActivityEventSeverity {
+  if (run.status === "partial") {
+    return "partial";
+  }
+
+  return syncRunSeverity(run.status);
+}
+
 function webhookDeliveryPending(status: DomainWebhookEventStatus): boolean {
   return status === "pending";
 }
@@ -365,6 +381,41 @@ export function buildLocalActivityEvents(
         severity: "warning",
         source: run.profile,
         referenceId: run.id,
+      });
+    }
+
+    const timestamp = formatSyncRunTimestamp(run);
+    const ledgerWriteCount = syncRunLedgerWriteCount(run);
+
+    if (ledgerWriteCount > 0) {
+      events.push({
+        id: `sync-run:${run.id}:ledger-write`,
+        type: "ledger_write",
+        title: "Ledger updated",
+        details: `${ledgerWriteCount} local ledger ${
+          ledgerWriteCount === 1 ? "entry" : "entries"
+        } written from ${syncRunSourceLabel(run.source)}`,
+        timestamp,
+        severity: syncRunLedgerWriteSeverity(run),
+        source: run.profile,
+        referenceId: run.id,
+        correlationId: run.id,
+      });
+    }
+
+    if (syncRunCanRefreshReports(run)) {
+      events.push({
+        id: `sync-run:${run.id}:report-refresh`,
+        type: "report_refresh",
+        title: "Reports refreshed",
+        details: `Local summaries refreshed after ${syncRunSourceLabel(
+          run.source,
+        )}`,
+        timestamp,
+        severity: run.status === "partial" ? "partial" : "success",
+        source: run.profile,
+        referenceId: run.id,
+        correlationId: run.id,
       });
     }
   }

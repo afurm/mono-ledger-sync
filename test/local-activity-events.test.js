@@ -76,7 +76,7 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
 
   const eventIds = events.map((event) => event.id);
 
-  assert.equal(events.length, 8);
+  assert.equal(events.length, 11);
   assert.equal(eventIds[0], "webhook:webhook-1");
   assert.deepEqual(eventIds[1], "webhook:webhook-1:warning");
 
@@ -109,7 +109,7 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
     true,
   );
 
-  assert.equal(idsByTimestamp["2026-06-01T11:10:00Z"].length, 2);
+  assert.equal(idsByTimestamp["2026-06-01T11:10:00Z"].length, 3);
   assert.equal(
     idsByTimestamp["2026-06-01T11:10:00Z"].includes("sync-run:run-failed"),
     true,
@@ -120,13 +120,31 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
     ),
     true,
   );
+  assert.equal(
+    idsByTimestamp["2026-06-01T11:10:00Z"].includes(
+      "sync-run:run-failed:ledger-write",
+    ),
+    true,
+  );
 
   assert.equal(idsByTimestamp["2026-06-01T10:00:00Z"].length, 1);
   assert.equal(idsByTimestamp["2026-06-01T10:00:00Z"][0], "webhook:webhook-2");
-  assert.equal(idsByTimestamp["2026-06-01T09:05:00Z"].length, 1);
+  assert.equal(idsByTimestamp["2026-06-01T09:05:00Z"].length, 3);
   assert.equal(
     idsByTimestamp["2026-06-01T09:05:00Z"][0],
     "sync-run:run-success",
+  );
+  assert.equal(
+    idsByTimestamp["2026-06-01T09:05:00Z"].includes(
+      "sync-run:run-success:ledger-write",
+    ),
+    true,
+  );
+  assert.equal(
+    idsByTimestamp["2026-06-01T09:05:00Z"].includes(
+      "sync-run:run-success:report-refresh",
+    ),
+    true,
   );
 
   assert.equal(
@@ -155,8 +173,28 @@ test("buildLocalActivityEvents emits sync lifecycle events with warning and erro
     "error",
   );
   assert.equal(
+    events.find((event) => event.id === "sync-run:run-failed:ledger-write")
+      ?.severity,
+    "error",
+  );
+  assert.equal(
     events.find((event) => event.id === "sync-run:run-success")?.severity,
     "success",
+  );
+  assert.equal(
+    events.find((event) => event.id === "sync-run:run-success:ledger-write")
+      ?.type,
+    "ledger_write",
+  );
+  assert.equal(
+    events.find((event) => event.id === "sync-run:run-success:ledger-write")
+      ?.correlationId,
+    "run-success",
+  );
+  assert.equal(
+    events.find((event) => event.id === "sync-run:run-success:report-refresh")
+      ?.type,
+    "report_refresh",
   );
 });
 
@@ -235,5 +273,63 @@ test("buildLocalActivityEvents maps webhook status-specific activity variants", 
     events.find((event) => event.id === "webhook:webhook-failed:error")
       ?.severity,
     "error",
+  );
+});
+
+test("buildLocalActivityEvents emits failed ledger writes without failed report refreshes", () => {
+  const events = buildLocalActivityEvents(
+    [
+      {
+        id: "run-partial",
+        profile: "demo",
+        source: "monobank",
+        status: "partial",
+        startedAt: "2026-06-03T10:00:00Z",
+        finishedAt: "2026-06-03T10:05:00Z",
+        apiCalls: 4,
+        windowsFetched: 2,
+        itemsSeen: 20,
+        itemsInserted: 7,
+        itemsUpdated: 1,
+        itemsSkipped: 2,
+        rateLimited: 1,
+      },
+      {
+        id: "run-failed",
+        profile: "demo",
+        source: "monobank",
+        status: "failed",
+        startedAt: "2026-06-03T09:00:00Z",
+        finishedAt: "2026-06-03T09:01:00Z",
+        apiCalls: 1,
+        windowsFetched: 0,
+        itemsSeen: 0,
+        itemsInserted: 3,
+        itemsUpdated: 0,
+        itemsSkipped: 0,
+        rateLimited: 0,
+      },
+    ],
+    [],
+  );
+
+  assert.equal(
+    events.find((event) => event.id === "sync-run:run-partial:ledger-write")
+      ?.severity,
+    "partial",
+  );
+  assert.equal(
+    events.find((event) => event.id === "sync-run:run-partial:report-refresh")
+      ?.severity,
+    "partial",
+  );
+  assert.equal(
+    events.find((event) => event.id === "sync-run:run-failed:ledger-write")
+      ?.severity,
+    "error",
+  );
+  assert.equal(
+    events.some((event) => event.id === "sync-run:run-failed:report-refresh"),
+    false,
   );
 });
