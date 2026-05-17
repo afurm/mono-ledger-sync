@@ -1034,6 +1034,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0012_budget_periods",
         "0013_recurring_items",
         "0014_tags",
+        "0015_query_performance_indexes",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1053,6 +1054,46 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.equal(accounts[0].balance, 100000);
     } finally {
       await db.close();
+    }
+  });
+});
+
+test("creates ledger and budget query performance indexes", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile: "demo",
+    });
+
+    try {
+      await db.migrate();
+    } finally {
+      await db.close();
+    }
+
+    const database = new Database(databasePath, { readonly: true });
+
+    try {
+      const indexes = database
+        .prepare(
+          `
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'index'
+            ORDER BY name
+          `,
+        )
+        .all()
+        .map((row) => row.name);
+
+      assert.ok(indexes.includes("idx_ledger_entries_profile_account"));
+      assert.ok(indexes.includes("idx_ledger_entries_profile_time"));
+      assert.ok(indexes.includes("idx_ledger_entries_profile_category_time"));
+      assert.ok(indexes.includes("idx_ledger_entries_profile_time_category"));
+      assert.ok(indexes.includes("idx_budgets_profile_category_period"));
+      assert.ok(indexes.includes("idx_budget_periods_profile_period"));
+    } finally {
+      database.close();
     }
   });
 });

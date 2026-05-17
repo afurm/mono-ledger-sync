@@ -849,6 +849,23 @@ const migrations: readonly SqliteMigration[] = [
         ON tags(profile, normalized_name);
     `,
   },
+  {
+    id: "0015_query_performance_indexes",
+    description: "Add ledger and budget query indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_ledger_entries_profile_category_time
+        ON ledger_entries(profile, category_id, time DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_ledger_entries_profile_time_category
+        ON ledger_entries(profile, time DESC, category_id);
+
+      CREATE INDEX IF NOT EXISTS idx_budgets_profile_category_period
+        ON budgets(profile, category_id, period_start DESC, period_end, id);
+
+      CREATE INDEX IF NOT EXISTS idx_budget_periods_profile_period
+        ON budget_periods(profile, period_start DESC, budget_id, id);
+    `,
+  },
 ];
 
 function nowIso(): string {
