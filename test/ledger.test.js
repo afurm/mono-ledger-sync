@@ -14,6 +14,7 @@ import {
   createBundledFixtureMonobankAdapter,
   loadMonobankFixtureSet,
 } from "../dist/monobank/index.js";
+import { createSessionMonobankTokenStore } from "../dist/security/index.js";
 import { createLocalApiServer } from "../dist/server/index.js";
 import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
 import {
@@ -1277,10 +1278,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
 
 test("local API returns auth_required for monobank sync without token", async () => {
   await withTempLedger(async ({ tempRoot }) => {
+    const monobankTokenStore = createSessionMonobankTokenStore();
+    await monobankTokenStore.setToken("demo", "ignored-stored-token");
+
     const server = createLocalApiServer({
       profile: "demo",
       source: "monobank",
       monobankToken: "",
+      monobankTokenStore,
       dataDir: tempRoot,
       host: "127.0.0.1",
       port: 55665,
@@ -1435,12 +1440,14 @@ test("local API sync with monobank source uses env token and base URL", async ()
 
 test("local API token endpoint saves and deletes monobank token state", async () => {
   await withTempLedger(async ({ tempRoot }) => {
+    const monobankTokenStore = createSessionMonobankTokenStore();
     const server = createLocalApiServer({
       profile: "demo",
       source: "monobank",
       dataDir: tempRoot,
       host: "127.0.0.1",
       port: 55666,
+      monobankTokenStore,
     });
 
     try {
@@ -1560,6 +1567,75 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       });
     } finally {
       await server.close();
+    }
+  });
+});
+
+test("local API loads saved monobank token from token store", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const monobankTokenStore = createSessionMonobankTokenStore();
+    const firstServer = createLocalApiServer({
+      profile: "demo",
+      source: "monobank",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 55667,
+      monobankTokenStore,
+    });
+
+    try {
+      const saveResponse = await firstServer.inject({
+        method: "POST",
+        url: "/api/app/token",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          profile: "demo",
+          token: "stored-monobank-token",
+        }),
+      });
+
+      assert.equal(saveResponse.statusCode, 200);
+      assert.deepEqual(saveResponse.json(), {
+        profile: "demo",
+        hasToken: true,
+      });
+    } finally {
+      await firstServer.close();
+    }
+
+    const previousToken = process.env.MONOBANK_TOKEN;
+    process.env.MONOBANK_TOKEN = "";
+
+    try {
+      const secondServer = createLocalApiServer({
+        profile: "demo",
+        source: "monobank",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55668,
+        monobankTokenStore,
+      });
+
+      const configResponse = await secondServer.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+
+      assert.equal(configResponse.statusCode, 200);
+      assert.deepEqual(configResponse.json().token, {
+        profile: "demo",
+        hasToken: true,
+      });
+
+      await secondServer.close();
+    } finally {
+      if (previousToken === undefined) {
+        Reflect.deleteProperty(process.env, "MONOBANK_TOKEN");
+      } else {
+        process.env.MONOBANK_TOKEN = previousToken;
+      }
     }
   });
 });

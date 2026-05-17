@@ -117,6 +117,13 @@ adapter. It skips unless `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1` and
 `MONOBANK_TOKEN` are set, so default local and pull-request validation never
 calls the live API.
 
+The local API token endpoint stores saved Monobank tokens through the default
+token store. Linux uses Secret Service when available. macOS and Windows keep
+session-only handling until a packaged desktop host can bridge Keychain Services
+and Credential Manager without passing secrets through shell arguments.
+Unsupported or unavailable secure stores fall back to the running session
+instead of writing plaintext credentials to SQLite or config files.
+
 Release automation is documented in [docs/release.md](docs/release.md).
 Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).
 Common local workflows are documented in
