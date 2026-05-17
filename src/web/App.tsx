@@ -138,6 +138,7 @@ import {
   clearMonobankToken,
   saveMonobankToken,
   runFixtureSync,
+  setMonobankSource,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
 } from "./api";
@@ -4396,6 +4397,13 @@ function SettingsRoute({
   const [isSavingToken, setIsSavingToken] = useState(false);
   const [isDeletingToken, setIsDeletingToken] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
+  const [sourceActionError, setSourceActionError] = useState<
+    string | undefined
+  >();
+  const [sourceActionMessage, setSourceActionMessage] = useState<
+    string | undefined
+  >();
 
   if (loading && !snapshot) {
     return <SettingsLoadingSkeleton />;
@@ -4413,6 +4421,7 @@ function SettingsRoute({
   const isBusy = isSavingToken || isDeletingToken;
   const isTokenInputValid = tokenInput.trim().length > 0;
   const isMonobankSource = snapshot.config.source === "monobank";
+  const isConfigBusy = isSavingToken || isDeletingToken || isSwitchingSource;
 
   async function saveToken(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -4463,6 +4472,28 @@ function SettingsRoute({
       );
     } finally {
       setIsDeletingToken(false);
+    }
+  }
+
+  async function setSource(
+    nextSource: LocalAppSnapshot["config"]["source"],
+  ): Promise<void> {
+    setIsSwitchingSource(true);
+    setSourceActionError(undefined);
+    setSourceActionMessage(undefined);
+
+    try {
+      await setMonobankSource(nextSource);
+      setSourceActionMessage(
+        `Source switched to ${nextSource} mode for the local API session.`,
+      );
+      await onRefresh();
+    } catch (error) {
+      setSourceActionError(
+        error instanceof Error ? error.message : "Unable to switch source.",
+      );
+    } finally {
+      setIsSwitchingSource(false);
     }
   }
 
@@ -4611,6 +4642,35 @@ function SettingsRoute({
             Source:{" "}
             <span className="font-medium">{snapshot.config.source}</span>
           </p>
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Data source
+            </span>
+            <div className="flex items-center gap-2">
+              <Select
+                value={snapshot.config.source}
+                onValueChange={(value) =>
+                  void setSource(value as LocalAppSnapshot["config"]["source"])
+                }
+                disabled={isConfigBusy}
+              >
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="Select source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="fixture">
+                      Fixture (offline demo)
+                    </SelectItem>
+                    <SelectItem value="monobank">Monobank API</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                {isConfigBusy ? "Updating source..." : "Switch source"}
+              </span>
+            </div>
+          </div>
           <p className="text-muted-foreground">
             Data directory:{" "}
             <span className="break-all font-medium">
@@ -4625,6 +4685,21 @@ function SettingsRoute({
           </p>
         </CardContent>
       </Card>
+      {sourceActionError && (
+        <Alert variant="destructive">
+          <AlertCircleIcon />
+          <AlertTitle>Source update failed</AlertTitle>
+          <AlertDescription>{sourceActionError}</AlertDescription>
+        </Alert>
+      )}
+
+      {sourceActionMessage && (
+        <Alert>
+          <CheckCircle2Icon />
+          <AlertTitle>Source updated</AlertTitle>
+          <AlertDescription>{sourceActionMessage}</AlertDescription>
+        </Alert>
+      )}
     </div>
   );
 }
