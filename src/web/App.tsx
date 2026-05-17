@@ -249,6 +249,7 @@ const LOG_EVENT_TYPE_LABELS: Readonly<Record<LocalActivityEventType, string>> =
   };
 
 const TRANSACTION_PAGE_SIZE = 25;
+const OVERVIEW_TRANSACTION_LIMIT = 8;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
 const THEME_STORAGE_KEY = "mono-ledger-sync-theme";
 const HOUR_MS = 60 * 60 * 1000;
@@ -723,6 +724,30 @@ function hasActiveTransactionFilters(
     amountInputToMinor(filters.amountMin) !== undefined ||
     amountInputToMinor(filters.amountMax) !== undefined
   );
+}
+
+function canUseSnapshotTransactionFallback(
+  filters: TransactionFilterFormState,
+): boolean {
+  const defaultFilters = defaultTransactionFilters();
+
+  return (
+    !hasActiveTransactionFilters(filters) &&
+    filters.page === 1 &&
+    filters.sortBy === defaultFilters.sortBy &&
+    filters.sortDirection === defaultFilters.sortDirection
+  );
+}
+
+function snapshotTransactionFallbackPage(
+  snapshot: LocalAppSnapshot,
+): LedgerEntryPage {
+  return {
+    ...snapshot.transactions,
+    total: snapshot.transactions.entries.length,
+    limit: snapshot.transactions.entries.length,
+    offset: 0,
+  };
 }
 
 function hasTransactionFilterInput(
@@ -1926,8 +1951,11 @@ function OfflineBrowsingBanner({
       <AlertTitle>Browsing last local snapshot</AlertTitle>
       <AlertDescription className="text-sky-900/85 dark:text-sky-100/85">
         The local API did not respond: {error}. Existing ledger data for{" "}
-        {snapshot.config.profile} is still visible from the last successful
-        load.
+        {snapshot.config.profile} is still visible from the last successful load
+        {snapshot.offline
+          ? ` at ${formatDateTime(snapshot.offline.cachedAt)}`
+          : ""}
+        .
       </AlertDescription>
       <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
         <Button size="sm" type="button" disabled={loading} onClick={onRefresh}>
@@ -3817,7 +3845,12 @@ function OverviewRoute({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <TransactionTable entries={snapshot.transactions.entries} />
+            <TransactionTable
+              entries={snapshot.transactions.entries.slice(
+                0,
+                OVERVIEW_TRANSACTION_LIMIT,
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -3870,6 +3903,16 @@ function TransactionsRoute({
       })
       .catch((error) => {
         if (!cancelled) {
+          const cachedTransactions =
+            snapshot?.offline && canUseSnapshotTransactionFallback(filters)
+              ? snapshotTransactionFallbackPage(snapshot)
+              : undefined;
+
+          if (cachedTransactions) {
+            setPageState({ status: "ready", data: cachedTransactions });
+            return;
+          }
+
           setPageState((current) => ({
             status: "error",
             ...(current.data ? { data: current.data } : {}),
@@ -3886,8 +3929,10 @@ function TransactionsRoute({
     };
   }, [
     filters,
+    snapshot?.offline,
     snapshot?.summary.lastSyncedAt,
     snapshot?.summary.ledgerEntries,
+    snapshot?.transactions,
     transactionsReloadToken,
   ]);
 
@@ -6496,7 +6541,11 @@ export default function App() {
             )}
 
             <OfflineBrowsingBanner
-              error={loadState.status === "error" ? loadState.error : undefined}
+              error={
+                loadState.status === "error"
+                  ? loadState.error
+                  : snapshot?.offline?.reason
+              }
               snapshot={snapshot}
               loading={loading}
               onRefresh={refresh}

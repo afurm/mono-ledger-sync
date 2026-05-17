@@ -185,6 +185,11 @@ export type LocalActivityEventSeverity = DomainLocalActivityEventSeverity;
 
 export type LocalActivityEvent = DomainLocalActivityEvent;
 
+export interface OfflineSnapshotMetadata {
+  cachedAt: string;
+  reason: string;
+}
+
 export interface LocalAppSnapshot {
   health: LocalApiHealth;
   config: LocalApiAppConfig;
@@ -196,6 +201,103 @@ export interface LocalAppSnapshot {
   webhookEvents: readonly WebhookEvent[];
   activityEvents: readonly LocalActivityEvent[];
   fixtures?: LocalApiFixtureSummary;
+  offline?: OfflineSnapshotMetadata;
+}
+
+interface BrowserStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+interface CachedLocalAppSnapshot {
+  cachedAt: string;
+  snapshot: LocalAppSnapshot;
+}
+
+const LOCAL_APP_SNAPSHOT_CACHE_PREFIX =
+  "mono-ledger-sync:local-app-snapshot:v1:";
+const LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY =
+  "mono-ledger-sync:active-snapshot:v1";
+const LOCAL_APP_TRANSACTION_LIMIT = 25;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Local API unavailable";
+}
+
+function browserStorage(): BrowserStorage | undefined {
+  try {
+    return (globalThis as { localStorage?: BrowserStorage }).localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function snapshotCacheKey(profile: string, databasePath: string): string {
+  return `${LOCAL_APP_SNAPSHOT_CACHE_PREFIX}${encodeURIComponent(
+    profile,
+  )}:${encodeURIComponent(databasePath)}`;
+}
+
+function readCachedJson<T>(key: string): T | undefined {
+  const storage = browserStorage();
+
+  if (!storage) {
+    return undefined;
+  }
+
+  try {
+    const raw = storage.getItem(key);
+
+    return raw ? (JSON.parse(raw) as T) : undefined;
+  } catch {
+    try {
+      storage.removeItem(key);
+    } catch {}
+
+    return undefined;
+  }
+}
+
+function writeCachedJson(key: string, value: unknown): void {
+  const storage = browserStorage();
+
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function cacheableSnapshot(snapshot: LocalAppSnapshot): LocalAppSnapshot {
+  const { offline: _offline, ...cacheable } = snapshot;
+
+  return cacheable;
+}
+
+function readCachedLocalAppSnapshot(
+  cacheKey: string,
+): CachedLocalAppSnapshot | undefined {
+  return readCachedJson<CachedLocalAppSnapshot>(cacheKey);
+}
+
+function readCachedActiveSnapshotKey(): string | undefined {
+  return readCachedJson<string>(LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY);
+}
+
+function writeCachedLocalAppSnapshot(snapshot: LocalAppSnapshot): void {
+  const cacheKey = snapshotCacheKey(
+    snapshot.config.profile,
+    snapshot.config.databasePath,
+  );
+
+  writeCachedJson(LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY, cacheKey);
+  writeCachedJson(cacheKey, {
+    cachedAt: new Date().toISOString(),
+    snapshot: cacheableSnapshot(snapshot),
+  } satisfies CachedLocalAppSnapshot);
 }
 
 function syncRunInProgressLabel(status: SyncRun["status"]): boolean {
@@ -565,45 +667,70 @@ export async function updateLedgerTransactionSplitPlan(
 }
 
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
-  const [
-    health,
-    config,
-    summary,
-    accounts,
-    categories,
-    transactions,
-    syncRuns,
-    webhookEvents,
-  ] = await Promise.all([
-    requestJson<LocalApiHealth>("/api/health"),
-    requestJson<LocalApiAppConfig>("/api/app/config"),
-    requestJson<LedgerSummary>("/api/ledger/summary"),
-    requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
-    requestJson<readonly Category[]>("/api/ledger/categories"),
-    loadLedgerTransactions({ limit: 8 }),
-    requestJson<readonly SyncRun[]>("/api/sync/runs"),
-    requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
-  ]);
+  let config: LocalApiAppConfig | undefined;
 
-  const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
+  try {
+    config = await requestJson<LocalApiAppConfig>("/api/app/config");
 
-  const fixtures =
-    config.source === "fixture"
-      ? await requestJson<LocalApiFixtureSummary>("/api/fixtures/summary")
-      : undefined;
+    const [
+      health,
+      summary,
+      accounts,
+      categories,
+      transactions,
+      syncRuns,
+      webhookEvents,
+    ] = await Promise.all([
+      requestJson<LocalApiHealth>("/api/health"),
+      requestJson<LedgerSummary>("/api/ledger/summary"),
+      requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
+      requestJson<readonly Category[]>("/api/ledger/categories"),
+      loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
+      requestJson<readonly SyncRun[]>("/api/sync/runs"),
+      requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
+    ]);
 
-  return {
-    health,
-    config,
-    summary,
-    accounts,
-    categories,
-    transactions,
-    syncRuns,
-    webhookEvents,
-    activityEvents,
-    ...(fixtures ? { fixtures } : {}),
-  };
+    const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
+
+    const fixtures =
+      config.source === "fixture"
+        ? await requestJson<LocalApiFixtureSummary>("/api/fixtures/summary")
+        : undefined;
+
+    const snapshot = {
+      health,
+      config,
+      summary,
+      accounts,
+      categories,
+      transactions,
+      syncRuns,
+      webhookEvents,
+      activityEvents,
+      ...(fixtures ? { fixtures } : {}),
+    } satisfies LocalAppSnapshot;
+
+    writeCachedLocalAppSnapshot(snapshot);
+
+    return snapshot;
+  } catch (error) {
+    const cacheKey = config
+      ? snapshotCacheKey(config.profile, config.databasePath)
+      : readCachedActiveSnapshotKey();
+    const cached = cacheKey ? readCachedLocalAppSnapshot(cacheKey) : undefined;
+
+    if (cached) {
+      return {
+        ...cached.snapshot,
+        offline: {
+          cachedAt: cached.cachedAt,
+          reason: errorMessage(error),
+        },
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function runFixtureSync(): Promise<void> {
