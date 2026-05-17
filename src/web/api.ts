@@ -65,6 +65,16 @@ export interface LedgerAccount {
   updatedAt: string;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
+  isSystem?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
@@ -179,6 +189,7 @@ export interface LocalAppSnapshot {
   config: LocalApiAppConfig;
   summary: LedgerSummary;
   accounts: readonly LedgerAccount[];
+  categories: readonly Category[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
   webhookEvents: readonly WebhookEvent[];
@@ -558,6 +569,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     config,
     summary,
     accounts,
+    categories,
     transactions,
     syncRuns,
     webhookEvents,
@@ -566,6 +578,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     requestJson<LocalApiAppConfig>("/api/app/config"),
     requestJson<LedgerSummary>("/api/ledger/summary"),
     requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
+    requestJson<readonly Category[]>("/api/ledger/categories"),
     loadLedgerTransactions({ limit: 8 }),
     requestJson<readonly SyncRun[]>("/api/sync/runs"),
     requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
@@ -583,6 +596,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     config,
     summary,
     accounts,
+    categories,
     transactions,
     syncRuns,
     webhookEvents,

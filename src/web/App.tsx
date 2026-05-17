@@ -3668,6 +3668,10 @@ function TransactionsRoute({
   const categoryOptions = useMemo(() => {
     const categories = new Map<string, string>();
 
+    for (const category of snapshot?.categories ?? []) {
+      categories.set(category.id, category.name);
+    }
+
     for (const entry of [
       ...(snapshot?.transactions.entries ?? []),
       ...(pageState.data?.entries ?? []),
@@ -3688,6 +3692,7 @@ function TransactionsRoute({
   }, [
     filters.categoryId,
     pageState.data?.entries,
+    snapshot?.categories,
     snapshot?.transactions.entries,
   ]);
 
@@ -5517,9 +5522,9 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
     builtInRuleSummaries.find((rule) => rule.id === selectedRuleId) ??
     filteredRules[0] ??
     builtInRuleSummaries[0];
-  const categoryCount = new Set(
-    entries.map((entry) => entry.categoryId ?? "uncategorized"),
-  ).size;
+  const categoryCount =
+    snapshot?.categories.length ??
+    new Set(entries.map((entry) => entry.categoryId ?? "uncategorized")).size;
   const merchants = [
     ...new Set(entries.map((entry) => entry.merchantName ?? entry.description)),
   ].filter(Boolean);

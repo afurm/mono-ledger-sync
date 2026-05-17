@@ -1105,6 +1105,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/summary",
       });
+      const categoriesResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/categories",
+      });
       const transactionsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/transactions?search=Silpo",
@@ -1198,6 +1202,20 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(syncBody.stats.itemsSeen, 7);
       assert.equal(summaryResponse.statusCode, 200);
       assert.equal(summaryResponse.json().ledgerEntries, 7);
+      assert.equal(categoriesResponse.statusCode, 200);
+      assert.deepEqual(
+        categoriesResponse.json().map((category) => category.id),
+        [
+          "dining",
+          "groceries",
+          "income",
+          "subscriptions",
+          "transfers",
+          "transport",
+          "travel",
+          "uncategorized",
+        ],
+      );
       assert.equal(transactionsResponse.statusCode, 200);
       assert.equal(transactionsResponse.json().total, 1);
       assert.match(
