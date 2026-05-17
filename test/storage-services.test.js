@@ -64,6 +64,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       });
       const categories = await queryService.listCategories();
       const budgets = await queryService.listBudgets();
+      const budgetPeriods = await queryService.listBudgetPeriods();
       const recurringItems = await queryService.listRecurringItems();
       const runs = await queryService.listSyncRuns();
       const events = await queryService.listWebhookEvents();
@@ -75,6 +76,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const groupedBalances = await queryServices.balances.getAccountBalances();
       const groupedCategories = await queryServices.categories.listCategories();
       const groupedBudgets = await queryServices.budgets.listBudgets();
+      const groupedBudgetPeriods =
+        await queryServices.budgets.listBudgetPeriods();
       const groupedRecurringItems =
         await queryServices.recurringItems.listRecurringItems();
       const groupedRuns = await queryServices.syncState.listSyncRuns();
@@ -91,6 +94,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.ok(categoryIds.includes("income"));
       assert.ok(categoryIds.includes("uncategorized"));
       assert.deepEqual(budgets, []);
+      assert.deepEqual(budgetPeriods, []);
       assert.deepEqual(recurringItems, []);
       assert.equal(runs.length, 1);
       assert.equal(runs[0].profile, profile);
@@ -102,6 +106,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         categoryIds,
       );
       assert.deepEqual(groupedBudgets, []);
+      assert.deepEqual(groupedBudgetPeriods, []);
       assert.deepEqual(groupedRecurringItems, []);
       assert.equal(groupedRuns.length, runs.length);
     } finally {
@@ -275,6 +280,10 @@ test("ledger services factory returns both query and write surfaces", async () =
         "function",
       );
       assert.equal(typeof services.queries.budgets.listBudgets, "function");
+      assert.equal(
+        typeof services.queries.budgets.listBudgetPeriods,
+        "function",
+      );
       assert.equal(
         typeof services.queries.recurringItems.listRecurringItems,
         "function",

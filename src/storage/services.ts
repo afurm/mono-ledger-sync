@@ -1,6 +1,7 @@
 import type {
   AccountBalance,
   Budget,
+  BudgetPeriod,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -35,6 +36,7 @@ export interface LedgerCategoryQueryService {
 
 export interface LedgerBudgetQueryService {
   listBudgets(profile?: string): Promise<readonly Budget[]>;
+  listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
 }
 
 export interface LedgerRecurringItemQueryService {
@@ -127,6 +129,9 @@ export function createLedgerQueryService({
     listBudgets(profile) {
       return db.listBudgets(coerceProfile(profile, defaultProfile));
     },
+    listBudgetPeriods(profile) {
+      return db.listBudgetPeriods(coerceProfile(profile, defaultProfile));
+    },
     async listRecurringItems() {
       return [];
     },
@@ -167,6 +172,7 @@ export function createLedgerQueryServices(
     },
     budgets: {
       listBudgets: query.listBudgets,
+      listBudgetPeriods: query.listBudgetPeriods,
     },
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
