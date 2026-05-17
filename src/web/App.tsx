@@ -137,6 +137,7 @@ import {
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   clearMonobankToken,
+  initializeWorkspace,
   saveMonobankToken,
   runFixtureSync,
   setMonobankSource,
@@ -4454,6 +4455,13 @@ function SettingsRoute({
   const [sourceActionMessage, setSourceActionMessage] = useState<
     string | undefined
   >();
+  const [isInitializingWorkspace, setIsInitializingWorkspace] = useState(false);
+  const [workspaceActionError, setWorkspaceActionError] = useState<
+    string | undefined
+  >();
+  const [workspaceActionMessage, setWorkspaceActionMessage] = useState<
+    string | undefined
+  >();
 
   if (loading && !snapshot) {
     return <SettingsLoadingSkeleton />;
@@ -4570,8 +4578,84 @@ function SettingsRoute({
     }
   }
 
+  async function setupWorkspace(): Promise<void> {
+    setIsInitializingWorkspace(true);
+    setWorkspaceActionError(undefined);
+    setWorkspaceActionMessage(undefined);
+
+    try {
+      const config = await initializeWorkspace();
+      setWorkspaceActionMessage(
+        `Workspace ${config.profile} is ready at ${config.databasePath}.`,
+      );
+      await onRefresh();
+    } catch (error) {
+      setWorkspaceActionError(
+        error instanceof Error ? error.message : "Unable to set up workspace.",
+      );
+    } finally {
+      setIsInitializingWorkspace(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace setup</CardTitle>
+          <CardDescription>
+            Create the local profile workspace and SQLite database before
+            importing data.
+          </CardDescription>
+          <CardAction>
+            <Badge variant="secondary">{activeProfile}</Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Database
+            </span>
+            <span className="break-all font-medium">
+              {snapshot.config.databasePath}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={isInitializingWorkspace || loading}
+              onClick={() => void setupWorkspace()}
+            >
+              <DatabaseIcon data-icon="inline-start" />
+              {isInitializingWorkspace ? "Creating..." : "Create workspace"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading}
+              onClick={() => void onRefresh()}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              Refresh status
+            </Button>
+          </div>
+          {workspaceActionError && (
+            <Alert variant="destructive">
+              <AlertCircleIcon />
+              <AlertTitle>Workspace setup failed</AlertTitle>
+              <AlertDescription>{workspaceActionError}</AlertDescription>
+            </Alert>
+          )}
+          {workspaceActionMessage && (
+            <Alert>
+              <CheckCircle2Icon />
+              <AlertTitle>Workspace ready</AlertTitle>
+              <AlertDescription>{workspaceActionMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Monobank token</CardTitle>

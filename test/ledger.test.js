@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -2029,6 +2030,41 @@ test("local API loads saved monobank token from token store", async () => {
       } else {
         process.env.MONOBANK_TOKEN = previousToken;
       }
+    }
+  });
+});
+
+test("local API creates the first-run workspace database on demand", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const databasePath = path.join(tempRoot, "first-run.sqlite");
+    const server = createLocalApiServer({
+      profile: "first-run",
+      source: "fixture",
+      dataDir: tempRoot,
+    });
+
+    try {
+      assert.equal(existsSync(databasePath), false);
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/app/workspace",
+      });
+      const configResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().profile, "first-run");
+      assert.equal(response.json().source, "fixture");
+      assert.equal(response.json().databasePath, databasePath);
+      assert.equal(response.json().localOnly, true);
+      assert.equal(existsSync(databasePath), true);
+      assert.equal(configResponse.statusCode, 200);
+      assert.equal(configResponse.json().databasePath, databasePath);
+    } finally {
+      await server.close();
     }
   });
 });
