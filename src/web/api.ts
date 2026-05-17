@@ -630,6 +630,14 @@ export async function clearMonobankToken(): Promise<LocalApiMonobankTokenStatus>
   });
 }
 
+export async function initializeWorkspace(): Promise<
+  LocalAppSnapshot["config"]
+> {
+  return requestJson<LocalAppSnapshot["config"]>("/api/app/workspace", {
+    method: "POST",
+  });
+}
+
 export async function setMonobankSource(
   source: LocalAppSnapshot["config"]["source"],
 ): Promise<LocalAppSnapshot["config"]> {

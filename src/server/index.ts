@@ -1793,6 +1793,27 @@ function registerLocalApiRoutes(
   );
 
   app.post(
+    `${localApiRoutePrefix}/app/workspace`,
+    {
+      schema: {
+        response: {
+          200: appConfigResponseSchema,
+        },
+      },
+    },
+    async (): Promise<LocalApiAppConfig> => {
+      const services = await getServices();
+
+      await services.db.migrate();
+      await services.db.updateLocalAppSettings(services.profile, {
+        source: services.source,
+      });
+
+      return readAppConfig();
+    },
+  );
+
+  app.post(
     `${localApiRoutePrefix}/app/source`,
     {
       schema: {
