@@ -14,6 +14,11 @@ test("session monobank token store keeps tokens per profile", async () => {
 
   assert.equal(await store.getToken("demo"), "demo-token");
   assert.equal(await store.getToken("other"), "other-token");
+  assert.deepEqual(await store.getStatus("demo"), {
+    storage: "session",
+    persistence: "session",
+    fallbackReason: "secure_storage_unavailable",
+  });
 
   await store.deleteToken("demo");
 
@@ -58,6 +63,10 @@ test("default monobank token store passes token through stdin for Linux Secret S
 
   await store.setToken("demo", "saved-token");
   assert.equal(await store.getToken("demo"), "stored-token");
+  assert.deepEqual(await store.getStatus("demo"), {
+    storage: "secure",
+    persistence: "persistent",
+  });
   await store.deleteToken("demo");
 
   assert.deepEqual(calls, [
@@ -120,4 +129,9 @@ test("default monobank token store falls back to session storage when secure wri
   await store.setToken("demo", "session-token");
 
   assert.equal(await store.getToken("demo"), "session-token");
+  assert.deepEqual(await store.getStatus("demo"), {
+    storage: "session",
+    persistence: "session",
+    fallbackReason: "secure_storage_write_failed",
+  });
 });

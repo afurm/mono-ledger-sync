@@ -64,6 +64,9 @@ import { logStructured } from "../logging/index.js";
 import {
   createDefaultMonobankTokenStore,
   type MonobankTokenStore,
+  type MonobankTokenStoreFallbackReason,
+  type MonobankTokenStorePersistence,
+  type MonobankTokenStoreStorage,
 } from "../security/index.js";
 
 export const localApiServerFramework = "fastify";
@@ -149,6 +152,9 @@ export interface LocalApiWebhookSettings {
 interface LocalApiMonobankTokenStatus {
   profile: string;
   hasToken: boolean;
+  storage: MonobankTokenStoreStorage;
+  persistence: MonobankTokenStorePersistence;
+  fallbackReason?: MonobankTokenStoreFallbackReason;
 }
 
 export interface LocalApiAppConfig {
@@ -329,10 +335,15 @@ const appConfigResponseSchema = {
     },
     token: {
       type: "object",
-      required: ["profile", "hasToken"],
+      required: ["profile", "hasToken", "storage", "persistence"],
       properties: {
         profile: { type: "string" },
         hasToken: { type: "boolean" },
+        storage: { enum: ["secure", "session"] },
+        persistence: { enum: ["persistent", "session"] },
+        fallbackReason: {
+          enum: ["secure_storage_unavailable", "secure_storage_write_failed"],
+        },
       },
     },
   },
@@ -359,10 +370,15 @@ const appSourceBodySchema = {
 
 const monobankTokenResponseSchema = {
   type: "object",
-  required: ["profile", "hasToken"],
+  required: ["profile", "hasToken", "storage", "persistence"],
   properties: {
     profile: { type: "string" },
     hasToken: { type: "boolean" },
+    storage: { enum: ["secure", "session"] },
+    persistence: { enum: ["persistent", "session"] },
+    fallbackReason: {
+      enum: ["secure_storage_unavailable", "secure_storage_write_failed"],
+    },
   },
 } as const;
 
@@ -1586,6 +1602,14 @@ function registerLocalApiRoutes(
   ) => Promise<LocalApiMonobankTokenStatus>,
   removeMonobankToken: () => Promise<LocalApiMonobankTokenStatus>,
   setSource: (source: LedgerSource) => Promise<void>,
+  getMonobankTokenStoreStatus: (
+    profile: string,
+  ) => Promise<
+    Pick<
+      LocalApiMonobankTokenStatus,
+      "storage" | "persistence" | "fallbackReason"
+    >
+  >,
   localWebhookRoutePath: LocalWebhookRoutePath,
   resolveWebhookSettings: () => Omit<
     LocalApiWebhookSettings,
@@ -1671,6 +1695,9 @@ function registerLocalApiRoutes(
   async function readAppConfig(): Promise<LocalApiAppConfig> {
     const services = await getServices();
     const monobankToken = getMonobankToken();
+    const tokenStoreStatus = await getMonobankTokenStoreStatus(
+      services.profile,
+    );
 
     return {
       profile: services.profile,
@@ -1681,6 +1708,7 @@ function registerLocalApiRoutes(
       token: {
         profile: services.profile,
         hasToken: monobankToken !== undefined,
+        ...tokenStoreStatus,
       },
       webhook: {
         enabled: true,
@@ -2337,6 +2365,8 @@ export function createLocalApiServer(
   let url: string | undefined;
   let servicesPromise: Promise<LocalAppServices> | undefined;
   let monobankToken = resolveMonobankToken(options);
+  let monobankTokenSource: "runtime" | "store" | undefined =
+    monobankToken === undefined ? undefined : "runtime";
   const shouldLoadStoredMonobankToken =
     options.monobankToken === undefined &&
     (process.env.MONOBANK_TOKEN === undefined ||
@@ -2391,6 +2421,8 @@ export function createLocalApiServer(
           monobankToken = await monobankTokenStore.getToken(
             resolveProfile(options),
           );
+          monobankTokenSource =
+            monobankToken === undefined ? undefined : "store";
         }
 
         return;
@@ -2412,6 +2444,8 @@ export function createLocalApiServer(
 
         if (shouldLoadStoredMonobankToken && monobankToken === undefined) {
           monobankToken = await monobankTokenStore.getToken(profile);
+          monobankTokenSource =
+            monobankToken === undefined ? undefined : "store";
         }
       } finally {
         await db.close();
@@ -2460,16 +2494,39 @@ export function createLocalApiServer(
     return monobankToken;
   }
 
+  function runtimeMonobankTokenStatus(): Pick<
+    LocalApiMonobankTokenStatus,
+    "storage" | "persistence"
+  > {
+    return {
+      storage: "session",
+      persistence: "session",
+    };
+  }
+
+  function unknownMonobankTokenStoreStatus(): Pick<
+    LocalApiMonobankTokenStatus,
+    "storage" | "persistence"
+  > {
+    return {
+      storage: "session",
+      persistence: "session",
+    };
+  }
+
   async function removeMonobankToken(): Promise<LocalApiMonobankTokenStatus> {
     const profile = resolveProfile(options);
 
     await monobankTokenStore.deleteToken(profile);
     monobankToken = undefined;
+    monobankTokenSource = undefined;
     await rebuildServices();
+    const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
 
     return {
       profile,
       hasToken: false,
+      ...tokenStoreStatus,
     };
   }
 
@@ -2479,11 +2536,14 @@ export function createLocalApiServer(
   ): Promise<LocalApiMonobankTokenStatus> {
     await monobankTokenStore.setToken(profile, token);
     monobankToken = token;
+    monobankTokenSource = "store";
     await rebuildServices();
+    const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
 
     return {
       profile,
       hasToken: true,
+      ...tokenStoreStatus,
     };
   }
 
@@ -2508,6 +2568,24 @@ export function createLocalApiServer(
     await rebuildServices();
   }
 
+  async function getMonobankTokenStoreStatus(
+    profile: string,
+  ): Promise<
+    Pick<
+      LocalApiMonobankTokenStatus,
+      "storage" | "persistence" | "fallbackReason"
+    >
+  > {
+    if (monobankTokenSource === "runtime") {
+      return Promise.resolve(runtimeMonobankTokenStatus());
+    }
+
+    return (
+      (await monobankTokenStore.getStatus?.(profile)) ??
+      unknownMonobankTokenStoreStatus()
+    );
+  }
+
   registerLocalApiRoutes(
     app,
     options,
@@ -2516,6 +2594,7 @@ export function createLocalApiServer(
     saveMonobankToken,
     removeMonobankToken,
     updateSource,
+    getMonobankTokenStoreStatus,
     localWebhookRoutePath,
     resolveWebhookSettings,
   );

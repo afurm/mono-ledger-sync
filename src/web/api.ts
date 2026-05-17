@@ -29,6 +29,9 @@ export interface LocalApiWebhookSettings {
 export interface LocalApiMonobankTokenStatus {
   profile: string;
   hasToken: boolean;
+  storage: "secure" | "session";
+  persistence: "persistent" | "session";
+  fallbackReason?: "secure_storage_unavailable" | "secure_storage_write_failed";
 }
 
 export interface LocalApiAppConfig {

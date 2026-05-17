@@ -4355,17 +4355,27 @@ function SyncRoute({
   );
 }
 
-function tokenStateLabel(hasToken: boolean): {
+function tokenStateLabel(token: LocalAppSnapshot["config"]["token"]): {
   state: string;
   variant: "default" | "secondary" | "destructive" | "outline";
   description: string;
 } {
-  if (hasToken) {
+  if (token.hasToken && token.persistence === "persistent") {
     return {
       state: "Configured",
       variant: "default",
+      description: "A Monobank token is available from secure local storage.",
+    };
+  }
+
+  if (token.hasToken) {
+    return {
+      state: "Session only",
+      variant: "secondary",
       description:
-        "A Monobank token is available for the running server session.",
+        token.fallbackReason === "secure_storage_write_failed"
+          ? "Secure storage was unavailable during save, so the token is available only until this server stops."
+          : "A Monobank token is available only for the running server session.",
     };
   }
 
@@ -4450,7 +4460,7 @@ function SettingsRoute({
     state: tokenState,
     variant: tokenVariant,
     description,
-  } = tokenStateLabel(snapshot.config.token.hasToken);
+  } = tokenStateLabel(snapshot.config.token);
   const isBusy = isSavingToken || isDeletingToken;
   const tokenValidationMessage = tokenInput
     ? validateTokenInput(tokenInput)
@@ -4723,8 +4733,13 @@ function SettingsRoute({
             <AlertTitle>Local-only token policy</AlertTitle>
             <AlertDescription>
               Tokens are used only by the local API server process. They are not
-              included in exported payloads or persisted to the local ledger.
-              Restarting the local process drops the cached token.
+              included in exported payloads or persisted to the local ledger.{" "}
+              {snapshot.config.token.hasToken &&
+              snapshot.config.token.persistence === "persistent"
+                ? "This profile is using persistent secure token storage."
+                : snapshot.config.token.hasToken
+                  ? "This profile is using session-only token handling; restarting the local process drops the cached token."
+                  : "No Monobank token is currently configured for this profile."}
             </AlertDescription>
           </Alert>
 
