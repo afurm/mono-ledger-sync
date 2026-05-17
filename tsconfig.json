@@ -30,6 +30,7 @@
     "src/sync/**/*.ts",
     "src/web/api.ts",
     "src/web/review.ts",
+    "src/web/sync-summary.ts",
     "src/ui/**/*.ts"
   ]
 }
