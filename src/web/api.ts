@@ -155,6 +155,22 @@ export interface Category {
   updatedAt?: string;
 }
 
+export interface CategoryRule {
+  id: string;
+  categoryId: string;
+  name: string;
+  priority: number;
+  matchType: "condition" | "fallback";
+  merchantContains?: string;
+  descriptionContains?: string;
+  mcc?: number;
+  amountDirection?: "income" | "expense" | "any";
+  isSystem?: boolean;
+  isEnabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface MerchantCleanupRule {
   id: string;
   name: string;
@@ -296,6 +312,7 @@ export interface LocalAppSnapshot {
   accounts: readonly LedgerAccount[];
   jars: readonly LedgerJar[];
   categories: readonly Category[];
+  categoryRules: readonly CategoryRule[];
   merchantCleanupRules: readonly MerchantCleanupRule[];
   categorySpending: readonly LedgerCategorySpending[];
   budgetProgress: readonly BudgetProgress[];
@@ -327,6 +344,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "budgetProgress"
   | "upcomingRecurringPayments"
   | "merchantCleanupRules"
+  | "categoryRules"
 > & {
   netWorthTrend?: NetWorthTrend;
   jars?: readonly LedgerJar[];
@@ -334,6 +352,7 @@ type PersistedLocalAppSnapshot = Omit<
   budgetProgress?: readonly BudgetProgress[];
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
   merchantCleanupRules?: readonly MerchantCleanupRule[];
+  categoryRules?: readonly CategoryRule[];
   summary: Omit<LedgerSummary, "monthToDate"> & {
     monthToDate?: LedgerCashflowSummary;
   };
@@ -432,6 +451,7 @@ function normalizeCachedLocalAppSnapshot(
       budgetProgress: snapshot.budgetProgress ?? [],
       upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
       merchantCleanupRules: snapshot.merchantCleanupRules ?? [],
+      categoryRules: snapshot.categoryRules ?? [],
     },
   };
 }
@@ -855,6 +875,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       accounts,
       jars,
       categories,
+      categoryRules,
       merchantCleanupRules,
       categorySpending,
       budgetProgress,
@@ -869,6 +890,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
       requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
       requestJson<readonly Category[]>("/api/ledger/categories"),
+      requestJson<readonly CategoryRule[]>("/api/ledger/category-rules"),
       requestJson<readonly MerchantCleanupRule[]>(
         "/api/ledger/merchant-cleanup-rules",
       ),
@@ -899,6 +921,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       accounts,
       jars,
       categories,
+      categoryRules,
       merchantCleanupRules,
       categorySpending,
       budgetProgress,

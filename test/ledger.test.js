@@ -878,6 +878,870 @@ test("seeds merchant cleanup rules for built-in merchant normalization", async (
   });
 });
 
+test("applies user-defined category rules before built-in sync categories", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "grocery-utilities-override",
+            categoryId: "utilities",
+            name: "Grocery utilities override",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "grocery",
+            amountDirection: "expense",
+            isEnabled: true,
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+      });
+
+      const transactions = await db.listLedgerEntries({
+        profile,
+        search: "Silpo",
+        limit: 20,
+      });
+
+      assert.equal(transactions.total, 1);
+      assert.equal(transactions.entries[0].categoryId, "utilities");
+      assert.equal(transactions.entries[0].categoryName, "Utilities");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("matches multi-word category rule terms across punctuation", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "book-store-utilities-override",
+            categoryId: "utilities",
+            name: "Book store utilities override",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book store",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "custom-book-store-punctuation",
+        time: 1_775_001_890,
+        description: "Book-store purchase",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1500,
+        operationAmount: -1500,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 118_500,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [createLedgerEntryFromStatementItem(accountId, statementItem)],
+      );
+
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(page.entries[0]?.categoryId, "utilities");
+      assert.equal(page.entries[0]?.categoryName, "Utilities");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("reapplies category rules for unchanged synced statement items", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "custom-book-store",
+        time: 1_775_001_900,
+        description: "Book store purchase",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1500,
+        operationAmount: -1500,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 118_500,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      const firstRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "book-utilities-override",
+            categoryId: "utilities",
+            name: "Book purchases as utilities",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(firstRun.inserted, 1);
+      assert.equal(firstRun.updated, 0);
+      assert.equal(firstRun.skipped, 0);
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 1);
+      assert.equal(secondRun.skipped, 0);
+      assert.equal(page.entries[0]?.categoryId, "utilities");
+      assert.equal(page.entries[0]?.categoryName, "Utilities");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("reapplies category rules after restart without marking stale categories manual", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const accountId = "fixture-account-uah-main";
+    const statementItem = {
+      id: "restart-book-store",
+      time: 1_775_001_905,
+      description: "Book store purchase",
+      mcc: 9999,
+      originalMcc: 9999,
+      amount: -1500,
+      operationAmount: -1500,
+      currencyCode: 980,
+      commissionRate: 0,
+      cashbackAmount: 0,
+      balance: 118_500,
+      hold: false,
+    };
+    const entry = createLedgerEntryFromStatementItem(accountId, statementItem);
+    const firstDb = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await firstDb.migrate();
+      await firstDb.upsertStatementItems(accountId, [statementItem], [entry]);
+      await firstDb.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "restart-book-utilities-override",
+            categoryId: "utilities",
+            name: "Book purchases as utilities",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+    } finally {
+      await firstDb.close();
+    }
+
+    const secondDb = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await secondDb.migrate();
+
+      const secondRun = await secondDb.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const page = await secondDb.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 1);
+      assert.equal(secondRun.skipped, 0);
+      assert.equal(page.entries[0]?.categoryId, "utilities");
+      assert.equal(page.entries[0]?.categoryName, "Utilities");
+    } finally {
+      await secondDb.close();
+    }
+  });
+});
+
+test("keeps manual transaction edits when unchanged statement items resync", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "manual-book-store",
+        time: 1_775_001_901,
+        description: "Book store purchase",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1500,
+        operationAmount: -1500,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 118_500,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await db.updateLedgerEntriesBulkEdit(profile, [entry.id], {
+        categoryId: "travel",
+        merchantName: "Manual Book Merchant",
+      });
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "manual-book-utilities-override",
+            categoryId: "utilities",
+            name: "Book purchases as utilities",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 0);
+      assert.equal(secondRun.skipped, 1);
+      assert.equal(page.entries[0]?.categoryId, "travel");
+      assert.equal(page.entries[0]?.categoryName, "Travel");
+      assert.equal(page.entries[0]?.merchantName, "Manual Book Merchant");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("reapplies category rules when only merchant was manually edited", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "manual-merchant-book-store",
+        time: 1_775_001_902,
+        description: "Book store purchase",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1500,
+        operationAmount: -1500,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 118_500,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+      await db.updateLedgerEntriesBulkEdit(profile, [entry.id], {
+        merchantName: "Manual Book Merchant",
+      });
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "manual-merchant-book-utilities-override",
+            categoryId: "utilities",
+            name: "Book purchases as utilities",
+            priority: 10,
+            matchType: "condition",
+            merchantContains: "Manual Book Merchant",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 1);
+      assert.equal(secondRun.skipped, 0);
+      assert.equal(page.entries[0]?.categoryId, "utilities");
+      assert.equal(page.entries[0]?.categoryName, "Utilities");
+      assert.equal(page.entries[0]?.merchantName, "Manual Book Merchant");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("keeps manual transaction edits when changed statement items resync", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "settled-manual-book-store",
+        time: 1_775_001_903,
+        description: "Book store purchase",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1500,
+        operationAmount: -1500,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 118_500,
+        hold: true,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+      await db.updateLedgerEntriesBulkEdit(profile, [entry.id], {
+        categoryId: "travel",
+        merchantName: "Manual Book Merchant",
+      });
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "settled-book-utilities-override",
+            categoryId: "utilities",
+            name: "Book purchases as utilities",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const settledStatementItem = {
+        ...statementItem,
+        balance: 117_000,
+        hold: false,
+      };
+      const settledEntry = createLedgerEntryFromStatementItem(
+        accountId,
+        settledStatementItem,
+      );
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [settledStatementItem],
+        [settledEntry],
+      );
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 1);
+      assert.equal(secondRun.skipped, 0);
+      assert.equal(page.entries[0]?.categoryId, "travel");
+      assert.equal(page.entries[0]?.categoryName, "Travel");
+      assert.equal(page.entries[0]?.merchantName, "Manual Book Merchant");
+      assert.equal(page.entries[0]?.hold, false);
+      assert.equal(page.entries[0]?.balance, 117_000);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("reapplies category rules after annotation-only transaction edits", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "annotated-book-store",
+        time: 1_775_001_904,
+        description: "Book store purchase",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1500,
+        operationAmount: -1500,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 115_200,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "annotated-book-override",
+            categoryId: "utilities",
+            name: "Annotated book purchases",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await db.updateLedgerEntryAnnotation(profile, entry.id, {
+        note: "Keep this note",
+        tags: ["books"],
+      });
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "annotated-book-override",
+            categoryId: "education",
+            name: "Annotated book purchases",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "book",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.updated, 1);
+      assert.equal(page.entries[0]?.categoryId, "education");
+      assert.equal(page.entries[0]?.categoryName, "Education");
+      assert.equal(page.entries[0]?.note, "Keep this note");
+      assert.deepEqual(page.entries[0]?.tags, ["books"]);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("preserves explicit categories on direct ledger writes", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      await db.transaction(async (tx) => {
+        await tx.upsertLedgerEntries([
+          {
+            id: "manual-travel-entry",
+            accountId: "account-1",
+            time: 1_715_700_000,
+            description: "Flight booking",
+            amount: -120_000,
+            currencyCode: 980,
+            categoryId: "travel",
+            categoryName: "Travel",
+            merchantName: "Airline",
+            hold: false,
+            rawStatementItemId: "manual-raw-entry",
+          },
+        ]);
+      });
+
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(page.entries[0]?.categoryId, "travel");
+      assert.equal(page.entries[0]?.categoryName, "Travel");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("matches category rules after merchant cleanup", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      const rawDatabase = new Database(databasePath);
+      try {
+        rawDatabase
+          .prepare(
+            `
+              INSERT INTO merchant_cleanup_rules (
+                profile,
+                id,
+                name,
+                priority,
+                merchant_contains,
+                canonical_name,
+                is_system,
+                is_enabled,
+                created_at,
+                updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)
+            `,
+          )
+          .run(
+            profile,
+            "raw-counterparty-cleanup",
+            "Raw counterparty cleanup",
+            10,
+            "raw counterparty ltd",
+            "Canonical Coffee",
+            "2026-05-01T00:00:00.000Z",
+            "2026-05-01T00:00:00.000Z",
+          );
+      } finally {
+        rawDatabase.close();
+      }
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "canonical-coffee-food",
+            categoryId: "utilities",
+            name: "Canonical coffee food",
+            priority: 10,
+            matchType: "condition",
+            merchantContains: "Canonical Coffee",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "canonical-coffee-purchase",
+        time: 1_775_001_902,
+        description: "Morning purchase",
+        counterName: "Raw Counterparty LTD Terminal 7",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -900,
+        operationAmount: -900,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 117_600,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(page.entries[0]?.merchantName, "Canonical Coffee");
+      assert.equal(page.entries[0]?.categoryId, "utilities");
+      assert.equal(page.entries[0]?.categoryName, "Utilities");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("does not reapply merchant cleanup to prepared unchanged entries", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      const rawDatabase = new Database(databasePath);
+      try {
+        const insertCleanupRule = rawDatabase.prepare(
+          `
+            INSERT INTO merchant_cleanup_rules (
+              profile,
+              id,
+              name,
+              priority,
+              merchant_contains,
+              canonical_name,
+              is_system,
+              is_enabled,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)
+          `,
+        );
+
+        insertCleanupRule.run(
+          profile,
+          "raw-counterparty-cleanup",
+          "Raw counterparty cleanup",
+          10,
+          "raw counterparty ltd",
+          "Canonical Coffee",
+          "2026-05-01T00:00:00.000Z",
+          "2026-05-01T00:00:00.000Z",
+        );
+        insertCleanupRule.run(
+          profile,
+          "canonical-coffee-cleanup",
+          "Canonical coffee cleanup",
+          20,
+          "canonical coffee",
+          "Coffee Group",
+          "2026-05-01T00:00:00.000Z",
+          "2026-05-01T00:00:00.000Z",
+        );
+      } finally {
+        rawDatabase.close();
+      }
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "chained-cleanup-purchase",
+        time: 1_775_001_903,
+        description: "Morning purchase",
+        counterName: "Raw Counterparty LTD Terminal 8",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -900,
+        operationAmount: -900,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 116_700,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "prepared-canonical-coffee-utilities",
+            categoryId: "utilities",
+            name: "Prepared canonical coffee utilities",
+            priority: 10,
+            matchType: "condition",
+            merchantContains: "Canonical Coffee",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const page = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.updated, 1);
+      assert.equal(page.entries[0]?.merchantName, "Canonical Coffee");
+      assert.equal(page.entries[0]?.categoryId, "utilities");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("applies built-in category text variants during synced writes", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    const statementItems = [
+      {
+        id: "variant-groceries",
+        time: 1775001600,
+        description: "Weekly groceries",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -1000,
+        operationAmount: -1000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 100000,
+        hold: false,
+      },
+      {
+        id: "variant-taxes",
+        time: 1775001700,
+        description: "City taxes payment",
+        mcc: 9999,
+        originalMcc: 9999,
+        amount: -2000,
+        operationAmount: -2000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 98000,
+        hold: false,
+      },
+    ];
+
+    try {
+      await db.migrate();
+      await db.upsertStatementItems(
+        "fixture-account-uah-main",
+        statementItems,
+        statementItems.map((item) =>
+          createLedgerEntryFromStatementItem("fixture-account-uah-main", item),
+        ),
+      );
+
+      const entries = await db.listLedgerEntries({
+        profile,
+        limit: 20,
+        sortBy: "time",
+        sortDirection: "asc",
+      });
+
+      assert.deepEqual(
+        entries.entries.map((entry) => [
+          entry.rawStatementItemId,
+          entry.categoryId,
+        ]),
+        [
+          ["variant-groceries", "groceries"],
+          ["variant-taxes", "taxes"],
+        ],
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("seeds default categories for Ukrainian personal finance use cases", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -1818,6 +2682,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0014_tags",
         "0015_query_performance_indexes",
         "0016_merchant_cleanup_rules",
+        "0017_ledger_entry_manual_overrides",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -1863,7 +2728,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(afterMigration.syncRuns, 1);
         assert.equal(
           afterMigration.migrations.at(-1),
-          "0016_merchant_cleanup_rules",
+          "0017_ledger_entry_manual_overrides",
         );
 
         const summary = await db.getLedgerSummary(profile);
@@ -1921,6 +2786,833 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(runs[0].apiCalls, 0);
       } finally {
         await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("migrates legacy manual transaction edits into override markers", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const profile = "legacy";
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase
+          .prepare(
+            `
+              UPDATE ledger_entries
+              SET
+                category_id = 'travel',
+                category_name = 'Travel',
+                merchant_name = 'Manual legacy merchant',
+                updated_at = '2026-05-16T08:10:00.000Z'
+              WHERE profile = ? AND id = ?
+            `,
+          )
+          .run(profile, "legacy-entry-grocery");
+      } finally {
+        rawDatabase.close();
+      }
+
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile,
+      });
+
+      try {
+        await db.migrate();
+
+        await db.importLocalConfiguration(profile, {
+          categoryRules: [
+            {
+              id: "legacy-grocery-utilities-override",
+              categoryId: "utilities",
+              name: "Legacy grocery purchases as utilities",
+              priority: 10,
+              matchType: "condition",
+              descriptionContains: "grocery",
+              amountDirection: "expense",
+              createdAt: "2026-05-17T00:00:00.000Z",
+            },
+          ],
+        });
+
+        const statementItem = {
+          id: "legacy-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-entry-grocery",
+          accountId: "legacy-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await db.upsertStatementItems(
+          "legacy-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await db.listLedgerEntries({
+          profile,
+          search: "legacy merchant",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 0);
+        assert.equal(secondRun.skipped, 1);
+        assert.equal(page.entries[0]?.categoryId, "travel");
+        assert.equal(page.entries[0]?.categoryName, "Travel");
+        assert.equal(page.entries[0]?.merchantName, "Manual legacy merchant");
+      } finally {
+        await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("migrates legacy manual transaction edits for every profile", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase.exec(`
+          INSERT INTO profiles (name, created_at)
+          VALUES ('legacy-alt', '2026-05-16T08:00:00.000Z');
+
+          INSERT INTO accounts (
+            profile, id, type, currency_code, balance, credit_limit,
+            masked_pan_json, raw_json, updated_at
+          ) VALUES (
+            'legacy-alt',
+            'legacy-alt-account-uah-main',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{"fixture":"legacy-alt"}',
+            '2026-05-16T08:00:00.000Z'
+          );
+
+          INSERT INTO raw_statement_items (
+            profile, account_id, statement_item_id, time, payload_json, updated_at
+          ) VALUES (
+            'legacy-alt',
+            'legacy-alt-account-uah-main',
+            'legacy-alt-statement-1',
+            1775001600,
+            '{"id":"legacy-alt-statement-1","time":1775001600,"description":"Fixture Grocery LLC","amount":-2450,"operationAmount":-2450,"currencyCode":980,"commissionRate":0,"cashbackAmount":0,"balance":97550,"hold":false}',
+            '2026-05-16T08:01:00.000Z'
+          );
+
+          INSERT INTO ledger_entries (
+            profile, id, account_id, time, description, amount,
+            operation_amount, currency_code, category_id, category_name,
+            merchant_name, raw_statement_item_id, hold, balance, created_at, updated_at
+          ) VALUES (
+            'legacy-alt',
+            'legacy-alt-entry-grocery',
+            'legacy-alt-account-uah-main',
+            1775001600,
+            'Fixture Grocery LLC',
+            -2450,
+            -2450,
+            980,
+            'travel',
+            'Travel',
+            'Manual alt merchant',
+            'legacy-alt-statement-1',
+            0,
+            97550,
+            '2026-05-16T08:01:00.000Z',
+            '2026-05-16T08:10:00.000Z'
+          );
+        `);
+      } finally {
+        rawDatabase.close();
+      }
+
+      const firstProfileDb = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "legacy",
+      });
+
+      try {
+        await firstProfileDb.migrate();
+      } finally {
+        await firstProfileDb.close();
+      }
+
+      const secondProfileDb = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "legacy-alt",
+      });
+
+      try {
+        await secondProfileDb.migrate();
+        await secondProfileDb.importLocalConfiguration("legacy-alt", {
+          categoryRules: [
+            {
+              id: "legacy-alt-grocery-utilities",
+              categoryId: "utilities",
+              name: "Legacy alt grocery purchases as utilities",
+              priority: 10,
+              matchType: "condition",
+              descriptionContains: "grocery",
+              amountDirection: "expense",
+              createdAt: "2026-05-17T00:00:00.000Z",
+            },
+          ],
+        });
+
+        const statementItem = {
+          id: "legacy-alt-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-alt-entry-grocery",
+          accountId: "legacy-alt-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await secondProfileDb.upsertStatementItems(
+          "legacy-alt-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await secondProfileDb.listLedgerEntries({
+          profile: "legacy-alt",
+          search: "Manual alt merchant",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 0);
+        assert.equal(secondRun.skipped, 1);
+        assert.equal(page.entries[0]?.categoryId, "travel");
+        assert.equal(page.entries[0]?.categoryName, "Travel");
+        assert.equal(page.entries[0]?.merchantName, "Manual alt merchant");
+      } finally {
+        await secondProfileDb.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("does not backfill legacy annotation-only edits as category overrides", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const profile = "legacy";
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase
+          .prepare(
+            `
+              UPDATE ledger_entries
+              SET updated_at = '2026-05-16T08:10:00.000Z'
+              WHERE profile = ? AND id = ?
+            `,
+          )
+          .run(profile, "legacy-entry-grocery");
+      } finally {
+        rawDatabase.close();
+      }
+
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile,
+      });
+
+      try {
+        await db.migrate();
+
+        await db.importLocalConfiguration(profile, {
+          categoryRules: [
+            {
+              id: "legacy-annotation-grocery-utilities",
+              categoryId: "utilities",
+              name: "Legacy grocery purchases as utilities",
+              priority: 10,
+              matchType: "condition",
+              descriptionContains: "grocery",
+              amountDirection: "expense",
+              createdAt: "2026-05-17T00:00:00.000Z",
+            },
+          ],
+        });
+
+        const statementItem = {
+          id: "legacy-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-entry-grocery",
+          accountId: "legacy-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await db.upsertStatementItems(
+          "legacy-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await db.listLedgerEntries({
+          profile,
+          search: "Fixture Grocery",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 1);
+        assert.equal(secondRun.skipped, 0);
+        assert.equal(page.entries[0]?.categoryId, "utilities");
+        assert.equal(page.entries[0]?.categoryName, "Utilities");
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery");
+      } finally {
+        await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("does not backfill merchant cleanup as a legacy manual override", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const profile = "legacy";
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile,
+      });
+
+      try {
+        await db.migrate();
+
+        const statementItem = {
+          id: "legacy-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-entry-grocery",
+          accountId: "legacy-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await db.upsertStatementItems(
+          "legacy-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await db.listLedgerEntries({
+          profile,
+          search: "Fixture Grocery",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 1);
+        assert.equal(secondRun.skipped, 0);
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery");
+      } finally {
+        await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("does not backfill existing category rules as legacy category overrides", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const profile = "legacy";
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase.exec(`
+          CREATE TABLE categories (
+            profile TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            color TEXT,
+            description TEXT NOT NULL,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (profile, id),
+            FOREIGN KEY (profile) REFERENCES profiles(name)
+          );
+
+          CREATE TABLE category_rules (
+            profile TEXT NOT NULL,
+            id TEXT NOT NULL,
+            category_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            priority INTEGER NOT NULL,
+            match_type TEXT NOT NULL,
+            merchant_contains TEXT,
+            description_contains TEXT,
+            mcc INTEGER,
+            amount_direction TEXT,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (profile, id),
+            FOREIGN KEY (profile) REFERENCES profiles(name),
+            FOREIGN KEY (profile, category_id) REFERENCES categories(profile, id)
+          );
+
+          INSERT INTO categories (
+            profile, id, name, color, description, is_system, created_at, updated_at
+          ) VALUES (
+            'legacy',
+            'utilities',
+            'Utilities',
+            '#2563eb',
+            'Utility bills.',
+            1,
+            '2026-05-16T08:00:00.000Z',
+            '2026-05-16T08:00:00.000Z'
+          );
+
+          INSERT INTO category_rules (
+            profile, id, category_id, name, priority, match_type,
+            merchant_contains, description_contains, mcc, amount_direction,
+            is_system, is_enabled, created_at, updated_at
+          ) VALUES (
+            'legacy',
+            'legacy-grocery-utilities',
+            'utilities',
+            'Legacy grocery purchases as utilities',
+            10,
+            'condition',
+            NULL,
+            'grocery',
+            NULL,
+            'expense',
+            0,
+            1,
+            '2026-05-16T08:00:00.000Z',
+            '2026-05-16T08:00:00.000Z'
+          );
+        `);
+      } finally {
+        rawDatabase.close();
+      }
+
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile,
+      });
+
+      try {
+        await db.migrate();
+
+        const statementItem = {
+          id: "legacy-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-entry-grocery",
+          accountId: "legacy-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await db.upsertStatementItems(
+          "legacy-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await db.listLedgerEntries({
+          profile,
+          search: "Fixture Grocery",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 1);
+        assert.equal(secondRun.skipped, 0);
+        assert.equal(page.entries[0]?.categoryId, "utilities");
+        assert.equal(page.entries[0]?.categoryName, "Utilities");
+      } finally {
+        await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("does not backfill cleaned merchants as legacy manual overrides", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const profile = "legacy";
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase.exec(`
+          CREATE TABLE merchant_cleanup_rules (
+            profile TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            priority INTEGER NOT NULL,
+            merchant_contains TEXT NOT NULL,
+            canonical_name TEXT NOT NULL,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (profile, id),
+            FOREIGN KEY (profile) REFERENCES profiles(name)
+          );
+
+          INSERT INTO schema_migrations (
+            id,
+            description,
+            applied_at
+          ) VALUES (
+            '0016_merchant_cleanup_rules',
+            'Add merchant cleanup rules',
+            '2026-05-16T08:00:00.000Z'
+          );
+
+          INSERT INTO merchant_cleanup_rules (
+            profile, id, name, priority, merchant_contains, canonical_name,
+            is_system, is_enabled, created_at, updated_at
+          ) VALUES (
+            'legacy',
+            'fixture-grocery-cleanup',
+            'Fixture Grocery cleanup',
+            100,
+            'fixture grocery',
+            'Fixture Grocery',
+            1,
+            1,
+            '2026-05-16T08:00:00.000Z',
+            '2026-05-16T08:00:00.000Z'
+          );
+
+          UPDATE ledger_entries
+          SET merchant_name = 'Fixture Grocery'
+          WHERE profile = 'legacy' AND id = 'legacy-entry-grocery';
+        `);
+      } finally {
+        rawDatabase.close();
+      }
+
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile,
+      });
+
+      try {
+        await db.migrate();
+
+        const postMigrationDatabase = new Database(databasePath);
+        try {
+          postMigrationDatabase
+            .prepare(
+              `
+                UPDATE merchant_cleanup_rules
+                SET canonical_name = 'Fixture Grocery Updated'
+                WHERE profile = ? AND id = ?
+              `,
+            )
+            .run(profile, "fixture-grocery-cleanup");
+        } finally {
+          postMigrationDatabase.close();
+        }
+
+        const statementItem = {
+          id: "legacy-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-entry-grocery",
+          accountId: "legacy-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await db.upsertStatementItems(
+          "legacy-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await db.listLedgerEntries({
+          profile,
+          search: "Fixture Grocery",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 1);
+        assert.equal(secondRun.skipped, 0);
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery Updated");
+      } finally {
+        await db.close();
+      }
+    },
+    { seedLedger: true },
+  );
+});
+
+test("seeds category rules for every legacy profile before override backfill", async () => {
+  await withLegacyFirstMigrationDb(
+    async ({ databasePath }) => {
+      const rawDatabase = new Database(databasePath);
+
+      try {
+        rawDatabase.exec(`
+          INSERT INTO profiles (name, created_at)
+          VALUES ('legacy-alt', '2026-05-16T08:00:00.000Z');
+
+          INSERT INTO accounts (
+            profile, id, type, currency_code, balance, credit_limit,
+            masked_pan_json, raw_json, updated_at
+          ) VALUES (
+            'legacy-alt',
+            'legacy-alt-account-uah-main',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{"fixture":"legacy-alt"}',
+            '2026-05-16T08:00:00.000Z'
+          );
+
+          INSERT INTO raw_statement_items (
+            profile, account_id, statement_item_id, time, payload_json, updated_at
+          ) VALUES (
+            'legacy-alt',
+            'legacy-alt-account-uah-main',
+            'legacy-alt-statement-1',
+            1775001600,
+            '{"id":"legacy-alt-statement-1","time":1775001600,"description":"Fixture Grocery LLC","amount":-2450,"operationAmount":-2450,"currencyCode":980,"commissionRate":0,"cashbackAmount":0,"balance":97550,"hold":false}',
+            '2026-05-16T08:01:00.000Z'
+          );
+
+          INSERT INTO ledger_entries (
+            profile, id, account_id, time, description, amount,
+            operation_amount, currency_code, category_id, category_name,
+            merchant_name, raw_statement_item_id, hold, balance, created_at, updated_at
+          ) VALUES (
+            'legacy-alt',
+            'legacy-alt-entry-grocery',
+            'legacy-alt-account-uah-main',
+            1775001600,
+            'Fixture Grocery LLC',
+            -2450,
+            -2450,
+            980,
+            'groceries',
+            'Groceries',
+            'Fixture Grocery LLC',
+            'legacy-alt-statement-1',
+            0,
+            97550,
+            '2026-05-16T08:01:00.000Z',
+            '2026-05-16T08:01:00.000Z'
+          );
+        `);
+      } finally {
+        rawDatabase.close();
+      }
+
+      const firstProfileDb = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "legacy",
+      });
+
+      try {
+        await firstProfileDb.migrate();
+      } finally {
+        await firstProfileDb.close();
+      }
+
+      const secondProfileDb = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "legacy-alt",
+      });
+
+      try {
+        await secondProfileDb.migrate();
+        await secondProfileDb.importLocalConfiguration("legacy-alt", {
+          categoryRules: [
+            {
+              id: "legacy-alt-grocery-utilities",
+              categoryId: "utilities",
+              name: "Legacy alt grocery purchases as utilities",
+              priority: 10,
+              matchType: "condition",
+              descriptionContains: "grocery",
+              amountDirection: "expense",
+              createdAt: "2026-05-17T00:00:00.000Z",
+            },
+          ],
+        });
+
+        const statementItem = {
+          id: "legacy-alt-statement-1",
+          time: 1775001600,
+          description: "Fixture Grocery LLC",
+          amount: -2450,
+          operationAmount: -2450,
+          currencyCode: 980,
+          commissionRate: 0,
+          cashbackAmount: 0,
+          balance: 97550,
+          hold: false,
+        };
+        const entry = {
+          id: "legacy-alt-entry-grocery",
+          accountId: "legacy-alt-account-uah-main",
+          time: statementItem.time,
+          description: statementItem.description,
+          amount: statementItem.amount,
+          operationAmount: statementItem.operationAmount,
+          currencyCode: statementItem.currencyCode,
+          categoryId: "groceries",
+          categoryName: "Groceries",
+          merchantName: statementItem.description,
+          rawStatementItemId: statementItem.id,
+          hold: statementItem.hold,
+          balance: statementItem.balance,
+        };
+
+        const secondRun = await secondProfileDb.upsertStatementItems(
+          "legacy-alt-account-uah-main",
+          [statementItem],
+          [entry],
+        );
+        const page = await secondProfileDb.listLedgerEntries({
+          profile: "legacy-alt",
+          search: "Fixture Grocery",
+          limit: 10,
+        });
+
+        assert.equal(secondRun.inserted, 0);
+        assert.equal(secondRun.updated, 1);
+        assert.equal(secondRun.skipped, 0);
+        assert.equal(page.entries[0]?.categoryId, "utilities");
+        assert.equal(page.entries[0]?.categoryName, "Utilities");
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery");
+      } finally {
+        await secondProfileDb.close();
       }
     },
     { seedLedger: true },
@@ -2266,6 +3958,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/categories",
       });
+      const categoryRulesResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/category-rules",
+      });
       const merchantCleanupRulesResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/merchant-cleanup-rules",
@@ -2427,6 +4123,19 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           "utilities",
         ],
       );
+      assert.equal(categoryRulesResponse.statusCode, 200);
+      assert.equal(categoryRulesResponse.json().length, 17);
+      assert.deepEqual(categoryRulesResponse.json()[0], {
+        id: "income-positive-amount",
+        categoryId: "income",
+        name: "Income by positive amount",
+        priority: 100,
+        matchType: "condition",
+        amountDirection: "income",
+        isSystem: true,
+        isEnabled: true,
+        createdAt: categoryRulesResponse.json()[0].createdAt,
+      });
       assert.equal(merchantCleanupRulesResponse.statusCode, 200);
       assert.deepEqual(
         merchantCleanupRulesResponse

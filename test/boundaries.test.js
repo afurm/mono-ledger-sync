@@ -152,6 +152,34 @@ test("local web UI exposes a privacy onboarding screen", async () => {
   assert.match(appSource, /Review privacy settings/);
 });
 
+test("rules UI keeps current rule previews and conflicts aligned", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /matchType: CategoryRuleSummary\["matchType"\]/);
+  assert.match(appSource, /function findRuleHistoricalMatches/);
+  assert.match(appSource, /rule\.matchType !== "fallback"/);
+  assert.match(appSource, /function ruleHasMccOnlyHistoryConstraint/);
+  assert.match(appSource, /MCC-only preview unavailable/);
+  assert.match(appSource, /income amount/);
+  assert.match(appSource, /normalizedValue === "any merchant"/);
+  assert.doesNotMatch(appSource, /normalizedValue\.startsWith\("any"\)/);
+  assert.match(appSource, /const merchantText = entry\.merchantName \?\? ""/);
+  assert.doesNotMatch(
+    appSource,
+    /const merchantText = `\$\{entry\.merchantName \?\? ""\} \$\{entry\.description\}`/,
+  );
+  assert.match(
+    appSource,
+    /function findRuleConflicts\(\s*entries:[\s\S]*rules:/,
+  );
+  assert.match(appSource, /findRuleConflicts\(entries, rules\)/);
+  assert.match(appSource, /rules=\{categoryRuleSummaries\}/);
+  assert.doesNotMatch(
+    appSource,
+    /builtInRuleSummaries\.filter\(\(rule\) =>\s*ledgerEntryMatchesRule/,
+  );
+});
+
 test("web client caches local snapshots for offline browsing", async () => {
   const apiSource = await readFile("src/web/api.ts", "utf8");
   const appSource = await readFile("src/web/App.tsx", "utf8");
