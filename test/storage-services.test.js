@@ -59,6 +59,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         defaultProfile: profile,
       });
       const summary = await queryService.getLedgerSummary();
+      const netWorthTrend = await queryService.getNetWorthTrend();
       const accounts = await queryService.listAccounts();
       const jars = await queryService.listJars();
       const balances = await queryService.getAccountBalances();
@@ -81,6 +82,8 @@ test("query service defaults profile and wraps storage reads", async () => {
         sortDirection: "desc",
       });
       const groupedBalances = await queryServices.balances.getAccountBalances();
+      const groupedNetWorthTrend =
+        await queryServices.balances.getNetWorthTrend();
       const groupedJars = await queryServices.balances.listJars();
       const groupedCategories = await queryServices.categories.listCategories();
       const groupedCategorySpending =
@@ -103,6 +106,11 @@ test("query service defaults profile and wraps storage reads", async () => {
         income: 8520000,
         expenses: 408650,
         net: 8111350,
+      });
+      assert.deepEqual(netWorthTrend, {
+        enabled: false,
+        reason: "Manual account and asset support is not enabled.",
+        points: [],
       });
       assert.equal(accounts.length, 2);
       assert.equal(jars.length, 1);
@@ -137,6 +145,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.ok(Array.isArray(events));
       assert.equal(groupedPage.entries.length, 2);
       assert.equal(groupedBalances.length, balances.length);
+      assert.deepEqual(groupedNetWorthTrend, netWorthTrend);
       assert.equal(groupedJars.length, jars.length);
       assert.deepEqual(
         groupedCategories.map((category) => category.id),
@@ -568,11 +577,16 @@ test("ledger services factory returns both query and write surfaces", async () =
 
     try {
       assert.equal(typeof services.query.getLedgerSummary, "function");
+      assert.equal(typeof services.query.getNetWorthTrend, "function");
       assert.equal(
         typeof services.queries.transactions.listLedgerEntries,
         "function",
       );
       assert.equal(typeof services.queries.balances.listAccounts, "function");
+      assert.equal(
+        typeof services.queries.balances.getNetWorthTrend,
+        "function",
+      );
       assert.equal(
         typeof services.queries.categories.listCategories,
         "function",

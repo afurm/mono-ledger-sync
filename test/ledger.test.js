@@ -2079,6 +2079,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/summary",
       });
+      const netWorthTrendResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/net-worth-trend",
+      });
       const categoriesResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/categories",
@@ -2199,6 +2203,12 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         income: 8520000,
         expenses: 408650,
         net: 8111350,
+      });
+      assert.equal(netWorthTrendResponse.statusCode, 200);
+      assert.deepEqual(netWorthTrendResponse.json(), {
+        enabled: false,
+        reason: "Manual account and asset support is not enabled.",
+        points: [],
       });
       assert.equal(categoriesResponse.statusCode, 200);
       assert.deepEqual(

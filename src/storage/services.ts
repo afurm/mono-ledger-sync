@@ -13,6 +13,7 @@ import type {
   LedgerJar,
   Category,
   LedgerSummary,
+  NetWorthTrend,
   RecurringItem,
   StoredWebhookEvent,
   SyncRun,
@@ -30,6 +31,7 @@ export interface LedgerTransactionQueryService {
 
 export interface LedgerBalanceQueryService {
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
+  getNetWorthTrend(profile?: string): Promise<NetWorthTrend>;
   getAccountBalances(profile?: string): Promise<readonly AccountBalance[]>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
   listJars(profile?: string): Promise<readonly LedgerJar[]>;
@@ -367,6 +369,13 @@ export function createLedgerQueryService({
     getLedgerSummary(profile) {
       return db.getLedgerSummary(coerceProfile(profile, defaultProfile));
     },
+    async getNetWorthTrend(_profile) {
+      return {
+        enabled: false,
+        reason: "Manual account and asset support is not enabled.",
+        points: [],
+      };
+    },
     getAccountBalances(profile) {
       return db.getAccountBalances(coerceProfile(profile, defaultProfile));
     },
@@ -430,6 +439,7 @@ export function createLedgerQueryServices(
     },
     balances: {
       getLedgerSummary: query.getLedgerSummary,
+      getNetWorthTrend: query.getNetWorthTrend,
       getAccountBalances: query.getAccountBalances,
       listAccounts: query.listAccounts,
       listJars: query.listJars,

@@ -3982,6 +3982,63 @@ function BudgetProgressCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
+function NetWorthTrendCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  if (
+    !snapshot.netWorthTrend.enabled ||
+    snapshot.netWorthTrend.points.length === 0
+  ) {
+    return null;
+  }
+
+  const points = snapshot.netWorthTrend.points.slice(-8);
+  const amounts = points.map((point) => point.amount);
+  const minAmount = Math.min(...amounts);
+  const maxAmount = Math.max(...amounts);
+  const latest = points[points.length - 1];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Net worth trend</CardTitle>
+        <CardDescription>
+          Manual accounts and assets included in local net worth history.
+        </CardDescription>
+        {latest ? (
+          <CardAction>
+            <Badge variant="outline">
+              {formatMinorAmount(latest.amount, latest.currencyCode)}
+            </Badge>
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent>
+        <div className="flex h-32 items-end gap-2">
+          {points.map((point) => {
+            const range = maxAmount - minAmount;
+            const height =
+              range > 0 ? 20 + ((point.amount - minAmount) / range) * 80 : 60;
+
+            return (
+              <div
+                className="flex min-w-0 flex-1 flex-col items-center gap-2"
+                key={`${point.date}:${point.currencyCode}`}
+              >
+                <div
+                  className="w-full rounded-t-md bg-primary"
+                  style={{ height: `${height}%` }}
+                />
+                <span className="truncate text-[10px] text-muted-foreground">
+                  {point.date}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function OverviewRoute({
   snapshot,
   loading,
@@ -4080,6 +4137,8 @@ function OverviewRoute({
       </div>
 
       <SyncHealthChart runs={snapshot.syncRuns} />
+
+      <NetWorthTrendCard snapshot={snapshot} />
 
       <Card>
         <CardHeader>

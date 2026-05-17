@@ -90,6 +90,18 @@ export interface BudgetProgress {
   status: "on_track" | "near_limit" | "overspent";
 }
 
+export interface NetWorthTrendPoint {
+  date: string;
+  amount: number;
+  currencyCode: number;
+}
+
+export interface NetWorthTrend {
+  enabled: boolean;
+  reason?: string;
+  points: readonly NetWorthTrendPoint[];
+}
+
 export interface UpcomingRecurringPayment {
   id: string;
   recurringItemId: string;
@@ -261,6 +273,7 @@ export interface LocalAppSnapshot {
   health: LocalApiHealth;
   config: LocalApiAppConfig;
   summary: LedgerSummary;
+  netWorthTrend: NetWorthTrend;
   accounts: readonly LedgerAccount[];
   jars: readonly LedgerJar[];
   categories: readonly Category[];
@@ -288,8 +301,13 @@ interface CachedLocalAppSnapshot {
 
 type PersistedLocalAppSnapshot = Omit<
   LocalAppSnapshot,
-  "jars" | "categorySpending" | "budgetProgress" | "upcomingRecurringPayments"
+  | "netWorthTrend"
+  | "jars"
+  | "categorySpending"
+  | "budgetProgress"
+  | "upcomingRecurringPayments"
 > & {
+  netWorthTrend?: NetWorthTrend;
   jars?: readonly LedgerJar[];
   categorySpending?: readonly LedgerCategorySpending[];
   budgetProgress?: readonly BudgetProgress[];
@@ -381,6 +399,11 @@ function normalizeCachedLocalAppSnapshot(
       summary: {
         ...snapshot.summary,
         monthToDate,
+      },
+      netWorthTrend: snapshot.netWorthTrend ?? {
+        enabled: false,
+        reason: "Manual account and asset support is not enabled.",
+        points: [],
       },
       jars: snapshot.jars ?? [],
       categorySpending: snapshot.categorySpending ?? [],
@@ -790,6 +813,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     const [
       health,
       summary,
+      netWorthTrend,
       accounts,
       jars,
       categories,
@@ -802,6 +826,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
     ] = await Promise.all([
       requestJson<LocalApiHealth>("/api/health"),
       requestJson<LedgerSummary>("/api/ledger/summary"),
+      requestJson<NetWorthTrend>("/api/ledger/net-worth-trend"),
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
       requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
       requestJson<readonly Category[]>("/api/ledger/categories"),
@@ -828,6 +853,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       health,
       config,
       summary,
+      netWorthTrend,
       accounts,
       jars,
       categories,
