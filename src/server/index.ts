@@ -16,6 +16,7 @@ import {
   type ExportPreset,
 } from "../exports/index.js";
 import {
+  isLedgerSource,
   productArchitecture,
   version,
   type LedgerSource,
@@ -717,8 +718,33 @@ function resolveProfile(options: LocalApiServerOptions): string {
   return options.profile?.trim() || "default";
 }
 
+function resolveConfiguredSource(
+  options: LocalApiServerOptions,
+): LedgerSource | undefined {
+  if (options.source !== undefined) {
+    return options.source;
+  }
+
+  const envSource = process.env.MONO_LEDGER_SYNC_SOURCE?.trim();
+
+  if (!envSource) {
+    return undefined;
+  }
+
+  if (!isLedgerSource(envSource)) {
+    throw new DomainError(
+      "MONO_LEDGER_SYNC_SOURCE must be fixture or monobank.",
+      "config_invalid",
+      "config",
+      { field: "MONO_LEDGER_SYNC_SOURCE" },
+    );
+  }
+
+  return envSource;
+}
+
 function resolveSource(options: LocalApiServerOptions): LedgerSource {
-  return options.source ?? "fixture";
+  return resolveConfiguredSource(options) ?? "fixture";
 }
 
 function resolveDataDir(options: LocalApiServerOptions): string {
@@ -2278,7 +2304,9 @@ export function createLocalApiServer(
   let servicesPromise: Promise<LocalAppServices> | undefined;
   let monobankToken = resolveMonobankToken(options);
   const monobankBaseUrl = resolveMonobankBaseUrl(options);
-  let source = resolveSource(options);
+  const configuredSource = resolveConfiguredSource(options);
+  let source = configuredSource ?? "fixture";
+  let storedSettingsLoadPromise: Promise<void> | undefined;
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
   let webhookHost: NonNullable<LocalApiServerOptions["host"]> =
@@ -2316,7 +2344,58 @@ export function createLocalApiServer(
     };
   }
 
-  function getServices(): Promise<LocalAppServices> {
+  async function loadStoredSettings(): Promise<void> {
+    storedSettingsLoadPromise ??= (async () => {
+      if (configuredSource !== undefined) {
+        return;
+      }
+
+      const profile = resolveProfile(options);
+      const db = createSqliteLedgerDb({
+        filePath: resolveLocalLedgerDatabasePath(options),
+        profile,
+      });
+
+      try {
+        await db.migrate();
+        const settings = await db.getLocalAppSettings(profile);
+
+        if (settings?.source !== undefined) {
+          source = settings.source;
+        }
+      } finally {
+        await db.close();
+      }
+    })();
+
+    return storedSettingsLoadPromise;
+  }
+
+  async function persistSource(nextSource: LedgerSource): Promise<void> {
+    if (servicesPromise !== undefined) {
+      const services = await servicesPromise;
+      await services.db.updateLocalAppSettings(services.profile, {
+        source: nextSource,
+      });
+      return;
+    }
+
+    const profile = resolveProfile(options);
+    const db = createSqliteLedgerDb({
+      filePath: resolveLocalLedgerDatabasePath(options),
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.updateLocalAppSettings(profile, { source: nextSource });
+    } finally {
+      await db.close();
+    }
+  }
+
+  async function getServices(): Promise<LocalAppServices> {
+    await loadStoredSettings();
     servicesPromise ??= createServices(
       options,
       source,
@@ -2363,10 +2442,12 @@ export function createLocalApiServer(
 
   async function updateSource(nextSource: LedgerSource): Promise<void> {
     if (source === nextSource) {
+      await persistSource(nextSource);
       return;
     }
 
     source = nextSource;
+    await persistSource(nextSource);
     await rebuildServices();
   }
 
