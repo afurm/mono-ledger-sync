@@ -290,9 +290,14 @@ function isTransferLikeEntry(entry: LedgerEntry): boolean {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
-  const tokens = normalizedDescription.length === 0 ? [] : normalizedDescription.split(/\s+/u);
+  const tokens =
+    normalizedDescription.length === 0
+      ? []
+      : normalizedDescription.split(/\s+/u);
 
-  return TRANSFER_DESCRIPTION_TERMS.includes(entry.description.toLowerCase().trim())
+  return TRANSFER_DESCRIPTION_TERMS.includes(
+    entry.description.toLowerCase().trim(),
+  )
     ? true
     : tokens.some((token) => TRANSFER_DESCRIPTION_TERMS.includes(token));
 }

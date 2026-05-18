@@ -347,9 +347,7 @@ test("write service ignores transfer-like entries when calculating budget progre
 
       const groceryStatementItem = {
         id: "fixture-grocery-2026-04",
-        time: Math.floor(
-          Date.parse("2026-04-12T10:00:00.000Z") / 1000,
-        ),
+        time: Math.floor(Date.parse("2026-04-12T10:00:00.000Z") / 1000),
         description: "Store groceries",
         mcc: 5411,
         originalMcc: 5411,
@@ -363,9 +361,7 @@ test("write service ignores transfer-like entries when calculating budget progre
       };
       const transferStatementItem = {
         id: "fixture-transfer-2026-04",
-        time: Math.floor(
-          Date.parse("2026-04-12T11:00:00.000Z") / 1000,
-        ),
+        time: Math.floor(Date.parse("2026-04-12T11:00:00.000Z") / 1000),
         description: "Переказ на рахунок заощаджень",
         mcc: 6012,
         originalMcc: 6012,
@@ -383,13 +379,19 @@ test("write service ignores transfer-like entries when calculating budget progre
         [groceryStatementItem, transferStatementItem],
         [
           {
-            ...createLedgerEntryFromStatementItem(accountId, groceryStatementItem),
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              groceryStatementItem,
+            ),
             categoryId: "groceries",
             categoryName: "Groceries",
             categorySource: "system_rule",
           },
           {
-            ...createLedgerEntryFromStatementItem(accountId, transferStatementItem),
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              transferStatementItem,
+            ),
             categoryId: "groceries",
             categoryName: "Groceries",
             categorySource: "system_rule",
