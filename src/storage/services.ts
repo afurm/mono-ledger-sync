@@ -96,6 +96,10 @@ export interface LedgerWriteService {
     input: MonthlyCategoryBudgetInput,
     profile?: string,
   ): Promise<BudgetProgress>;
+  deleteMonthlyCategoryBudget(
+    budgetPeriodId: string,
+    profile?: string,
+  ): Promise<boolean>;
   updateTransactionsBulk(
     ids: readonly string[],
     update: LedgerEntryBulkEditUpdate,
@@ -699,6 +703,16 @@ export function createLedgerWriteService({
       }
 
       return created;
+    },
+    async deleteMonthlyCategoryBudget(budgetPeriodId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const normalizedPeriodId = budgetPeriodId.trim();
+
+      if (!normalizedPeriodId) {
+        throw new Error("Budget period ID is required.");
+      }
+
+      return db.deleteMonthlyCategoryBudget(resolvedProfile, normalizedPeriodId);
     },
     updateTransactionsBulk(ids, update, profile) {
       return withProfileTransaction(profile, (tx, resolvedProfile) =>
