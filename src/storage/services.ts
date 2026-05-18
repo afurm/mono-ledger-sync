@@ -408,7 +408,7 @@ async function calculateBudgetActualAmount(
       }
 
       if (budget.includeInflows) {
-        return sum - entry.amount;
+        return entry.amount > 0 ? sum + entry.amount : sum;
       }
 
       return entry.amount < 0 ? sum - entry.amount : sum;
@@ -544,11 +544,13 @@ async function listBudgetProgress(
         amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
       const remainingAmount = amountLimit - actualAmount;
       const status =
-        actualAmount > amountLimit
-          ? "overspent"
-          : progressPercentage >= 85
-            ? "near_limit"
-            : "on_track";
+        budget.includeInflows && actualAmount >= amountLimit
+          ? "on_track"
+          : actualAmount > amountLimit
+            ? "overspent"
+            : progressPercentage >= 85
+              ? "near_limit"
+              : "on_track";
 
       return {
         id: period.id,
@@ -728,7 +730,8 @@ export function createLedgerWriteService({
       const categoryId = input.categoryId.trim();
       const amountLimit = Math.trunc(input.amountLimit);
       const currencyCode = Math.trunc(input.currencyCode);
-      const rollover = input.rollover === true;
+      const includeInflows = categoryId === "income";
+      const rollover = includeInflows ? false : input.rollover === true;
       const { month, periodStart, periodEnd } = readBudgetMonth(input.month);
 
       if (!categoryId) {
@@ -795,7 +798,7 @@ export function createLedgerWriteService({
             periodEnd,
             amountLimit,
             rollover,
-            includeInflows: false,
+            includeInflows,
             createdAt: timestamp,
             updatedAt: timestamp,
           },
