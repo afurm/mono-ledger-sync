@@ -347,9 +347,7 @@ test("write service carries over remaining amount from previous rollover budget 
 
       const previousMonthExpense = {
         id: "fixture-transfer-from-previous-month",
-        time: Math.floor(
-          Date.parse("2026-04-20T11:00:00.000Z") / 1000,
-        ),
+        time: Math.floor(Date.parse("2026-04-20T11:00:00.000Z") / 1000),
         description: "Store groceries",
         mcc: 5411,
         originalMcc: 5411,
@@ -438,9 +436,7 @@ test("write service does not inherit carryover without previous rollover flag", 
 
       const previousMonthExpense = {
         id: "fixture-previous-month-no-rollover",
-        time: Math.floor(
-          Date.parse("2026-04-22T11:00:00.000Z") / 1000,
-        ),
+        time: Math.floor(Date.parse("2026-04-22T11:00:00.000Z") / 1000),
         description: "Store groceries",
         mcc: 5411,
         originalMcc: 5411,

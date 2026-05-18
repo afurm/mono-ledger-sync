@@ -180,7 +180,10 @@ function findPreviousRolloverBudgetPeriod(
       continue;
     }
 
-    if (budget.categoryId !== categoryId || budget.currencyCode !== currencyCode) {
+    if (
+      budget.categoryId !== categoryId ||
+      budget.currencyCode !== currencyCode
+    ) {
       continue;
     }
 
@@ -767,12 +770,14 @@ export function createLedgerWriteService({
           : Math.max(
               0,
               (previous.period.plannedAmount || previous.budget.amountLimit) -
-                (await calculateBudgetActualAmount(
+                ((await calculateBudgetActualAmount(
                   db,
                   resolvedProfile,
                   previous.budget,
                   previous.period,
-                ) ?? previous.period.actualAmount ?? 0),
+                )) ??
+                  previous.period.actualAmount ??
+                  0),
             );
 
       const timestamp = new Date().toISOString();
