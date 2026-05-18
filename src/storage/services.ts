@@ -1,0 +1,739 @@
+import type {
+  AccountBalance,
+  Budget,
+  BudgetProgress,
+  BudgetPeriod,
+  LedgerAccount,
+  LedgerEntry,
+  LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
+  LedgerEntryPage,
+  LedgerEntryQuery,
+  LedgerEntrySplitPlanUpdate,
+  LedgerCategorySpending,
+  LedgerJar,
+  Category,
+  CategoryRule,
+  LedgerSummary,
+  MerchantCleanupRule,
+  NetWorthTrend,
+  RecurringItem,
+  StoredWebhookEvent,
+  SyncRun,
+  UpcomingRecurringPayment,
+} from "./index.js";
+
+import type { LedgerDbTransaction } from "./index.js";
+import type { SqliteLedgerDb } from "../sqlite/index.js";
+
+export interface LedgerTransactionQueryService {
+  listLedgerEntries(
+    query: Omit<LedgerEntryQuery, "profile"> & { profile?: string },
+  ): Promise<LedgerEntryPage>;
+}
+
+export interface LedgerBalanceQueryService {
+  getLedgerSummary(profile?: string): Promise<LedgerSummary>;
+  getNetWorthTrend(profile?: string): Promise<NetWorthTrend>;
+  getAccountBalances(profile?: string): Promise<readonly AccountBalance[]>;
+  listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
+  listJars(profile?: string): Promise<readonly LedgerJar[]>;
+}
+
+export interface LedgerCategoryQueryService {
+  listCategories(profile?: string): Promise<readonly Category[]>;
+  listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
+  listMerchantCleanupRules(
+    profile?: string,
+  ): Promise<readonly MerchantCleanupRule[]>;
+  listCategorySpending(
+    profile?: string,
+  ): Promise<readonly LedgerCategorySpending[]>;
+}
+
+export interface LedgerBudgetQueryService {
+  listBudgets(profile?: string): Promise<readonly Budget[]>;
+  listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  listBudgetProgress(profile?: string): Promise<readonly BudgetProgress[]>;
+}
+
+export interface LedgerRecurringItemQueryService {
+  listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  listUpcomingRecurringPayments(
+    profile?: string,
+    asOf?: Date,
+  ): Promise<readonly UpcomingRecurringPayment[]>;
+}
+
+export interface LedgerSyncStateQueryService {
+  listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
+  listWebhookEvents(
+    profile?: string,
+    limit?: number,
+  ): Promise<readonly StoredWebhookEvent[]>;
+}
+
+export interface LedgerQueryServices {
+  transactions: LedgerTransactionQueryService;
+  balances: LedgerBalanceQueryService;
+  categories: LedgerCategoryQueryService;
+  budgets: LedgerBudgetQueryService;
+  recurringItems: LedgerRecurringItemQueryService;
+  syncState: LedgerSyncStateQueryService;
+}
+
+export interface LedgerQueryService
+  extends
+    LedgerTransactionQueryService,
+    LedgerBalanceQueryService,
+    LedgerCategoryQueryService,
+    LedgerBudgetQueryService,
+    LedgerRecurringItemQueryService,
+    LedgerSyncStateQueryService {}
+
+export interface LedgerWriteService {
+  createMonthlyCategoryBudget(
+    input: MonthlyCategoryBudgetInput,
+    profile?: string,
+  ): Promise<BudgetProgress>;
+  updateTransactionsBulk(
+    ids: readonly string[],
+    update: LedgerEntryBulkEditUpdate,
+    profile?: string,
+  ): Promise<readonly LedgerEntry[]>;
+  updateTransactionNote(
+    id: string,
+    note: string | undefined,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined>;
+  updateTransactionTags(
+    id: string,
+    tags: readonly string[] | undefined,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined>;
+  updateTransactionAnnotation(
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined>;
+  updateTransactionSplitPlan(
+    id: string,
+    update: LedgerEntrySplitPlanUpdate,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined>;
+}
+
+export interface MonthlyCategoryBudgetInput {
+  categoryId: string;
+  currencyCode: number;
+  month: string;
+  amountLimit: number;
+}
+
+export interface LedgerServices {
+  query: LedgerQueryService;
+  queries: LedgerQueryServices;
+  write: LedgerWriteService;
+}
+
+interface CreateLedgerServicesOptions {
+  db: SqliteLedgerDb;
+  defaultProfile: string;
+}
+
+const DEFAULT_SYNC_LIST_LIMIT = 20;
+const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
+const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
+
+function coerceProfile(profile: string | undefined, fallback: string): string {
+  return profile === undefined || profile.trim() === "" ? fallback : profile;
+}
+
+function startOfUtcDate(value: Date): Date {
+  return new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
+  );
+}
+
+function daysInUtcMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+}
+
+function addUtcMonths(value: Date, months: number): Date {
+  const year = value.getUTCFullYear();
+  const month = value.getUTCMonth() + months;
+  const day = Math.min(
+    value.getUTCDate(),
+    daysInUtcMonth(year + Math.floor(month / 12), ((month % 12) + 12) % 12),
+  );
+
+  return new Date(Date.UTC(year, month, day));
+}
+
+function addRecurringFrequency(
+  value: Date,
+  frequency: RecurringItem["frequency"],
+): Date {
+  const next = new Date(value);
+
+  switch (frequency) {
+    case "daily":
+      next.setUTCDate(next.getUTCDate() + 1);
+      return next;
+    case "weekly":
+      next.setUTCDate(next.getUTCDate() + 7);
+      return next;
+    case "monthly":
+      return addUtcMonths(next, 1);
+    case "quarterly":
+      return addUtcMonths(next, 3);
+    case "yearly":
+      return addUtcMonths(next, 12);
+    case "irregular":
+      return next;
+  }
+}
+
+function resolveNextRecurringDate(
+  item: RecurringItem,
+  asOf: Date,
+): Date | undefined {
+  const anchor = item.lastSeenAt ?? item.startedAt ?? item.createdAt;
+  const parsedAnchor = Date.parse(anchor);
+
+  if (!Number.isFinite(parsedAnchor)) {
+    return undefined;
+  }
+
+  let nextDueAt = startOfUtcDate(new Date(parsedAnchor));
+  const asOfDate = startOfUtcDate(asOf);
+
+  if (item.frequency === "irregular") {
+    return nextDueAt;
+  }
+
+  while (nextDueAt < asOfDate) {
+    const next = addRecurringFrequency(nextDueAt, item.frequency);
+
+    if (next.getTime() === nextDueAt.getTime()) {
+      return undefined;
+    }
+
+    nextDueAt = next;
+  }
+
+  return nextDueAt;
+}
+
+function daysBetweenUtcDates(left: Date, right: Date): number {
+  const millisecondsPerDay = 86_400_000;
+
+  return Math.round(
+    (startOfUtcDate(left).getTime() - startOfUtcDate(right).getTime()) /
+      millisecondsPerDay,
+  );
+}
+
+function readBudgetMonth(month: string): {
+  month: string;
+  periodStart: string;
+  periodEnd: string;
+} {
+  const match = /^(\d{4})-(\d{2})$/.exec(month.trim());
+
+  if (!match) {
+    throw new Error("Budget month must use YYYY-MM format.");
+  }
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+
+  if (monthIndex < 0 || monthIndex > 11) {
+    throw new Error("Budget month must use a valid month.");
+  }
+
+  const monthStart = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+  return {
+    month: month.trim(),
+    periodStart: localDateKey(monthStart),
+    periodEnd: localDateKey(monthEnd),
+  };
+}
+
+function localDateKey(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function endOfLocalDateEpoch(dateKey: string): number {
+  const epoch = Date.parse(`${dateKey}T23:59:59.999`);
+
+  return Math.floor(epoch / 1000);
+}
+
+function startOfLocalDateEpoch(dateKey: string): number {
+  const epoch = Date.parse(`${dateKey}T00:00:00.000`);
+
+  return Math.floor(epoch / 1000);
+}
+
+async function calculateBudgetActualAmount(
+  db: SqliteLedgerDb,
+  profile: string,
+  budget: Budget,
+  period: BudgetPeriod,
+): Promise<number | undefined> {
+  let offset = 0;
+  let countedEntries = false;
+  let totalActualAmount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      categoryId: budget.categoryId,
+      from: startOfLocalDateEpoch(period.periodStart),
+      to: endOfLocalDateEpoch(period.periodEnd),
+      limit: BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE,
+      offset,
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    countedEntries = true;
+
+    totalActualAmount += page.entries.reduce((sum, entry) => {
+      if (entry.currencyCode !== budget.currencyCode) {
+        return sum;
+      }
+
+      if (budget.includeInflows) {
+        return sum - entry.amount;
+      }
+
+      return entry.amount < 0 ? sum - entry.amount : sum;
+    }, 0);
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  if (!countedEntries) {
+    return undefined;
+  }
+
+  return Math.max(0, totalActualAmount);
+}
+
+async function listUpcomingRecurringPayments(
+  db: SqliteLedgerDb,
+  profile: string,
+  asOf = new Date(),
+): Promise<readonly UpcomingRecurringPayment[]> {
+  const [items, accounts] = await Promise.all([
+    db.listRecurringItems(profile),
+    db.listAccounts(profile),
+  ]);
+  const accountCurrencyCodes = new Map(
+    accounts.map((account) => [account.id, account.currencyCode]),
+  );
+  const asOfDate = startOfUtcDate(asOf);
+
+  return items
+    .filter((item) => item.isActive)
+    .flatMap((item): UpcomingRecurringPayment[] => {
+      const nextDueAt = resolveNextRecurringDate(item, asOfDate);
+      const currencyCode = accountCurrencyCodes.get(item.accountId);
+
+      if (!nextDueAt || currencyCode === undefined) {
+        return [];
+      }
+
+      const daysUntilDue = daysBetweenUtcDates(nextDueAt, asOfDate);
+
+      return [
+        {
+          id: `${item.id}:${nextDueAt.toISOString().slice(0, 10)}`,
+          recurringItemId: item.id,
+          profile: item.profile,
+          accountId: item.accountId,
+          ...(item.categoryId === undefined
+            ? {}
+            : { categoryId: item.categoryId }),
+          ...(item.merchantName === undefined
+            ? {}
+            : { merchantName: item.merchantName }),
+          frequency: item.frequency,
+          ...(item.expectedAmountMin === undefined
+            ? {}
+            : { expectedAmountMin: item.expectedAmountMin }),
+          ...(item.expectedAmountMax === undefined
+            ? {}
+            : { expectedAmountMax: item.expectedAmountMax }),
+          currencyCode,
+          ...(item.lastSeenAt === undefined
+            ? {}
+            : { lastSeenAt: item.lastSeenAt }),
+          nextDueAt: nextDueAt.toISOString(),
+          daysUntilDue,
+          isOverdue: daysUntilDue < 0,
+        },
+      ];
+    })
+    .sort((left, right) => {
+      const dueDiff = Date.parse(left.nextDueAt) - Date.parse(right.nextDueAt);
+
+      if (dueDiff !== 0) {
+        return dueDiff;
+      }
+
+      return (left.merchantName ?? left.recurringItemId).localeCompare(
+        right.merchantName ?? right.recurringItemId,
+      );
+    })
+    .slice(0, UPCOMING_RECURRING_PAYMENT_LIMIT);
+}
+
+async function listBudgetProgress(
+  db: SqliteLedgerDb,
+  profile: string,
+): Promise<readonly BudgetProgress[]> {
+  const [budgets, periods, categories] = await Promise.all([
+    db.listBudgets(profile),
+    db.listBudgetPeriods(profile),
+    db.listCategories(profile),
+  ]);
+  const categoryNames = new Map(
+    categories.map((category) => [category.id, category.name]),
+  );
+  const latestPeriodsByBudget = new Map<string, BudgetPeriod>();
+
+  for (const period of periods) {
+    const existing = latestPeriodsByBudget.get(period.budgetId);
+
+    if (
+      existing === undefined ||
+      period.periodStart > existing.periodStart ||
+      (period.periodStart === existing.periodStart &&
+        period.updatedAt > existing.updatedAt)
+    ) {
+      latestPeriodsByBudget.set(period.budgetId, period);
+    }
+  }
+
+  const rows = await Promise.all(
+    budgets.map(async (budget): Promise<BudgetProgress | undefined> => {
+      const period = latestPeriodsByBudget.get(budget.id);
+
+      if (period === undefined) {
+        return undefined;
+      }
+
+      const calculatedActualAmount = await calculateBudgetActualAmount(
+        db,
+        profile,
+        budget,
+        period,
+      );
+      const actualAmount = calculatedActualAmount ?? period.actualAmount ?? 0;
+      const amountLimit = period.plannedAmount || budget.amountLimit;
+      const progressPercentage =
+        amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
+      const remainingAmount = amountLimit - actualAmount;
+      const status =
+        actualAmount > amountLimit
+          ? "overspent"
+          : progressPercentage >= 85
+            ? "near_limit"
+            : "on_track";
+
+      return {
+        id: period.id,
+        budgetId: budget.id,
+        profile: budget.profile,
+        categoryId: budget.categoryId,
+        categoryName: categoryNames.get(budget.categoryId) ?? budget.categoryId,
+        currencyCode: budget.currencyCode,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+        amountLimit,
+        actualAmount,
+        remainingAmount,
+        progressPercentage,
+        status,
+      };
+    }),
+  );
+
+  return rows
+    .filter((row): row is BudgetProgress => row !== undefined)
+    .sort((left, right) => {
+      const statusOrder: Record<BudgetProgress["status"], number> = {
+        overspent: 0,
+        near_limit: 1,
+        on_track: 2,
+      };
+      const statusDiff = statusOrder[left.status] - statusOrder[right.status];
+
+      if (statusDiff !== 0) {
+        return statusDiff;
+      }
+
+      return right.progressPercentage - left.progressPercentage;
+    });
+}
+
+export function createLedgerQueryService({
+  db,
+  defaultProfile,
+}: CreateLedgerServicesOptions): LedgerQueryService {
+  return {
+    getLedgerSummary(profile) {
+      return db.getLedgerSummary(coerceProfile(profile, defaultProfile));
+    },
+    async getNetWorthTrend(_profile) {
+      return {
+        enabled: false,
+        reason: "Manual account and asset support is not enabled.",
+        points: [],
+      };
+    },
+    getAccountBalances(profile) {
+      return db.getAccountBalances(coerceProfile(profile, defaultProfile));
+    },
+    listAccounts(profile) {
+      return db.listAccounts(coerceProfile(profile, defaultProfile));
+    },
+    listJars(profile) {
+      return db.listJars(coerceProfile(profile, defaultProfile));
+    },
+    listCategories(profile) {
+      return db.listCategories(coerceProfile(profile, defaultProfile));
+    },
+    listCategoryRules(profile) {
+      return db.listCategoryRules(coerceProfile(profile, defaultProfile));
+    },
+    listMerchantCleanupRules(profile) {
+      return db.listMerchantCleanupRules(
+        coerceProfile(profile, defaultProfile),
+      );
+    },
+    listCategorySpending(profile) {
+      return db.listCategorySpending(coerceProfile(profile, defaultProfile));
+    },
+    listBudgets(profile) {
+      return db.listBudgets(coerceProfile(profile, defaultProfile));
+    },
+    listBudgetPeriods(profile) {
+      return db.listBudgetPeriods(coerceProfile(profile, defaultProfile));
+    },
+    listBudgetProgress(profile) {
+      return listBudgetProgress(db, coerceProfile(profile, defaultProfile));
+    },
+    listRecurringItems(profile) {
+      return db.listRecurringItems(coerceProfile(profile, defaultProfile));
+    },
+    listUpcomingRecurringPayments(profile, asOf) {
+      return listUpcomingRecurringPayments(
+        db,
+        coerceProfile(profile, defaultProfile),
+        asOf,
+      );
+    },
+    listLedgerEntries({ profile, ...query }) {
+      return db.listLedgerEntries({
+        ...query,
+        profile: coerceProfile(profile, defaultProfile),
+      });
+    },
+    listSyncRuns(profile, limit) {
+      return db.listSyncRuns(coerceProfile(profile, defaultProfile), limit);
+    },
+    listWebhookEvents(profile, limit = DEFAULT_SYNC_LIST_LIMIT) {
+      return db.listWebhookEvents(
+        coerceProfile(profile, defaultProfile),
+        limit,
+      );
+    },
+  };
+}
+
+export function createLedgerQueryServices(
+  options: CreateLedgerServicesOptions,
+): LedgerQueryServices {
+  const query = createLedgerQueryService(options);
+
+  return {
+    transactions: {
+      listLedgerEntries: query.listLedgerEntries,
+    },
+    balances: {
+      getLedgerSummary: query.getLedgerSummary,
+      getNetWorthTrend: query.getNetWorthTrend,
+      getAccountBalances: query.getAccountBalances,
+      listAccounts: query.listAccounts,
+      listJars: query.listJars,
+    },
+    categories: {
+      listCategories: query.listCategories,
+      listCategoryRules: query.listCategoryRules,
+      listCategorySpending: query.listCategorySpending,
+      listMerchantCleanupRules: query.listMerchantCleanupRules,
+    },
+    budgets: {
+      listBudgets: query.listBudgets,
+      listBudgetPeriods: query.listBudgetPeriods,
+      listBudgetProgress: query.listBudgetProgress,
+    },
+    recurringItems: {
+      listRecurringItems: query.listRecurringItems,
+      listUpcomingRecurringPayments: query.listUpcomingRecurringPayments,
+    },
+    syncState: {
+      listSyncRuns: query.listSyncRuns,
+      listWebhookEvents: query.listWebhookEvents,
+    },
+  };
+}
+
+export function createLedgerWriteService({
+  db,
+  defaultProfile,
+}: CreateLedgerServicesOptions): LedgerWriteService {
+  async function withProfileTransaction<T>(
+    profile: string | undefined,
+    callback: (tx: LedgerDbTransaction, profile: string) => Promise<T>,
+  ): Promise<T> {
+    const resolvedProfile = coerceProfile(profile, defaultProfile);
+
+    return db.transaction((tx) => callback(tx, resolvedProfile));
+  }
+
+  function updateTransactionAnnotation(
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+    profile?: string,
+  ): Promise<LedgerEntry | undefined> {
+    return withProfileTransaction(profile, (tx, resolvedProfile) =>
+      tx.updateLedgerEntryAnnotation(resolvedProfile, id, update),
+    );
+  }
+
+  return {
+    async createMonthlyCategoryBudget(input, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const categoryId = input.categoryId.trim();
+      const amountLimit = Math.trunc(input.amountLimit);
+      const currencyCode = Math.trunc(input.currencyCode);
+      const { month, periodStart, periodEnd } = readBudgetMonth(input.month);
+
+      if (!categoryId) {
+        throw new Error("Budget category is required.");
+      }
+
+      if (!Number.isFinite(currencyCode) || currencyCode <= 0) {
+        throw new Error("Budget currency code must be a positive number.");
+      }
+
+      if (!Number.isFinite(amountLimit) || amountLimit <= 0) {
+        throw new Error("Budget amount limit must be positive.");
+      }
+
+      const categoryExists = (await db.listCategories(resolvedProfile)).some(
+        (category) => category.id === categoryId,
+      );
+
+      if (!categoryExists) {
+        throw new Error("Budget category was not found.");
+      }
+
+      const timestamp = new Date().toISOString();
+      const budgetId = `monthly-${categoryId}-${currencyCode}-${month}`;
+      const periodId = `${budgetId}-period`;
+
+      await db.importLocalConfiguration(resolvedProfile, {
+        budgets: [
+          {
+            id: budgetId,
+            profile: resolvedProfile,
+            categoryId,
+            currencyCode,
+            periodStart,
+            periodEnd,
+            amountLimit,
+            rollover: false,
+            includeInflows: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+        budgetPeriods: [
+          {
+            id: periodId,
+            profile: resolvedProfile,
+            budgetId,
+            periodStart,
+            periodEnd,
+            plannedAmount: amountLimit,
+            status: "open",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      });
+
+      const progress = await listBudgetProgress(db, resolvedProfile);
+      const created = progress.find((row) => row.id === periodId);
+
+      if (created === undefined) {
+        throw new Error("Created budget progress row was not found.");
+      }
+
+      return created;
+    },
+    updateTransactionsBulk(ids, update, profile) {
+      return withProfileTransaction(profile, (tx, resolvedProfile) =>
+        tx.updateLedgerEntriesBulkEdit(resolvedProfile, ids, update),
+      );
+    },
+    updateTransactionNote(id, note, profile) {
+      return updateTransactionAnnotation(
+        id,
+        note === undefined ? {} : { note },
+        profile,
+      );
+    },
+    updateTransactionTags(id, tags, profile) {
+      return updateTransactionAnnotation(
+        id,
+        tags === undefined ? {} : { tags },
+        profile,
+      );
+    },
+    updateTransactionAnnotation,
+    updateTransactionSplitPlan(id, update, profile) {
+      return withProfileTransaction(profile, (tx, resolvedProfile) =>
+        tx.updateLedgerEntrySplitPlan(resolvedProfile, id, update),
+      );
+    },
+  };
+}
+
+export function createLedgerServices(
+  options: CreateLedgerServicesOptions,
+): LedgerServices {
+  return {
+    query: createLedgerQueryService(options),
+    queries: createLedgerQueryServices(options),
+    write: createLedgerWriteService(options),
+  };
+}

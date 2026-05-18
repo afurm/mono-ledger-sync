@@ -9,6 +9,9 @@ product:
 - `client-info.json` mirrors `GET /personal/client-info`.
 - `currency-rates.json` mirrors `GET /bank/currency`.
 - `statements/*.json` mirror `GET /personal/statement/{account}/{from}/{to}`.
+  - `statements/uah-main-2026-04-large.json` is a 120-item fixture designed to
+    drive pagination, filters, chart inputs, rule categorization checks, and
+    export/report smoke coverage.
 - `webhooks/statement-item.json` mirrors a personal webhook `StatementItem`
   event.
 - `errors/*.json` are local test envelopes for invalid access, rate limits, and

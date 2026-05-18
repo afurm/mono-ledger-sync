@@ -15,6 +15,19 @@
 
 The planned sync flow is pull-first. Webhook events can improve freshness, but final ledger state should be reconciled through statement pulls so retries, duplicate events, and missing signatures do not corrupt the ledger.
 
+## Local webhook exposure
+
+The local webhook receiver starts as a loopback endpoint. Register it directly
+only for local checks. For live Monobank personal webhook delivery during local
+development, expose the local app through a temporary HTTPS tunnel and register
+only the tunnel origin plus the exact high-entropy webhook path from
+`/api/app/config`.
+
+Keep tunnels short-lived, avoid public interface binds, never place tokens in
+webhook URLs, and remove the Monobank webhook URL or stop the tunnel when the
+session ends. Received webhook payloads remain local hints until a statement
+pull reconciles them into the ledger.
+
 ## Moving and restoring data
 
 The local UI shows the active database path in the sidebar and exposes the same
@@ -24,6 +37,14 @@ database while the local app is stopped.
 Stop the local app before replacing or restoring a database. Remove stale
 SQLite WAL/SHM sidecar files next to the database before copying the selected
 database into place.
+
+## Removing local account data
+
+Removing a local workspace must include credential cleanup. Delete the saved
+Monobank token for the active profile from **Settings -> Monobank token** or
+`DELETE /api/app/token` before removing the profile database, SQLite sidecar
+files, backups, and generated exports. Token deletion is profile-scoped, so
+removing one local profile must not clear credentials for another profile.
 
 ## Stronger local privacy
 
