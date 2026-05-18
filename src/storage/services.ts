@@ -157,12 +157,6 @@ const TRANSFER_DESCRIPTION_TERMS = [
   "переказ",
 ];
 
-function budgetCategoryCurrencyKey(
-  budget: Pick<Budget, "categoryId" | "currencyCode">,
-): string {
-  return `${budget.categoryId}:${budget.currencyCode}`;
-}
-
 function findPreviousRolloverBudgetPeriod(
   budgets: readonly Budget[],
   periods: readonly BudgetPeriod[],
@@ -706,8 +700,8 @@ export function createLedgerWriteService({
   db,
   defaultProfile,
 }: CreateLedgerServicesOptions): LedgerWriteService {
-    async function withProfileTransaction<T>(
-      profile: string | undefined,
+  async function withProfileTransaction<T>(
+    profile: string | undefined,
     callback: (tx: LedgerDbTransaction, profile: string) => Promise<T>,
   ): Promise<T> {
     const resolvedProfile = coerceProfile(profile, defaultProfile);
