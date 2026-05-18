@@ -92,6 +92,10 @@ export interface LedgerQueryService
     LedgerSyncStateQueryService {}
 
 export interface LedgerWriteService {
+  createMonthlyCategoryBudget(
+    input: MonthlyCategoryBudgetInput,
+    profile?: string,
+  ): Promise<BudgetProgress>;
   updateTransactionsBulk(
     ids: readonly string[],
     update: LedgerEntryBulkEditUpdate,
@@ -119,6 +123,13 @@ export interface LedgerWriteService {
   ): Promise<LedgerEntry | undefined>;
 }
 
+export interface MonthlyCategoryBudgetInput {
+  categoryId: string;
+  currencyCode: number;
+  month: string;
+  amountLimit: number;
+}
+
 export interface LedgerServices {
   query: LedgerQueryService;
   queries: LedgerQueryServices;
@@ -132,6 +143,7 @@ interface CreateLedgerServicesOptions {
 
 const DEFAULT_SYNC_LIST_LIMIT = 20;
 const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
+const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
 
 function coerceProfile(profile: string | undefined, fallback: string): string {
   return profile === undefined || profile.trim() === "" ? fallback : profile;
@@ -220,6 +232,106 @@ function daysBetweenUtcDates(left: Date, right: Date): number {
     (startOfUtcDate(left).getTime() - startOfUtcDate(right).getTime()) /
       millisecondsPerDay,
   );
+}
+
+function readBudgetMonth(month: string): {
+  month: string;
+  periodStart: string;
+  periodEnd: string;
+} {
+  const match = /^(\d{4})-(\d{2})$/.exec(month.trim());
+
+  if (!match) {
+    throw new Error("Budget month must use YYYY-MM format.");
+  }
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+
+  if (monthIndex < 0 || monthIndex > 11) {
+    throw new Error("Budget month must use a valid month.");
+  }
+
+  const monthStart = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+  return {
+    month: month.trim(),
+    periodStart: localDateKey(monthStart),
+    periodEnd: localDateKey(monthEnd),
+  };
+}
+
+function localDateKey(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function endOfLocalDateEpoch(dateKey: string): number {
+  const epoch = Date.parse(`${dateKey}T23:59:59.999`);
+
+  return Math.floor(epoch / 1000);
+}
+
+function startOfLocalDateEpoch(dateKey: string): number {
+  const epoch = Date.parse(`${dateKey}T00:00:00.000`);
+
+  return Math.floor(epoch / 1000);
+}
+
+async function calculateBudgetActualAmount(
+  db: SqliteLedgerDb,
+  profile: string,
+  budget: Budget,
+  period: BudgetPeriod,
+): Promise<number | undefined> {
+  let offset = 0;
+  let countedEntries = false;
+  let totalActualAmount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      categoryId: budget.categoryId,
+      from: startOfLocalDateEpoch(period.periodStart),
+      to: endOfLocalDateEpoch(period.periodEnd),
+      limit: BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE,
+      offset,
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    countedEntries = true;
+
+    totalActualAmount += page.entries.reduce((sum, entry) => {
+      if (entry.currencyCode !== budget.currencyCode) {
+        return sum;
+      }
+
+      if (budget.includeInflows) {
+        return sum - entry.amount;
+      }
+
+      return entry.amount < 0 ? sum - entry.amount : sum;
+    }, 0);
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  if (!countedEntries) {
+    return undefined;
+  }
+
+  return Math.max(0, totalActualAmount);
 }
 
 async function listUpcomingRecurringPayments(
@@ -318,15 +430,21 @@ async function listBudgetProgress(
     }
   }
 
-  return budgets
-    .flatMap((budget): BudgetProgress[] => {
+  const rows = await Promise.all(
+    budgets.map(async (budget): Promise<BudgetProgress | undefined> => {
       const period = latestPeriodsByBudget.get(budget.id);
 
       if (period === undefined) {
-        return [];
+        return undefined;
       }
 
-      const actualAmount = period.actualAmount ?? 0;
+      const calculatedActualAmount = await calculateBudgetActualAmount(
+        db,
+        profile,
+        budget,
+        period,
+      );
+      const actualAmount = calculatedActualAmount ?? period.actualAmount ?? 0;
       const amountLimit = period.plannedAmount || budget.amountLimit;
       const progressPercentage =
         amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
@@ -338,25 +456,26 @@ async function listBudgetProgress(
             ? "near_limit"
             : "on_track";
 
-      return [
-        {
-          id: period.id,
-          budgetId: budget.id,
-          profile: budget.profile,
-          categoryId: budget.categoryId,
-          categoryName:
-            categoryNames.get(budget.categoryId) ?? budget.categoryId,
-          currencyCode: budget.currencyCode,
-          periodStart: period.periodStart,
-          periodEnd: period.periodEnd,
-          amountLimit,
-          actualAmount,
-          remainingAmount,
-          progressPercentage,
-          status,
-        },
-      ];
-    })
+      return {
+        id: period.id,
+        budgetId: budget.id,
+        profile: budget.profile,
+        categoryId: budget.categoryId,
+        categoryName: categoryNames.get(budget.categoryId) ?? budget.categoryId,
+        currencyCode: budget.currencyCode,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+        amountLimit,
+        actualAmount,
+        remainingAmount,
+        progressPercentage,
+        status,
+      };
+    }),
+  );
+
+  return rows
+    .filter((row): row is BudgetProgress => row !== undefined)
     .sort((left, right) => {
       const statusOrder: Record<BudgetProgress["status"], number> = {
         overspent: 0,
@@ -510,6 +629,77 @@ export function createLedgerWriteService({
   }
 
   return {
+    async createMonthlyCategoryBudget(input, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const categoryId = input.categoryId.trim();
+      const amountLimit = Math.trunc(input.amountLimit);
+      const currencyCode = Math.trunc(input.currencyCode);
+      const { month, periodStart, periodEnd } = readBudgetMonth(input.month);
+
+      if (!categoryId) {
+        throw new Error("Budget category is required.");
+      }
+
+      if (!Number.isFinite(currencyCode) || currencyCode <= 0) {
+        throw new Error("Budget currency code must be a positive number.");
+      }
+
+      if (!Number.isFinite(amountLimit) || amountLimit <= 0) {
+        throw new Error("Budget amount limit must be positive.");
+      }
+
+      const categoryExists = (await db.listCategories(resolvedProfile)).some(
+        (category) => category.id === categoryId,
+      );
+
+      if (!categoryExists) {
+        throw new Error("Budget category was not found.");
+      }
+
+      const timestamp = new Date().toISOString();
+      const budgetId = `monthly-${categoryId}-${currencyCode}-${month}`;
+      const periodId = `${budgetId}-period`;
+
+      await db.importLocalConfiguration(resolvedProfile, {
+        budgets: [
+          {
+            id: budgetId,
+            profile: resolvedProfile,
+            categoryId,
+            currencyCode,
+            periodStart,
+            periodEnd,
+            amountLimit,
+            rollover: false,
+            includeInflows: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+        budgetPeriods: [
+          {
+            id: periodId,
+            profile: resolvedProfile,
+            budgetId,
+            periodStart,
+            periodEnd,
+            plannedAmount: amountLimit,
+            status: "open",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      });
+
+      const progress = await listBudgetProgress(db, resolvedProfile);
+      const created = progress.find((row) => row.id === periodId);
+
+      if (created === undefined) {
+        throw new Error("Created budget progress row was not found.");
+      }
+
+      return created;
+    },
     updateTransactionsBulk(ids, update, profile) {
       return withProfileTransaction(profile, (tx, resolvedProfile) =>
         tx.updateLedgerEntriesBulkEdit(resolvedProfile, ids, update),

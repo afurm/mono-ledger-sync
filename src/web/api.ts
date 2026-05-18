@@ -224,6 +224,13 @@ export interface LedgerEntryBulkEditUpdate {
   tags?: readonly string[];
 }
 
+export interface MonthlyCategoryBudgetInput {
+  categoryId: string;
+  currencyCode?: number;
+  month: string;
+  amountLimit: number;
+}
+
 export interface LedgerEntryPage {
   entries: readonly LedgerEntry[];
   total: number;
@@ -863,6 +870,18 @@ export async function updateLedgerTransactionSplitPlan(
       body: JSON.stringify(update),
     },
   );
+}
+
+export async function createMonthlyCategoryBudget(
+  input: MonthlyCategoryBudgetInput,
+): Promise<BudgetProgress> {
+  return requestJson<BudgetProgress>("/api/ledger/budgets/monthly", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {

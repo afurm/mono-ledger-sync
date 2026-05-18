@@ -16,7 +16,10 @@ import {
   createLedgerWriteService,
 } from "../dist/storage/index.js";
 import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
-import { syncLedgerWithMonobank } from "../dist/sync/index.js";
+import {
+  createLedgerEntryFromStatementItem,
+  syncLedgerWithMonobank,
+} from "../dist/sync/index.js";
 
 async function withTempLedger(callback) {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-db-"));
@@ -256,6 +259,64 @@ test("query service ranks budget progress and overspend warnings", async () => {
         await queryServices.budgets.listBudgetProgress(),
         progress,
       );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("write service creates monthly category budgets with live transaction progress", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "monthly-budget-grocery",
+        time: 1_775_001_600,
+        description: "Fixture Grocery LLC",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -2450,
+        operationAmount: -2450,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 97_550,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [createLedgerEntryFromStatementItem(accountId, statementItem)],
+      );
+
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const progress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 10_000,
+      });
+
+      assert.equal(progress.budgetId, "monthly-groceries-980-2026-04");
+      assert.equal(progress.periodStart, "2026-04-01");
+      assert.equal(progress.periodEnd, "2026-04-30");
+      assert.equal(progress.amountLimit, 10_000);
+      assert.equal(progress.actualAmount, 2450);
+      assert.equal(progress.remainingAmount, 7550);
+      assert.equal(progress.progressPercentage, 25);
+      assert.equal(progress.status, "on_track");
     } finally {
       await db.close();
     }

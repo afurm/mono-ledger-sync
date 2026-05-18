@@ -99,6 +99,7 @@ export {
   type LedgerSyncStateQueryService,
   type LedgerTransactionQueryService,
   type LedgerWriteService,
+  type MonthlyCategoryBudgetInput,
 } from "./services.js";
 
 export interface LedgerDbTransaction {

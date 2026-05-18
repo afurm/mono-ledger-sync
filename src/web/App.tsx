@@ -136,6 +136,7 @@ import {
   type LocalAppSnapshot,
   type SyncRun,
   type WebhookEvent,
+  createMonthlyCategoryBudget,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   clearMonobankToken,
@@ -4231,8 +4232,80 @@ function budgetProgressStatusLabel(
   }
 }
 
-function BudgetProgressCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+function currentBudgetMonth(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  return `${now.getFullYear()}-${month}`;
+}
+
+function BudgetProgressCard({
+  snapshot,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot;
+  onRefresh: () => Promise<void>;
+}) {
   const rows = snapshot.budgetProgress.slice(0, 6);
+  const categories = snapshot.categories.filter(
+    (category) => category.id !== "uncategorized",
+  );
+  const defaultCategoryId = categories[0]?.id ?? "";
+  const defaultCurrencyCode =
+    snapshot.accounts[0]?.currencyCode ??
+    snapshot.categorySpending[0]?.currencyCode ??
+    980;
+  const [categoryId, setCategoryId] = useState(defaultCategoryId);
+  const [month, setMonth] = useState(currentBudgetMonth);
+  const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState<
+    | { state: "idle" }
+    | { state: "saving" }
+    | { state: "error"; message: string }
+    | { state: "saved" }
+  >({ state: "idle" });
+
+  useEffect(() => {
+    if (!categoryId && defaultCategoryId) {
+      setCategoryId(defaultCategoryId);
+    }
+  }, [categoryId, defaultCategoryId]);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const parsedAmount = Number(amount);
+
+    if (!categoryId || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setStatus({
+        state: "error",
+        message: "Choose a category and enter a positive monthly limit.",
+      });
+      return;
+    }
+
+    setStatus({ state: "saving" });
+
+    try {
+      await createMonthlyCategoryBudget({
+        categoryId,
+        currencyCode: defaultCurrencyCode,
+        month,
+        amountLimit: Math.round(parsedAmount * 100),
+      });
+      setAmount("");
+      setStatus({ state: "saved" });
+      await onRefresh();
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Monthly budget could not be saved.",
+      });
+    }
+  }
 
   return (
     <Card>
@@ -4243,6 +4316,56 @@ function BudgetProgressCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        <form
+          className="grid gap-2 rounded-md border border-border p-3"
+          onSubmit={(event) => void onSubmit(event)}
+        >
+          <div className="grid gap-2 sm:grid-cols-[1.2fr_0.8fr_0.8fr_auto]">
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger aria-label="Budget category">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {categories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Input
+              aria-label="Budget month"
+              type="month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+            />
+            <Input
+              aria-label="Monthly budget limit"
+              inputMode="decimal"
+              min="0"
+              placeholder="Limit"
+              type="number"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+            />
+            <Button
+              type="submit"
+              disabled={status.state === "saving" || categories.length === 0}
+            >
+              <PlusIcon />
+              Add
+            </Button>
+          </div>
+          {status.state === "error" ? (
+            <p className="text-xs text-destructive">{status.message}</p>
+          ) : status.state === "saved" ? (
+            <p className="text-xs text-muted-foreground">
+              Monthly budget saved.
+            </p>
+          ) : null}
+        </form>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No active budget periods found in the current ledger.
@@ -4363,10 +4486,12 @@ function OverviewRoute({
   snapshot,
   loading,
   onRouteChange,
+  onRefresh,
 }: {
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
   onRouteChange: (routeId: RouteId) => void;
+  onRefresh: () => Promise<void>;
 }) {
   if (loading && !snapshot) {
     return <OverviewLoadingSkeleton />;
@@ -4526,7 +4651,7 @@ function OverviewRoute({
             events={snapshot.webhookEvents}
             onRouteChange={onRouteChange}
           />
-          <BudgetProgressCard snapshot={snapshot} />
+          <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard
@@ -7381,6 +7506,7 @@ function RouteContent({
           loading={loading}
           snapshot={snapshot}
           onRouteChange={onRouteChange}
+          onRefresh={onRefresh}
         />
       );
     case "transactions":
