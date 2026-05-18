@@ -41,6 +41,8 @@ Deferred scope:
 - Public plugin systems.
 - MCP server, agent-tool, or ChatGPT app surfaces.
 - Native desktop or mobile apps.
+- Manual accounts, manual assets, liabilities, and net worth tracking until the
+  Monobank account and jar workflows are stable.
 
 ## Consequences
 

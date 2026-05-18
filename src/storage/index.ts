@@ -1,35 +1,72 @@
 import type {
   AccountBalance,
+  BudgetProgress,
+  Budget,
+  BudgetPeriod,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntryPage,
+  Category,
+  CategoryRule,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
   LedgerWriteStats,
+  LedgerCategorySpending,
+  LedgerJar,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
+  Merchant,
+  MerchantCleanupRule,
+  NetWorthTrend,
+  NetWorthTrendPoint,
+  RecurringItem,
   SyncCursor,
   SyncRun,
   SyncRunStatus,
   StoredWebhookEvent,
+  Tag,
+  UpcomingRecurringPayment,
+  WebhookEventStatus,
   ledgerEntrySortDirections,
   ledgerEntrySortFields,
 } from "../domain/index.js";
 
 export type {
   AccountBalance,
+  BudgetProgress,
   LedgerAccount,
+  LedgerCategorySpending,
+  LedgerJar,
   LedgerEntry,
+  LedgerEntryCategorySource,
   LedgerEntryAnnotationUpdate,
+  LedgerEntryBulkEditUpdate,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
+  Category,
+  CategoryRule,
+  Budget,
+  BudgetPeriod,
   LedgerEntryQuery,
   LedgerSummary,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
+  Merchant,
+  MerchantCleanupRule,
+  NetWorthTrend,
+  NetWorthTrendPoint,
+  RecurringItem,
   SyncCursor,
   SyncRun,
   SyncRunStatus,
   StoredWebhookEvent,
+  Tag,
+  UpcomingRecurringPayment,
   LedgerWriteStats,
+  WebhookEventStatus,
 } from "../domain/index.js";
 
 import type {
@@ -47,10 +84,42 @@ export {
   ledgerEntrySortDirections,
   syncRunStatuses,
 } from "../domain/index.js";
+export {
+  createLedgerQueryService,
+  createLedgerQueryServices,
+  createLedgerServices,
+  createLedgerWriteService,
+  type LedgerBalanceQueryService,
+  type LedgerBudgetQueryService,
+  type LedgerCategoryQueryService,
+  type LedgerQueryServices,
+  type LedgerQueryService,
+  type LedgerRecurringItemQueryService,
+  type LedgerServices,
+  type LedgerSyncStateQueryService,
+  type LedgerTransactionQueryService,
+  type LedgerWriteService,
+  type MonthlyCategoryBudgetInput,
+} from "./services.js";
 
 export interface LedgerDbTransaction {
   upsertLedgerEntries(entries: readonly LedgerEntry[]): Promise<void>;
   setSyncCursor(cursor: SyncCursor): Promise<void>;
+  updateLedgerEntryAnnotation(
+    profile: string,
+    id: string,
+    update: LedgerEntryAnnotationUpdate,
+  ): Promise<LedgerEntry | undefined>;
+  updateLedgerEntriesBulkEdit(
+    profile: string,
+    ids: readonly string[],
+    update: LedgerEntryBulkEditUpdate,
+  ): Promise<readonly LedgerEntry[]>;
+  updateLedgerEntrySplitPlan(
+    profile: string,
+    id: string,
+    update: LedgerEntrySplitPlanUpdate,
+  ): Promise<LedgerEntry | undefined>;
 }
 
 export interface LedgerDb {
@@ -61,7 +130,26 @@ export interface LedgerDb {
     profile: string,
     accountId: string,
   ): Promise<SyncCursor | undefined>;
+  getLocalAppSettings(profile: string): Promise<LocalAppSettings | undefined>;
+  updateLocalAppSettings(
+    profile: string,
+    update: LocalAppSettingsUpdate,
+  ): Promise<LocalAppSettings>;
   recordSyncRun(run: SyncRun): Promise<void>;
+  listCategories(profile?: string): Promise<readonly Category[]>;
+  listCategorySpending(
+    profile?: string,
+  ): Promise<readonly LedgerCategorySpending[]>;
+  listJars(profile?: string): Promise<readonly LedgerJar[]>;
+  listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
+  listMerchants(profile?: string): Promise<readonly Merchant[]>;
+  listMerchantCleanupRules(
+    profile?: string,
+  ): Promise<readonly MerchantCleanupRule[]>;
+  listBudgets(profile?: string): Promise<readonly Budget[]>;
+  listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  listTags(profile?: string): Promise<readonly Tag[]>;
   listWebhookEvents(
     profile?: string,
     limit?: number,

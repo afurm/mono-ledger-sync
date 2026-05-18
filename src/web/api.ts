@@ -1,3 +1,10 @@
+import type {
+  LocalActivityEvent as DomainLocalActivityEvent,
+  LocalActivityEventSeverity as DomainLocalActivityEventSeverity,
+  LocalActivityEventType as DomainLocalActivityEventType,
+  WebhookEventStatus as DomainWebhookEventStatus,
+} from "../domain/index.js";
+
 export interface LocalApiHealth {
   status: "ok";
   localOnly: true;
@@ -19,6 +26,14 @@ export interface LocalApiWebhookSettings {
   url: string;
 }
 
+export interface LocalApiMonobankTokenStatus {
+  profile: string;
+  hasToken: boolean;
+  storage: "secure" | "session";
+  persistence: "persistent" | "session";
+  fallbackReason?: "secure_storage_unavailable" | "secure_storage_write_failed";
+}
+
 export interface LocalApiAppConfig {
   profile: string;
   source: "fixture" | "monobank";
@@ -26,6 +41,7 @@ export interface LocalApiAppConfig {
   databasePath: string;
   localOnly: true;
   webhook: LocalApiWebhookSettings;
+  token: LocalApiMonobankTokenStatus;
 }
 
 export interface LedgerSummary {
@@ -35,8 +51,78 @@ export interface LedgerSummary {
   income: number;
   expenses: number;
   net: number;
+  monthToDate: LedgerCashflowSummary;
   currencies: readonly number[];
   lastSyncedAt?: string;
+  oldestSyncCursorUpdatedAt?: string;
+}
+
+export interface LedgerCashflowSummary {
+  month: string;
+  from: string;
+  to: string;
+  income: number;
+  expenses: number;
+  net: number;
+}
+
+export interface LedgerCategorySpending {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
+export interface BudgetProgress {
+  id: string;
+  budgetId: string;
+  profile: string;
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  periodStart: string;
+  periodEnd: string;
+  amountLimit: number;
+  actualAmount: number;
+  remainingAmount: number;
+  progressPercentage: number;
+  status: "on_track" | "near_limit" | "overspent";
+}
+
+export interface NetWorthTrendPoint {
+  date: string;
+  amount: number;
+  currencyCode: number;
+}
+
+export interface NetWorthTrend {
+  enabled: boolean;
+  reason?: string;
+  points: readonly NetWorthTrendPoint[];
+}
+
+export interface UpcomingRecurringPayment {
+  id: string;
+  recurringItemId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency:
+    | "daily"
+    | "weekly"
+    | "monthly"
+    | "quarterly"
+    | "yearly"
+    | "irregular";
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+  lastSeenAt?: string;
+  nextDueAt: string;
+  daysUntilDue: number;
+  isOverdue: boolean;
 }
 
 export interface LedgerAccount {
@@ -49,6 +135,54 @@ export interface LedgerAccount {
   updatedAt: string;
 }
 
+export interface LedgerJar {
+  id: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  balance: number;
+  goal: number;
+  updatedAt: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
+  isSystem?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CategoryRule {
+  id: string;
+  categoryId: string;
+  name: string;
+  priority: number;
+  matchType: "condition" | "fallback";
+  merchantContains?: string;
+  descriptionContains?: string;
+  mcc?: number;
+  amountDirection?: "income" | "expense" | "any";
+  isSystem?: boolean;
+  isEnabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MerchantCleanupRule {
+  id: string;
+  name: string;
+  priority: number;
+  merchantContains: string;
+  canonicalName: string;
+  isSystem?: boolean;
+  isEnabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
@@ -59,6 +193,9 @@ export interface LedgerEntry {
   currencyCode: number;
   categoryId?: string;
   categoryName?: string;
+  categorySource?: "system_rule" | "user_rule" | "manual";
+  categoryRuleId?: string;
+  categoryRuleVersion?: string;
   merchantName?: string;
   hold?: boolean;
   balance?: number;
@@ -78,6 +215,20 @@ export interface LedgerEntrySplitPlanUpdate {
     category: string;
     amount: number;
   }[];
+}
+
+export interface LedgerEntryBulkEditUpdate {
+  ids: readonly string[];
+  categoryId?: string;
+  merchantName?: string;
+  tags?: readonly string[];
+}
+
+export interface MonthlyCategoryBudgetInput {
+  categoryId: string;
+  currencyCode?: number;
+  month: string;
+  amountLimit: number;
 }
 
 export interface LedgerEntryPage {
@@ -135,6 +286,7 @@ export interface WebhookEvent {
   accountId: string;
   type: string;
   statementItemId?: string;
+  status: DomainWebhookEventStatus;
   receivedAt: string;
   processedAt?: string;
 }
@@ -151,42 +303,192 @@ export interface LocalApiFixtureSummary {
   errorStates: number;
 }
 
-export type LocalActivityEventType =
-  | "sync_run"
-  | "webhook_delivery"
-  | "export"
-  | "rule_application"
-  | "warning"
-  | "error";
+export type LocalActivityEventType = DomainLocalActivityEventType;
 
-export type LocalActivityEventSeverity =
-  | "info"
-  | "success"
-  | "partial"
-  | "warning"
-  | "error";
+export type LocalActivityEventSeverity = DomainLocalActivityEventSeverity;
 
-export interface LocalActivityEvent {
-  id: string;
-  type: LocalActivityEventType;
-  title: string;
-  details: string;
-  timestamp: string;
-  severity: LocalActivityEventSeverity;
-  source: string;
-  referenceId?: string;
+export type LocalActivityEvent = DomainLocalActivityEvent;
+
+export interface OfflineSnapshotMetadata {
+  cachedAt: string;
+  reason: string;
 }
 
 export interface LocalAppSnapshot {
   health: LocalApiHealth;
   config: LocalApiAppConfig;
   summary: LedgerSummary;
+  netWorthTrend: NetWorthTrend;
   accounts: readonly LedgerAccount[];
+  jars: readonly LedgerJar[];
+  categories: readonly Category[];
+  categoryRules: readonly CategoryRule[];
+  merchantCleanupRules: readonly MerchantCleanupRule[];
+  categorySpending: readonly LedgerCategorySpending[];
+  budgetProgress: readonly BudgetProgress[];
+  upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
   webhookEvents: readonly WebhookEvent[];
   activityEvents: readonly LocalActivityEvent[];
   fixtures?: LocalApiFixtureSummary;
+  offline?: OfflineSnapshotMetadata;
+}
+
+interface BrowserStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+interface CachedLocalAppSnapshot {
+  cachedAt: string;
+  snapshot: LocalAppSnapshot;
+}
+
+type PersistedLocalAppSnapshot = Omit<
+  LocalAppSnapshot,
+  | "netWorthTrend"
+  | "jars"
+  | "categorySpending"
+  | "budgetProgress"
+  | "upcomingRecurringPayments"
+  | "merchantCleanupRules"
+  | "categoryRules"
+> & {
+  netWorthTrend?: NetWorthTrend;
+  jars?: readonly LedgerJar[];
+  categorySpending?: readonly LedgerCategorySpending[];
+  budgetProgress?: readonly BudgetProgress[];
+  upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
+  merchantCleanupRules?: readonly MerchantCleanupRule[];
+  categoryRules?: readonly CategoryRule[];
+  summary: Omit<LedgerSummary, "monthToDate"> & {
+    monthToDate?: LedgerCashflowSummary;
+  };
+};
+
+const LOCAL_APP_SNAPSHOT_CACHE_PREFIX =
+  "mono-ledger-sync:local-app-snapshot:v1:";
+const LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY =
+  "mono-ledger-sync:active-snapshot:v1";
+const LOCAL_APP_TRANSACTION_LIMIT = 25;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Local API unavailable";
+}
+
+function browserStorage(): BrowserStorage | undefined {
+  try {
+    return (globalThis as { localStorage?: BrowserStorage }).localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function snapshotCacheKey(profile: string, databasePath: string): string {
+  return `${LOCAL_APP_SNAPSHOT_CACHE_PREFIX}${encodeURIComponent(
+    profile,
+  )}:${encodeURIComponent(databasePath)}`;
+}
+
+function readCachedJson<T>(key: string): T | undefined {
+  const storage = browserStorage();
+
+  if (!storage) {
+    return undefined;
+  }
+
+  try {
+    const raw = storage.getItem(key);
+
+    return raw ? (JSON.parse(raw) as T) : undefined;
+  } catch {
+    try {
+      storage.removeItem(key);
+    } catch {}
+
+    return undefined;
+  }
+}
+
+function writeCachedJson(key: string, value: unknown): void {
+  const storage = browserStorage();
+
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function cacheableSnapshot(snapshot: LocalAppSnapshot): LocalAppSnapshot {
+  const { offline: _offline, ...cacheable } = snapshot;
+
+  return cacheable;
+}
+
+function normalizeCachedLocalAppSnapshot(
+  cached: CachedLocalAppSnapshot,
+): CachedLocalAppSnapshot {
+  const snapshot = cached.snapshot as PersistedLocalAppSnapshot;
+  const monthToDate = snapshot.summary.monthToDate ?? {
+    month: "cached",
+    from: "cached",
+    to: "cached",
+    income: snapshot.summary.income,
+    expenses: snapshot.summary.expenses,
+    net: snapshot.summary.net,
+  };
+
+  return {
+    ...cached,
+    snapshot: {
+      ...snapshot,
+      summary: {
+        ...snapshot.summary,
+        monthToDate,
+      },
+      netWorthTrend: snapshot.netWorthTrend ?? {
+        enabled: false,
+        reason: "Manual account and asset support is not enabled.",
+        points: [],
+      },
+      jars: snapshot.jars ?? [],
+      categorySpending: snapshot.categorySpending ?? [],
+      budgetProgress: snapshot.budgetProgress ?? [],
+      upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
+      merchantCleanupRules: snapshot.merchantCleanupRules ?? [],
+      categoryRules: snapshot.categoryRules ?? [],
+    },
+  };
+}
+
+function readCachedLocalAppSnapshot(
+  cacheKey: string,
+): CachedLocalAppSnapshot | undefined {
+  const cached = readCachedJson<CachedLocalAppSnapshot>(cacheKey);
+
+  return cached ? normalizeCachedLocalAppSnapshot(cached) : undefined;
+}
+
+function readCachedActiveSnapshotKey(): string | undefined {
+  return readCachedJson<string>(LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY);
+}
+
+function writeCachedLocalAppSnapshot(snapshot: LocalAppSnapshot): void {
+  const cacheKey = snapshotCacheKey(
+    snapshot.config.profile,
+    snapshot.config.databasePath,
+  );
+
+  writeCachedJson(LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY, cacheKey);
+  writeCachedJson(cacheKey, {
+    cachedAt: new Date().toISOString(),
+    snapshot: cacheableSnapshot(snapshot),
+  } satisfies CachedLocalAppSnapshot);
 }
 
 function syncRunInProgressLabel(status: SyncRun["status"]): boolean {
@@ -290,7 +592,60 @@ function formatSyncRunTimestamp(run: SyncRun): string {
     : (run.finishedAt ?? run.startedAt);
 }
 
-function buildLocalActivityEvents(
+function syncRunCanRefreshReports(run: SyncRun): boolean {
+  return run.status === "success" || run.status === "partial";
+}
+
+function syncRunLedgerWriteCount(run: SyncRun): number {
+  return run.itemsInserted + run.itemsUpdated;
+}
+
+function syncRunLedgerWriteSeverity(run: SyncRun): LocalActivityEventSeverity {
+  if (run.status === "partial") {
+    return "partial";
+  }
+
+  return syncRunSeverity(run.status);
+}
+
+function webhookDeliveryPending(status: DomainWebhookEventStatus): boolean {
+  return status === "pending";
+}
+
+function webhookDeliverySeverity(
+  status: DomainWebhookEventStatus,
+): LocalActivityEventSeverity {
+  if (status === "failed") {
+    return "error";
+  }
+
+  if (status === "processed") {
+    return "success";
+  }
+
+  if (status === "duplicate") {
+    return "info";
+  }
+
+  return "warning";
+}
+
+function webhookDeliveryLabel(status: DomainWebhookEventStatus): string {
+  switch (status) {
+    case "processed":
+      return "Webhook reconciled";
+    case "pending":
+      return "Webhook not reconciled";
+    case "duplicate":
+      return "Webhook duplicate";
+    case "ignored":
+      return "Webhook ignored";
+    case "failed":
+      return "Webhook failed";
+  }
+}
+
+export function buildLocalActivityEvents(
   syncRuns: readonly SyncRun[],
   webhookEvents: readonly WebhookEvent[],
 ): readonly LocalActivityEvent[] {
@@ -337,26 +692,88 @@ function buildLocalActivityEvents(
         referenceId: run.id,
       });
     }
+
+    const timestamp = formatSyncRunTimestamp(run);
+    const ledgerWriteCount = syncRunLedgerWriteCount(run);
+
+    if (ledgerWriteCount > 0) {
+      events.push({
+        id: `sync-run:${run.id}:ledger-write`,
+        type: "ledger_write",
+        title: "Ledger updated",
+        details: `${ledgerWriteCount} local ledger ${
+          ledgerWriteCount === 1 ? "entry" : "entries"
+        } written from ${syncRunSourceLabel(run.source)}`,
+        timestamp,
+        severity: syncRunLedgerWriteSeverity(run),
+        source: run.profile,
+        referenceId: run.id,
+        correlationId: run.id,
+      });
+    }
+
+    if (syncRunCanRefreshReports(run)) {
+      events.push({
+        id: `sync-run:${run.id}:report-refresh`,
+        type: "report_refresh",
+        title: "Reports refreshed",
+        details: `Local summaries refreshed after ${syncRunSourceLabel(
+          run.source,
+        )}`,
+        timestamp,
+        severity: run.status === "partial" ? "partial" : "success",
+        source: run.profile,
+        referenceId: run.id,
+        correlationId: run.id,
+      });
+    }
   }
 
   for (const event of webhookEvents) {
+    const status = event.status;
     events.push({
       id: `webhook:${event.id}`,
       type: "webhook_delivery",
       title: `Webhook ${event.type}`,
       details: `account ${event.accountId}${event.statementItemId ? ` • statement ${event.statementItemId}` : ""}`,
       timestamp: event.receivedAt,
-      severity: event.processedAt ? "success" : "warning",
+      severity: webhookDeliverySeverity(status),
       source: event.accountId,
       referenceId: event.id,
     });
 
-    if (!event.processedAt) {
+    if (webhookDeliveryPending(status)) {
       events.push({
         id: `webhook:${event.id}:warning`,
         type: "warning",
-        title: "Webhook not reconciled",
+        title: webhookDeliveryLabel(status),
         details: `Pending pull for ${event.accountId} ${event.statementItemId ? `statement ${event.statementItemId}` : ""}`,
+        timestamp: event.receivedAt,
+        severity: "warning",
+        source: event.accountId,
+        referenceId: event.id,
+      });
+    }
+
+    if (status === "failed") {
+      events.push({
+        id: `webhook:${event.id}:error`,
+        type: "error",
+        title: webhookDeliveryLabel(status),
+        details: `Webhook event for ${event.accountId} failed`,
+        timestamp: event.receivedAt,
+        severity: "error",
+        source: event.accountId,
+        referenceId: event.id,
+      });
+    }
+
+    if (status === "ignored") {
+      events.push({
+        id: `webhook:${event.id}:ignored`,
+        type: "warning",
+        title: webhookDeliveryLabel(status),
+        details: `Webhook event for ${event.accountId} was ignored`,
         timestamp: event.receivedAt,
         severity: "warning",
         source: event.accountId,
@@ -424,6 +841,21 @@ export async function updateLedgerTransactionAnnotation(
   );
 }
 
+export async function updateLedgerTransactionsBulk(
+  update: LedgerEntryBulkEditUpdate,
+): Promise<readonly LedgerEntry[]> {
+  return requestJson<readonly LedgerEntry[]>(
+    "/api/ledger/transactions/bulk-edit",
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(update),
+    },
+  );
+}
+
 export async function updateLedgerTransactionSplitPlan(
   id: string,
   update: LedgerEntrySplitPlanUpdate,
@@ -440,47 +872,153 @@ export async function updateLedgerTransactionSplitPlan(
   );
 }
 
+export async function createMonthlyCategoryBudget(
+  input: MonthlyCategoryBudgetInput,
+): Promise<BudgetProgress> {
+  return requestJson<BudgetProgress>("/api/ledger/budgets/monthly", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+}
+
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
-  const [
-    health,
-    config,
-    summary,
-    accounts,
-    transactions,
-    syncRuns,
-    webhookEvents,
-  ] = await Promise.all([
-    requestJson<LocalApiHealth>("/api/health"),
-    requestJson<LocalApiAppConfig>("/api/app/config"),
-    requestJson<LedgerSummary>("/api/ledger/summary"),
-    requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
-    loadLedgerTransactions({ limit: 8 }),
-    requestJson<readonly SyncRun[]>("/api/sync/runs"),
-    requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
-  ]);
+  let config: LocalApiAppConfig | undefined;
 
-  const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
+  try {
+    config = await requestJson<LocalApiAppConfig>("/api/app/config");
 
-  const fixtures =
-    config.source === "fixture"
-      ? await requestJson<LocalApiFixtureSummary>("/api/fixtures/summary")
-      : undefined;
+    const [
+      health,
+      summary,
+      netWorthTrend,
+      accounts,
+      jars,
+      categories,
+      categoryRules,
+      merchantCleanupRules,
+      categorySpending,
+      budgetProgress,
+      upcomingRecurringPayments,
+      transactions,
+      syncRuns,
+      webhookEvents,
+    ] = await Promise.all([
+      requestJson<LocalApiHealth>("/api/health"),
+      requestJson<LedgerSummary>("/api/ledger/summary"),
+      requestJson<NetWorthTrend>("/api/ledger/net-worth-trend"),
+      requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
+      requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
+      requestJson<readonly Category[]>("/api/ledger/categories"),
+      requestJson<readonly CategoryRule[]>("/api/ledger/category-rules"),
+      requestJson<readonly MerchantCleanupRule[]>(
+        "/api/ledger/merchant-cleanup-rules",
+      ),
+      requestJson<readonly LedgerCategorySpending[]>(
+        "/api/ledger/category-spending",
+      ),
+      requestJson<readonly BudgetProgress[]>("/api/ledger/budget-progress"),
+      requestJson<readonly UpcomingRecurringPayment[]>(
+        "/api/ledger/upcoming-recurring-payments",
+      ),
+      loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
+      requestJson<readonly SyncRun[]>("/api/sync/runs"),
+      requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
+    ]);
 
-  return {
-    health,
-    config,
-    summary,
-    accounts,
-    transactions,
-    syncRuns,
-    webhookEvents,
-    activityEvents,
-    ...(fixtures ? { fixtures } : {}),
-  };
+    const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
+
+    const fixtures =
+      config.source === "fixture"
+        ? await requestJson<LocalApiFixtureSummary>("/api/fixtures/summary")
+        : undefined;
+
+    const snapshot = {
+      health,
+      config,
+      summary,
+      netWorthTrend,
+      accounts,
+      jars,
+      categories,
+      categoryRules,
+      merchantCleanupRules,
+      categorySpending,
+      budgetProgress,
+      upcomingRecurringPayments,
+      transactions,
+      syncRuns,
+      webhookEvents,
+      activityEvents,
+      ...(fixtures ? { fixtures } : {}),
+    } satisfies LocalAppSnapshot;
+
+    writeCachedLocalAppSnapshot(snapshot);
+
+    return snapshot;
+  } catch (error) {
+    const cacheKey = config
+      ? snapshotCacheKey(config.profile, config.databasePath)
+      : readCachedActiveSnapshotKey();
+    const cached = cacheKey ? readCachedLocalAppSnapshot(cacheKey) : undefined;
+
+    if (cached) {
+      return {
+        ...cached.snapshot,
+        offline: {
+          cachedAt: cached.cachedAt,
+          reason: errorMessage(error),
+        },
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function runFixtureSync(): Promise<void> {
   await requestJson("/api/sync/run", {
     method: "POST",
+  });
+}
+
+export async function saveMonobankToken(
+  token: string,
+  profile: string,
+): Promise<LocalApiMonobankTokenStatus> {
+  return requestJson<LocalApiMonobankTokenStatus>("/api/app/token", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ profile, token }),
+  });
+}
+
+export async function clearMonobankToken(): Promise<LocalApiMonobankTokenStatus> {
+  return requestJson<LocalApiMonobankTokenStatus>("/api/app/token", {
+    method: "DELETE",
+  });
+}
+
+export async function initializeWorkspace(): Promise<
+  LocalAppSnapshot["config"]
+> {
+  return requestJson<LocalAppSnapshot["config"]>("/api/app/workspace", {
+    method: "POST",
+  });
+}
+
+export async function setMonobankSource(
+  source: LocalAppSnapshot["config"]["source"],
+): Promise<LocalAppSnapshot["config"]> {
+  return requestJson<LocalAppSnapshot["config"]>("/api/app/source", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ source }),
   });
 }

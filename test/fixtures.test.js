@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,8 +18,15 @@ import {
   createMonobankHttpAdapter,
   loadMonobankFixtureSet,
 } from "../dist/monobank/index.js";
+import { createLedgerExport } from "../dist/exports/index.js";
 import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
+import { createLedgerQueryService } from "../dist/storage/index.js";
 import { syncLedgerWithMonobank } from "../dist/sync/index.js";
+import {
+  createMonobankMockHttpHandler,
+  createMonobankMockServer,
+  withMockMonobankServer,
+} from "./monobank-mock-server.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,6 +38,7 @@ const fixtureFiles = [
   "client-info.json",
   "currency-rates.json",
   "statements/uah-main-2026-04.json",
+  "statements/uah-main-2026-04-large.json",
   "statements/eur-savings-2026-04.json",
   "statements/empty.json",
   "webhooks/statement-item.json",
@@ -40,30 +47,73 @@ const fixtureFiles = [
   "errors/server-error.json",
 ];
 
+const personalNameCheckedKeys = new Set(["name", "counterName"]);
+const personalNamePattern =
+  /\b(?:[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ']{2,})(?:\s+(?:[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ']{2,})){1,2}\b/g;
+const nonPersonNameTokens = new Set([
+  "fixture",
+  "synthetic",
+  "demo",
+  "employer",
+  "grocery",
+  "coffee",
+  "metro",
+  "user",
+  "client",
+  "account",
+  "vendor",
+  "profile",
+  "bank",
+  "monobank",
+]);
+const organizationSuffixes =
+  /\b(?:llc|inc|ltd|gmbh|plc|corp|corporation|co|co\.)\b/i;
+
+function containsPersonalName(value) {
+  const candidates = value.match(personalNamePattern);
+
+  if (candidates === null) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    if (organizationSuffixes.test(candidate)) {
+      return false;
+    }
+
+    return candidate
+      .split(/\s+/)
+      .every((token) => !nonPersonNameTokens.has(token.toLowerCase()));
+  });
+}
+
+function collectPersonalNameViolations(value, path, violations) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectPersonalNameViolations(item, `${path}[${index}]`, violations);
+    });
+    return;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    Object.entries(value).forEach(([key, nested]) => {
+      const nextPath = path ? `${path}.${key}` : key;
+
+      if (typeof nested === "string" && personalNameCheckedKeys.has(key)) {
+        if (containsPersonalName(nested)) {
+          violations.push({ path: nextPath, value: nested });
+        }
+      }
+
+      collectPersonalNameViolations(nested, nextPath, violations);
+    });
+  }
+}
+
 async function readFixture(relativePath) {
   const text = await readFile(path.join(fixturesDir, relativePath), "utf8");
 
   return JSON.parse(text);
-}
-
-async function withMockMonobankServer(handler, callback) {
-  const server = createServer(handler);
-
-  try {
-    const port = await new Promise((resolve) => {
-      server.listen(0, "127.0.0.1", () => {
-        const address = server.address();
-
-        resolve(address.port);
-      });
-    });
-
-    return await callback(`http://127.0.0.1:${port}`);
-  } finally {
-    await new Promise((resolve) => {
-      server.close(resolve);
-    });
-  }
 }
 
 async function withTempLedger(callback) {
@@ -82,9 +132,39 @@ async function withTempLedger(callback) {
   }
 }
 
+function sumAmounts(rows) {
+  return rows.reduce((total, row) => total + row.amount, 0);
+}
+
+async function readAllEntries(queryService, query) {
+  const pageLimit = 500;
+  const all = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await queryService.listLedgerEntries({
+      ...query,
+      limit: pageLimit,
+      offset,
+    });
+
+    all.push(...page.entries);
+
+    if (page.entries.length === 0 || all.length >= page.total) {
+      break;
+    }
+
+    offset += page.entries.length;
+  }
+
+  return all;
+}
+
 test("fixtures stay synthetic and avoid real-looking sensitive values", async () => {
   for (const fixtureFile of fixtureFiles) {
     const text = await readFile(path.join(fixturesDir, fixtureFile), "utf8");
+    const payload = JSON.parse(text);
+    const violations = [];
 
     assert.doesNotMatch(
       text,
@@ -102,7 +182,12 @@ test("fixtures stay synthetic and avoid real-looking sensitive values", async ()
       `${fixtureFile} must not contain the API docs sample token`,
     );
 
-    JSON.parse(text);
+    collectPersonalNameViolations(payload, "", violations);
+    assert.equal(
+      violations.length,
+      0,
+      `${fixtureFile} must not contain obvious personal-name strings in sensitive fields`,
+    );
   }
 });
 
@@ -172,6 +257,288 @@ test("fixture files cover the personal Monobank API shapes", async () => {
   assert.equal(rateLimit.retryAfterSeconds, 60);
   assert.equal(serverError.statusCode, 500);
   assert.equal(serverError.code, "server_error");
+});
+
+test("large fixture statement snapshot is schema-valid and intentionally expansive", async () => {
+  const largeStatement = await readFixture(
+    "statements/uah-main-2026-04-large.json",
+  );
+
+  assertMonobankStatementItems(
+    largeStatement,
+    "fixtures/statements/uah-main-2026-04-large.json",
+  );
+
+  assert.ok(largeStatement.length >= 100);
+  assert.ok(
+    largeStatement.some((item) => item.amount > 0),
+    "large fixture should include credits",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.amount < 0),
+    "large fixture should include debits",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.hold),
+    "large fixture should include hold records",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.currencyCode === 840),
+    "large fixture should include USD records",
+  );
+  assert.ok(
+    largeStatement.some((item) => item.currencyCode === 978),
+    "large fixture should include EUR records",
+  );
+  assert.ok(
+    largeStatement.every(
+      (item, index, items) => index === 0 || items[index - 1].time <= item.time,
+    ),
+    "large fixture should be time-ordered",
+  );
+
+  const narrowWindow = largeStatement.filter(
+    (item) => item.time >= 1775169600 && item.time <= 1775350400,
+  );
+  assert.ok(
+    narrowWindow.length >= 5,
+    "time-window slice should still include multiple rows",
+  );
+});
+
+test("large fixture statement snapshot supports precise time-window filtering", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const largeStatement = await readFixture(
+    "statements/uah-main-2026-04-large.json",
+  );
+  const adapter = createFixtureMonobankAdapter({
+    clientInfo,
+    currencyRates,
+    statements: {
+      "fixture-account-uah-main-large": largeStatement,
+    },
+  });
+  const windowStart = largeStatement[12].time;
+  const windowEnd = largeStatement[77].time;
+  const filtered = await adapter.getStatement({
+    accountId: "fixture-account-uah-main-large",
+    from: windowStart,
+    to: windowEnd,
+  });
+
+  assert.equal(filtered.length, 66);
+  assert.ok(
+    filtered.every(
+      (item) => item.time >= windowStart && item.time <= windowEnd,
+    ),
+  );
+});
+
+test("large fixture snapshot powers pagination, filters, and export/report workflows", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const largeStatement = await readFixture(
+    "statements/uah-main-2026-04-large.json",
+  );
+
+  const largeAccount = {
+    ...clientInfo.accounts[0],
+    id: "fixture-account-uah-main-large",
+  };
+
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "fixture-large-snapshot";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    const queryService = createLedgerQueryService({
+      db,
+      defaultProfile: profile,
+    });
+
+    try {
+      await db.migrate();
+      const syncResult = await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: createFixtureMonobankAdapter({
+          clientInfo: {
+            ...clientInfo,
+            accounts: [largeAccount],
+          },
+          currencyRates,
+          statements: {
+            [largeAccount.id]: largeStatement,
+          },
+        }),
+        db,
+      });
+      const allEntries = await readAllEntries(queryService, {
+        sortBy: "time",
+        sortDirection: "asc",
+      });
+
+      assert.equal(syncResult.stats.itemsSeen, largeStatement.length);
+      assert.equal(syncResult.summary.ledgerEntries, largeStatement.length);
+      assert.equal(allEntries.length, largeStatement.length);
+
+      const page1 = await queryService.listLedgerEntries({
+        limit: 25,
+        sortBy: "time",
+        sortDirection: "desc",
+      });
+      const page2 = await queryService.listLedgerEntries({
+        limit: 25,
+        offset: 25,
+        sortBy: "time",
+        sortDirection: "desc",
+      });
+      const searchResult = await queryService.listLedgerEntries({
+        search: "Fixture transaction 011",
+        limit: 5,
+      });
+      const holdResult = await queryService.listLedgerEntries({
+        status: "hold",
+        limit: 500,
+      });
+      const incomeResult = await queryService.listLedgerEntries({
+        amountMin: 0,
+        limit: 500,
+      });
+      const expenseResult = await queryService.listLedgerEntries({
+        amountMax: -1,
+        limit: 500,
+      });
+      const groceriesResult = await queryService.listLedgerEntries({
+        categoryId: "groceries",
+        limit: 500,
+      });
+
+      const windowFrom = allEntries[12].time;
+      const windowTo = allEntries[88].time;
+      const windowResult = await queryService.listLedgerEntries({
+        from: windowFrom,
+        to: windowTo,
+        limit: 500,
+      });
+
+      assert.equal(page1.limit, 25);
+      assert.equal(page1.entries.length, 25);
+      assert.equal(page1.total, largeStatement.length);
+      assert.equal(page2.entries.length, 25);
+      assert.equal(page2.total, largeStatement.length);
+      assert.notEqual(page1.entries[0].id, page2.entries[0].id);
+
+      assert.equal(searchResult.total, 1);
+      assert.equal(
+        holdResult.total,
+        largeStatement.filter((item) => item.hold).length,
+      );
+      assert.equal(
+        incomeResult.total,
+        largeStatement.filter((item) => item.amount >= 0).length,
+      );
+      assert.equal(
+        expenseResult.total,
+        largeStatement.filter((item) => item.amount < 0).length,
+      );
+      assert.equal(
+        groceriesResult.total,
+        largeStatement.filter((item) => item.mcc === 5411).length,
+      );
+      assert.equal(
+        windowResult.total,
+        largeStatement.filter(
+          (item) => item.time >= windowFrom && item.time <= windowTo,
+        ).length,
+      );
+
+      const categoryIds = new Set(
+        allEntries.map((entry) => entry.categoryId).filter(Boolean),
+      );
+      assert.equal(categoryIds.has("income"), true);
+      assert.equal(categoryIds.has("groceries"), true);
+      assert.equal(categoryIds.has("dining"), true);
+
+      const dayTotals = new Map();
+      for (const entry of allEntries) {
+        const day = new Date(entry.time * 1000).toISOString().slice(0, 10);
+        dayTotals.set(day, (dayTotals.get(day) ?? 0) + entry.amount);
+      }
+      assert.equal(dayTotals.size >= 2, true);
+      assert.equal(dayTotals.size >= 20, true);
+
+      const currencyTotals = new Map();
+      for (const entry of allEntries) {
+        currencyTotals.set(
+          entry.currencyCode,
+          (currencyTotals.get(entry.currencyCode) ?? 0) + entry.amount,
+        );
+      }
+      assert.equal(currencyTotals.size >= 2, true);
+
+      const windowInflow = sumAmounts(
+        allEntries.filter((entry) => entry.amount > 0),
+      );
+      assert.equal(
+        windowInflow,
+        largeStatement
+          .filter((item) => item.amount > 0)
+          .reduce((total, item) => total + item.amount, 0),
+      );
+
+      const holdInflow = sumAmounts(allEntries.filter((entry) => entry.hold));
+      assert.equal(
+        holdInflow,
+        largeStatement
+          .filter((item) => item.hold)
+          .reduce((total, item) => total + item.amount, 0),
+      );
+
+      const jsonExport = await createLedgerExport(db, {
+        profile,
+        format: "json",
+        accountIds: [largeAccount.id],
+        from: windowFrom,
+        to: windowTo,
+      });
+      const parsedJsonExport = JSON.parse(jsonExport.body);
+      const groceriesJsonlExport = await createLedgerExport(db, {
+        profile,
+        format: "jsonl",
+        accountIds: [largeAccount.id],
+        categoryIds: ["groceries"],
+      });
+      const csvExport = await createLedgerExport(db, {
+        profile,
+        format: "csv",
+        accountIds: [largeAccount.id],
+      });
+      const groceriesRows = groceriesJsonlExport.body
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+      assert.equal(parsedJsonExport.total, windowResult.total);
+      assert.equal(parsedJsonExport.filters.accountIds[0], largeAccount.id);
+      assert.equal(parsedJsonExport.filters.from, windowFrom);
+      assert.equal(parsedJsonExport.filters.to, windowTo);
+      assert.equal(csvExport.contentType, "text/csv; charset=utf-8");
+      assert.ok(csvExport.body.startsWith("id,accountId,time,date"));
+      assert.equal(
+        groceriesRows.every((row) => row.categoryId === "groceries"),
+        true,
+      );
+      assert.equal(
+        groceriesRows.length,
+        largeStatement.filter((item) => item.mcc === 5411).length,
+      );
+    } finally {
+      await db.close();
+    }
+  });
 });
 
 test("fixture validation reports the failing field path", () => {
@@ -440,127 +807,280 @@ test("http adapter integration works against a local mock Monobank server", asyn
     "fixture-account-empty": [],
   };
 
-  await withMockMonobankServer(
-    async (request, response) => {
-      const requestUrl = new URL(request.url, "http://127.0.0.1");
-      const pathname = requestUrl.pathname;
-      const endpoint = `${request.method} ${pathname}`;
+  const handler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+    statementByAccount,
+    onRequest: ({ endpoint, headers }) => {
       recorded.push({
         endpoint,
-        token: request.headers["x-token"],
-        contentType: request.headers["content-type"],
+        token: headers["x-token"],
+        contentType: headers["content-type"],
       });
-
-      if (pathname === "/personal/client-info") {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(clientInfo));
-        return;
-      }
-
-      if (pathname === "/bank/currency") {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(currencyRates));
-        return;
-      }
-
-      if (pathname.startsWith("/personal/statement/")) {
-        const [segmentSource, segmentStatements, accountId, from, to] = pathname
-          .split("/")
-          .filter(Boolean);
-
-        if (
-          segmentSource !== "personal" ||
-          segmentStatements !== "statement" ||
-          !accountId ||
-          !from ||
-          !to
-        ) {
-          response.writeHead(404, { "content-type": "application/json" });
-          response.end('{"message":"not found"}');
-          return;
-        }
-
-        const fromSec = Number(from);
-        const toSec = Number(to);
-        const sourceStatements =
-          statementByAccount[decodeURIComponent(accountId)] ?? [];
-        const filtered = sourceStatements.filter(
-          (statementItem) =>
-            statementItem.time >= fromSec && statementItem.time <= toSec,
-        );
-
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify(filtered));
-        return;
-      }
-
-      if (pathname === "/personal/webhook" && request.method === "POST") {
-        response.writeHead(204);
-        response.end();
-        return;
-      }
-
-      response.writeHead(404, { "content-type": "application/json" });
-      response.end('{"message":"not found"}');
     },
-    async (baseUrl) => {
-      const adapter = createMonobankHttpAdapter({
-        token,
-        baseUrl,
-        now: () => now,
-        sleep: async (ms) => {
-          sleepHistory.push(ms);
-          now += ms;
-        },
+  });
+
+  await withMockMonobankServer(handler, async (baseUrl) => {
+    const adapter = createMonobankHttpAdapter({
+      token,
+      baseUrl,
+      now: () => now,
+      sleep: async (ms) => {
+        sleepHistory.push(ms);
+        now += ms;
+      },
+    });
+
+    await withTempLedger(async ({ databasePath }) => {
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "demo",
       });
 
-      await withTempLedger(async ({ databasePath }) => {
-        const db = createSqliteLedgerDb({
-          filePath: databasePath,
+      try {
+        const result = await syncLedgerWithMonobank({
           profile: "demo",
+          source: "monobank",
+          adapter,
+          db,
+          from: 1_775_011_600,
+          to: 1_777_593_599,
         });
+        const summary = await db.getDatabaseInfo("demo");
+        const accounts = await db.listAccounts("demo");
 
-        try {
-          const result = await syncLedgerWithMonobank({
-            profile: "demo",
-            source: "monobank",
-            adapter,
-            db,
-            from: 1_775_011_600,
-            to: 1_777_593_599,
-          });
-          const summary = await db.getDatabaseInfo("demo");
-          const accounts = await db.listAccounts("demo");
+        assert.equal(result.run.status, "success");
+        assert.equal(result.accounts.length, 2);
+        assert.equal(accounts.length, 2);
+        assert.equal(summary.accounts, 2);
+        assert.equal(summary.ledgerEntries, 7);
+        assert.equal(summary.syncRuns, 1);
+        assert.equal(summary.webhookEvents, 0);
+        await adapter.setWebhook("https://localhost.example/webhook");
+      } finally {
+        await db.close();
+      }
+    });
 
-          assert.equal(result.run.status, "success");
-          assert.equal(result.accounts.length, 2);
-          assert.equal(accounts.length, 2);
-          assert.equal(summary.accounts, 2);
-          assert.equal(summary.ledgerEntries, 7);
-          assert.equal(summary.syncRuns, 1);
-          assert.equal(summary.webhookEvents, 0);
-          await adapter.setWebhook("https://localhost.example/webhook");
-        } finally {
-          await db.close();
-        }
+    assert.equal(recorded.length, 5);
+    assert.deepEqual(
+      recorded.map((request) => request.token),
+      [token, token, token, token, token],
+    );
+    assert.equal(recorded[4].endpoint, "POST /personal/webhook");
+    assert.equal(recorded[4].contentType, "application/json");
+    assert.deepEqual(sleepHistory, [60000, 60000, 60000]);
+    assert.equal(
+      recorded.some(
+        (request) => request.endpoint === "GET /personal/client-info",
+      ),
+      true,
+    );
+  });
+});
+
+test("sync retries statement fetch after a mock 429 response", async () => {
+  const token = "fixture-secret-token";
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const uahStatement = await readFixture("statements/uah-main-2026-04.json");
+  const requestLog = [];
+  const sleepHistory = [];
+  let now = 0;
+  let throttledStatementResponses = 0;
+
+  const statementFrom = 1_775_011_600;
+  const statementTo = 1_777_593_599;
+
+  const baseHandler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+    statementByAccount: {
+      "fixture-account-uah-main": uahStatement,
+    },
+    onRequest: ({ endpoint }) => {
+      requestLog.push(endpoint);
+    },
+  });
+
+  const handler = async (request, response) => {
+    const requestUrl = new URL(request.url, "http://127.0.0.1");
+    const pathname = requestUrl.pathname;
+
+    if (
+      pathname.startsWith("/personal/statement/fixture-account-uah-main/") &&
+      request.method === "GET" &&
+      throttledStatementResponses === 0
+    ) {
+      throttledStatementResponses += 1;
+
+      response.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "60",
+      });
+      response.end(
+        JSON.stringify({
+          error: "rate_limited",
+          message: "rate limit exceeded",
+        }),
+      );
+
+      return;
+    }
+
+    return baseHandler(request, response);
+  };
+
+  await withMockMonobankServer(handler, async (baseUrl) => {
+    const adapter = createMonobankHttpAdapter({
+      token,
+      baseUrl,
+      now: () => now,
+      sleep: async (ms) => {
+        sleepHistory.push(ms);
+        now += ms;
+      },
+    });
+
+    await withTempLedger(async ({ databasePath }) => {
+      const db = createSqliteLedgerDb({
+        filePath: databasePath,
+        profile: "demo",
       });
 
-      assert.equal(recorded.length, 5);
-      assert.deepEqual(
-        recorded.map((request) => request.token),
-        [token, token, token, token, token],
-      );
-      assert.equal(recorded[4].endpoint, "POST /personal/webhook");
-      assert.equal(recorded[4].contentType, "application/json");
-      assert.deepEqual(sleepHistory, [60000, 60000, 60000]);
-      assert.equal(
-        recorded.some(
-          (request) => request.endpoint === "GET /personal/client-info",
-        ),
-        true,
-      );
-    },
+      try {
+        const result = await syncLedgerWithMonobank({
+          profile: "demo",
+          source: "monobank",
+          adapter,
+          db,
+          from: statementFrom,
+          to: statementTo,
+          accountIds: ["fixture-account-uah-main"],
+        });
+        const summary = await db.getDatabaseInfo("demo");
+
+        assert.equal(result.run.status, "success");
+        assert.equal(result.run.rateLimited, 0);
+        assert.equal(result.accounts.length, 1);
+        assert.equal(result.accounts[0].accountId, "fixture-account-uah-main");
+        assert.equal(summary.accounts, 2);
+        assert.equal(summary.ledgerEntries, uahStatement.length);
+        assert.equal(summary.syncRuns, 1);
+      } finally {
+        await db.close();
+      }
+    });
+  });
+
+  assert.equal(throttledStatementResponses, 1);
+  assert.deepEqual(
+    requestLog.filter((endpoint) =>
+      endpoint.startsWith("GET /personal/statement"),
+    ),
+    [
+      `GET /personal/statement/fixture-account-uah-main/${statementFrom}/${statementTo}`,
+    ],
   );
+  assert.deepEqual(sleepHistory, [60000, 60000]);
+});
+
+test("monobank mock server helper serves standard fixture endpoints", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const uahStatement = await readFixture("statements/uah-main-2026-04.json");
+  const requestLog = [];
+
+  const handler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+    statementByAccount: {
+      "fixture-account-uah-main": uahStatement,
+    },
+    onRequest: ({ endpoint }) => {
+      requestLog.push(endpoint);
+    },
+  });
+
+  await withMockMonobankServer(handler, async (baseUrl) => {
+    const clientInfoResponse = await fetch(`${baseUrl}/personal/client-info`);
+    const ratesResponse = await fetch(`${baseUrl}/bank/currency`);
+    const statementResponse = await fetch(
+      `${baseUrl}/personal/statement/fixture-account-uah-main/1775001600/1777593599`,
+    );
+    const webhookResponse = await fetch(`${baseUrl}/personal/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "StatementItem",
+        data: {
+          account: "fixture-account-uah-main",
+          statementItem: {
+            id: "fixture-webhook-large-001",
+            time: 1775031300,
+            description: "Webhook deposit",
+            mcc: 4829,
+            originalMcc: 4829,
+            amount: 2500,
+            operationAmount: 2500,
+            currencyCode: 980,
+            commissionRate: 0,
+            cashbackAmount: 0,
+            balance: 10000000,
+            hold: false,
+          },
+        },
+      }),
+    });
+    const missingResponse = await fetch(`${baseUrl}/not-a-real-endpoint`);
+
+    assert.equal(clientInfoResponse.status, 200);
+    assert.equal(ratesResponse.status, 200);
+    assert.equal(statementResponse.status, 200);
+    assert.equal(webhookResponse.status, 204);
+    assert.equal(missingResponse.status, 404);
+    assert.equal(requestLog.includes("GET /personal/client-info"), true);
+    assert.equal(requestLog.includes("GET /bank/currency"), true);
+    assert.equal(
+      requestLog.includes(
+        "GET /personal/statement/fixture-account-uah-main/1775001600/1777593599",
+      ),
+      true,
+    );
+    assert.equal(requestLog.includes("POST /personal/webhook"), true);
+  });
+});
+
+test("monobank mock server supports explicit integration-test lifecycle", async () => {
+  const clientInfo = await readFixture("client-info.json");
+  const currencyRates = await readFixture("currency-rates.json");
+  const handler = createMonobankMockHttpHandler({
+    clientInfo,
+    currencyRates,
+  });
+  const mockServer = createMonobankMockServer(handler);
+
+  assert.throws(() => mockServer.url, /has not started/);
+
+  const baseUrl = await mockServer.listen();
+
+  try {
+    assert.equal(mockServer.url, baseUrl);
+
+    const clientInfoResponse = await fetch(`${baseUrl}/personal/client-info`);
+    const ratesResponse = await fetch(`${mockServer.url}/bank/currency`);
+
+    assert.equal(clientInfoResponse.status, 200);
+    assert.equal(ratesResponse.status, 200);
+    assert.deepEqual(await clientInfoResponse.json(), clientInfo);
+    assert.deepEqual(await ratesResponse.json(), currencyRates);
+  } finally {
+    await mockServer.close();
+  }
+
+  assert.throws(() => mockServer.url, /has not started/);
 });
 
 test("http adapter redacts token-bearing API errors", async () => {
