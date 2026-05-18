@@ -2155,6 +2155,124 @@ function registerLocalApiRoutes(
     async (): Promise<LocalApiMonobankTokenStatus> => removeMonobankToken(),
   );
 
+  app.patch(
+    `${localApiRoutePrefix}/ledger/budgets/monthly/:id/close`,
+    {
+      schema: {
+        params: deleteMonthlyBudgetParamsSchema,
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: localApiErrorResponseSchema,
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<BudgetProgress | { error: string; message: string }> => {
+      const services = await getServices();
+      const params = request.params as { id?: string };
+      const budgetPeriodId = params.id?.trim() ?? "";
+
+      if (!budgetPeriodId) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message: "Budget period ID is required.",
+        };
+      }
+
+      try {
+        const progress = await services.writeService.closeMonthlyBudgetPeriod(
+          budgetPeriodId,
+          services.profile,
+        );
+
+        if (progress === undefined) {
+          reply.code(404);
+
+          return {
+            error: "budget_not_found",
+            message: "Monthly budget period could not be found.",
+          };
+        }
+
+        return progress;
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Monthly budget period could not be closed.",
+        };
+      }
+    },
+  );
+
+  app.patch(
+    `${localApiRoutePrefix}/ledger/budgets/monthly/:id/reopen`,
+    {
+      schema: {
+        params: deleteMonthlyBudgetParamsSchema,
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: localApiErrorResponseSchema,
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<BudgetProgress | { error: string; message: string }> => {
+      const services = await getServices();
+      const params = request.params as { id?: string };
+      const budgetPeriodId = params.id?.trim() ?? "";
+
+      if (!budgetPeriodId) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message: "Budget period ID is required.",
+        };
+      }
+
+      try {
+        const progress = await services.writeService.reopenMonthlyBudgetPeriod(
+          budgetPeriodId,
+          services.profile,
+        );
+
+        if (progress === undefined) {
+          reply.code(404);
+
+          return {
+            error: "budget_not_found",
+            message: "Monthly budget period could not be found.",
+          };
+        }
+
+        return progress;
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Monthly budget period could not be reopened.",
+        };
+      }
+    },
+  );
+
   app.get(
     `${localApiRoutePrefix}/ledger/summary`,
     {

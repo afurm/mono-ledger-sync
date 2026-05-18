@@ -104,6 +104,14 @@ export interface LedgerWriteService {
     budgetPeriodId: string,
     profile?: string,
   ): Promise<boolean>;
+  closeMonthlyBudgetPeriod(
+    budgetPeriodId: string,
+    profile?: string,
+  ): Promise<BudgetProgress | undefined>;
+  reopenMonthlyBudgetPeriod(
+    budgetPeriodId: string,
+    profile?: string,
+  ): Promise<BudgetProgress | undefined>;
   updateTransactionsBulk(
     ids: readonly string[],
     update: LedgerEntryBulkEditUpdate,
@@ -571,40 +579,13 @@ async function listBudgetProgress(
         return undefined;
       }
 
-      const calculatedActualAmount = await calculateBudgetActualAmount(
+      return buildBudgetProgressRow(
         db,
         profile,
         budget,
         period,
+        categoryNames.get(budget.categoryId) ?? budget.categoryId,
       );
-      const actualAmount = calculatedActualAmount ?? period.actualAmount ?? 0;
-      const amountLimit = period.plannedAmount || budget.amountLimit;
-      const progressPercentage =
-        amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
-      const remainingAmount = amountLimit - actualAmount;
-      const status = budget.includeInflows
-        ? "on_track"
-        : actualAmount > amountLimit
-          ? "overspent"
-          : progressPercentage >= 85
-            ? "near_limit"
-            : "on_track";
-
-      return {
-        id: period.id,
-        budgetId: budget.id,
-        profile: budget.profile,
-        categoryId: budget.categoryId,
-        categoryName: categoryNames.get(budget.categoryId) ?? budget.categoryId,
-        currencyCode: budget.currencyCode,
-        periodStart: period.periodStart,
-        periodEnd: period.periodEnd,
-        amountLimit,
-        actualAmount,
-        remainingAmount,
-        progressPercentage,
-        status,
-      };
     }),
   );
 
@@ -624,6 +605,52 @@ async function listBudgetProgress(
 
       return right.progressPercentage - left.progressPercentage;
     });
+}
+
+async function buildBudgetProgressRow(
+  db: SqliteLedgerDb,
+  profile: string,
+  budget: Budget,
+  period: BudgetPeriod,
+  categoryName: string,
+): Promise<BudgetProgress> {
+  const storedClosedActual =
+    period.status === "closed" && period.actualAmount !== undefined
+      ? period.actualAmount
+      : undefined;
+  const calculatedActualAmount =
+    storedClosedActual !== undefined
+      ? undefined
+      : await calculateBudgetActualAmount(db, profile, budget, period);
+  const actualAmount =
+    storedClosedActual ?? calculatedActualAmount ?? period.actualAmount ?? 0;
+  const amountLimit = period.plannedAmount || budget.amountLimit;
+  const progressPercentage =
+    amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
+  const remainingAmount = amountLimit - actualAmount;
+  const status = budget.includeInflows
+    ? "on_track"
+    : actualAmount > amountLimit
+      ? "overspent"
+      : progressPercentage >= 85
+        ? "near_limit"
+        : "on_track";
+
+  return {
+    id: period.id,
+    budgetId: budget.id,
+    profile: budget.profile,
+    categoryId: budget.categoryId,
+    categoryName,
+    currencyCode: budget.currencyCode,
+    periodStart: period.periodStart,
+    periodEnd: period.periodEnd,
+    amountLimit,
+    actualAmount,
+    remainingAmount,
+    progressPercentage,
+    status,
+  };
 }
 
 export function createLedgerQueryService({
@@ -811,20 +838,27 @@ export function createLedgerWriteService({
             periodStart,
           )
         : undefined;
+      const previousActualAmount =
+        previous === undefined
+          ? 0
+          : previous.period.status === "closed" &&
+              previous.period.actualAmount !== undefined
+            ? previous.period.actualAmount
+            : ((await calculateBudgetActualAmount(
+                db,
+                resolvedProfile,
+                previous.budget,
+                previous.period,
+              )) ??
+              previous.period.actualAmount ??
+              0);
       const carryoverAmount =
         previous === undefined
           ? 0
           : Math.max(
               0,
               (previous.period.plannedAmount || previous.budget.amountLimit) -
-                ((await calculateBudgetActualAmount(
-                  db,
-                  resolvedProfile,
-                  previous.budget,
-                  previous.period,
-                )) ??
-                  previous.period.actualAmount ??
-                  0),
+                previousActualAmount,
             );
 
       const timestamp = new Date().toISOString();
@@ -882,6 +916,121 @@ export function createLedgerWriteService({
       return db.deleteMonthlyCategoryBudget(
         resolvedProfile,
         normalizedPeriodId,
+      );
+    },
+    async closeMonthlyBudgetPeriod(budgetPeriodId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const normalizedPeriodId = budgetPeriodId.trim();
+
+      if (!normalizedPeriodId) {
+        throw new Error("Budget period ID is required.");
+      }
+
+      const [budgets, periods] = await Promise.all([
+        db.listBudgets(resolvedProfile),
+        db.listBudgetPeriods(resolvedProfile),
+      ]);
+      const period = periods.find(
+        (candidate) => candidate.id === normalizedPeriodId,
+      );
+
+      if (period === undefined) {
+        return undefined;
+      }
+
+      const budget = budgets.find(
+        (candidate) => candidate.id === period.budgetId,
+      );
+
+      if (budget === undefined) {
+        return undefined;
+      }
+
+      const actualAmount =
+        period.status === "closed" && period.actualAmount !== undefined
+          ? period.actualAmount
+          : ((await calculateBudgetActualAmount(
+              db,
+              resolvedProfile,
+              budget,
+              period,
+            )) ??
+            period.actualAmount ??
+            0);
+
+      const updated = await db.updateMonthlyBudgetPeriodStatus(
+        resolvedProfile,
+        normalizedPeriodId,
+        "closed",
+        actualAmount,
+      );
+
+      if (updated === undefined) {
+        return undefined;
+      }
+
+      const categories = await db.listCategories(resolvedProfile);
+      const categoryName =
+        categories.find((category) => category.id === budget.categoryId)
+          ?.name ?? budget.categoryId;
+
+      return buildBudgetProgressRow(
+        db,
+        resolvedProfile,
+        budget,
+        updated,
+        categoryName,
+      );
+    },
+    async reopenMonthlyBudgetPeriod(budgetPeriodId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const normalizedPeriodId = budgetPeriodId.trim();
+
+      if (!normalizedPeriodId) {
+        throw new Error("Budget period ID is required.");
+      }
+
+      const [budgets, periods] = await Promise.all([
+        db.listBudgets(resolvedProfile),
+        db.listBudgetPeriods(resolvedProfile),
+      ]);
+      const period = periods.find(
+        (candidate) => candidate.id === normalizedPeriodId,
+      );
+
+      if (period === undefined) {
+        return undefined;
+      }
+
+      const budget = budgets.find(
+        (candidate) => candidate.id === period.budgetId,
+      );
+
+      if (budget === undefined) {
+        return undefined;
+      }
+
+      const updated = await db.updateMonthlyBudgetPeriodStatus(
+        resolvedProfile,
+        normalizedPeriodId,
+        "open",
+      );
+
+      if (updated === undefined) {
+        return undefined;
+      }
+
+      const categories = await db.listCategories(resolvedProfile);
+      const categoryName =
+        categories.find((category) => category.id === budget.categoryId)
+          ?.name ?? budget.categoryId;
+
+      return buildBudgetProgressRow(
+        db,
+        resolvedProfile,
+        budget,
+        updated,
+        categoryName,
       );
     },
     updateTransactionsBulk(ids, update, profile) {

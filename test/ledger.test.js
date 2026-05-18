@@ -4230,6 +4230,37 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       );
       assert.equal(budgetProgressResponse.statusCode, 200);
       assert.deepEqual(budgetProgressResponse.json(), []);
+      const createBudgetResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/budgets/monthly",
+        body: {
+          categoryId: "groceries",
+          currencyCode: 980,
+          month: "2026-04",
+          amountLimit: 100000,
+        },
+      });
+      const closeBudgetResponse = await server.inject({
+        method: "PATCH",
+        url: `/api/ledger/budgets/monthly/${createBudgetResponse.json().id}/close`,
+      });
+      const reopenBudgetResponse = await server.inject({
+        method: "PATCH",
+        url: `/api/ledger/budgets/monthly/${createBudgetResponse.json().id}/reopen`,
+      });
+      const missingCloseBudgetResponse = await server.inject({
+        method: "PATCH",
+        url: "/api/ledger/budgets/monthly/non-existent/close",
+      });
+
+      assert.equal(createBudgetResponse.statusCode, 200);
+      assert.equal(createBudgetResponse.json().actualAmount, 84250);
+      assert.equal(closeBudgetResponse.statusCode, 200);
+      assert.equal(closeBudgetResponse.json().actualAmount, 84250);
+      assert.equal(reopenBudgetResponse.statusCode, 200);
+      assert.equal(reopenBudgetResponse.json().actualAmount, 84250);
+      assert.equal(missingCloseBudgetResponse.statusCode, 404);
+      assert.equal(missingCloseBudgetResponse.json().error, "budget_not_found");
       assert.equal(upcomingRecurringPaymentsResponse.statusCode, 200);
       assert.deepEqual(upcomingRecurringPaymentsResponse.json(), []);
       assert.equal(jarsResponse.statusCode, 200);

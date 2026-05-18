@@ -738,6 +738,131 @@ test("write service ignores transfer-like entries when calculating budget progre
   });
 });
 
+test("write service closes and reopens monthly budget periods", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+      });
+
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const progress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 100_000,
+        rollover: true,
+      });
+
+      assert.equal(
+        await writeService.closeMonthlyBudgetPeriod("non-existent"),
+        undefined,
+      );
+
+      const closed = await writeService.closeMonthlyBudgetPeriod(progress.id);
+      const closedPeriod = (await queryService.listBudgetPeriods()).find(
+        (period) => period.id === progress.id,
+      );
+
+      assert.equal(closed?.actualAmount, 84_250);
+      assert.equal(closedPeriod?.status, "closed");
+      assert.equal(closedPeriod?.actualAmount, 84_250);
+
+      const accountId = "fixture-account-uah-main";
+      const extraGroceryStatementItem = {
+        id: "closed-budget-extra-grocery",
+        time: Math.floor(Date.parse("2026-04-12T09:00:00.000Z") / 1000),
+        description: "Extra groceries",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -10_000,
+        operationAmount: -10_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 120_000,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [extraGroceryStatementItem],
+        [
+          {
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              extraGroceryStatementItem,
+            ),
+            categoryId: "groceries",
+            categoryName: "Groceries",
+            categorySource: "system_rule",
+          },
+        ],
+      );
+
+      const frozen = (await queryService.listBudgetProgress()).find(
+        (row) => row.id === progress.id,
+      );
+      const repeatedClose = await writeService.closeMonthlyBudgetPeriod(
+        progress.id,
+      );
+      const rolloverProgress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-05",
+        amountLimit: 100_000,
+        rollover: true,
+      });
+      const historicalClose = await writeService.closeMonthlyBudgetPeriod(
+        progress.id,
+      );
+      const reopened = await writeService.reopenMonthlyBudgetPeriod(
+        progress.id,
+      );
+      const reopenedPeriod = (await queryService.listBudgetPeriods()).find(
+        (period) => period.id === progress.id,
+      );
+
+      await db.updateMonthlyBudgetPeriodStatus(profile, progress.id, "closed");
+      const closedWithoutStoredActual =
+        await writeService.closeMonthlyBudgetPeriod(progress.id);
+
+      assert.equal(frozen?.actualAmount, 84_250);
+      assert.equal(repeatedClose?.actualAmount, 84_250);
+      assert.equal(rolloverProgress.amountLimit, 115_750);
+      assert.equal(historicalClose?.id, progress.id);
+      assert.equal(historicalClose?.actualAmount, 84_250);
+      assert.equal(reopened?.actualAmount, 94_250);
+      assert.equal(reopened?.status, "near_limit");
+      assert.equal(reopenedPeriod?.status, "open");
+      assert.equal(reopenedPeriod?.actualAmount, undefined);
+      assert.equal(closedWithoutStoredActual?.actualAmount, 94_250);
+      assert.equal(
+        await writeService.reopenMonthlyBudgetPeriod("non-existent"),
+        undefined,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("write service deletes monthly category budget periods", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";

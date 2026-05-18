@@ -150,6 +150,12 @@ export interface LedgerDb {
   ): Promise<readonly MerchantCleanupRule[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  updateMonthlyBudgetPeriodStatus(
+    profile: string,
+    budgetPeriodId: string,
+    status: BudgetPeriod["status"],
+    actualAmount?: number,
+  ): Promise<BudgetPeriod | undefined>;
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
   listTags(profile?: string): Promise<readonly Tag[]>;
   listWebhookEvents(
