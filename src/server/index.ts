@@ -48,6 +48,7 @@ import {
   createLedgerWriteService,
   type LedgerQueryService,
   type LedgerWriteService,
+  type MonthlyCategoryBudgetInput,
 } from "../storage/index.js";
 import type {
   Category,
@@ -508,6 +509,18 @@ const budgetProgressResponseSchema = {
   items: {
     type: "object",
     additionalProperties: true,
+  },
+} as const;
+
+const monthlyCategoryBudgetBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["categoryId", "month", "amountLimit"],
+  properties: {
+    categoryId: { type: "string", minLength: 1, maxLength: 80 },
+    month: { type: "string", pattern: "^\\d{4}-\\d{2}$" },
+    amountLimit: { type: "number", exclusiveMinimum: 0 },
+    currencyCode: { type: "number", minimum: 1 },
   },
 } as const;
 
@@ -1169,6 +1182,31 @@ function readLedgerEntrySplitPlanUpdate(
   }
 
   return update;
+}
+
+function readMonthlyCategoryBudgetInput(
+  body: unknown,
+): MonthlyCategoryBudgetInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {
+      categoryId: "",
+      currencyCode: 980,
+      month: "",
+      amountLimit: 0,
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  return {
+    categoryId:
+      typeof record.categoryId === "string" ? record.categoryId.trim() : "",
+    currencyCode:
+      typeof record.currencyCode === "number" ? record.currencyCode : 980,
+    month: typeof record.month === "string" ? record.month.trim() : "",
+    amountLimit:
+      typeof record.amountLimit === "number" ? record.amountLimit : 0,
+  };
 }
 
 function renderLocalFixtureOverview(
@@ -2256,6 +2294,42 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listBudgetProgress(services.profile);
+    },
+  );
+
+  app.post(
+    `${localApiRoutePrefix}/ledger/budgets/monthly`,
+    {
+      schema: {
+        body: monthlyCategoryBudgetBodySchema,
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<BudgetProgress | { error: string; message: string }> => {
+      const services = await getServices();
+
+      try {
+        return await services.writeService.createMonthlyCategoryBudget(
+          readMonthlyCategoryBudgetInput(request.body),
+          services.profile,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Monthly category budget could not be created.",
+        };
+      }
     },
   );
 
