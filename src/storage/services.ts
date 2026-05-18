@@ -543,14 +543,13 @@ async function listBudgetProgress(
       const progressPercentage =
         amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
       const remainingAmount = amountLimit - actualAmount;
-      const status =
-        budget.includeInflows && actualAmount >= amountLimit
-          ? "on_track"
-          : actualAmount > amountLimit
-            ? "overspent"
-            : progressPercentage >= 85
-              ? "near_limit"
-              : "on_track";
+      const status = budget.includeInflows
+        ? "on_track"
+        : actualAmount > amountLimit
+          ? "overspent"
+          : progressPercentage >= 85
+            ? "near_limit"
+            : "on_track";
 
       return {
         id: period.id,

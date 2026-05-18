@@ -424,7 +424,7 @@ test("write service creates monthly income plans with live inflow progress", asy
         categoryId: "income",
         currencyCode: 980,
         month: "2026-04",
-        amountLimit: 80_000,
+        amountLimit: 100_000,
         rollover: true,
       });
       const incomeBudget = (await queryService.listBudgets()).find(
@@ -434,10 +434,10 @@ test("write service creates monthly income plans with live inflow progress", asy
       assert.equal(incomeBudget?.includeInflows, true);
       assert.equal(incomeBudget?.rollover, false);
       assert.equal(progress.categoryName, "Income");
-      assert.equal(progress.amountLimit, 80_000);
+      assert.equal(progress.amountLimit, 100_000);
       assert.equal(progress.actualAmount, 90_000);
-      assert.equal(progress.remainingAmount, -10_000);
-      assert.equal(progress.progressPercentage, 113);
+      assert.equal(progress.remainingAmount, 10_000);
+      assert.equal(progress.progressPercentage, 90);
       assert.equal(progress.status, "on_track");
     } finally {
       await db.close();
