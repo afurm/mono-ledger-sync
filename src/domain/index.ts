@@ -44,10 +44,53 @@ export const domainErrorCodes = [
 
 export type DomainErrorCode = (typeof domainErrorCodes)[number];
 
+export const domainErrorCodeCategories: Readonly<
+  Record<DomainErrorCode, DomainErrorCategory>
+> = {
+  auth_required: "auth",
+  token_invalid: "auth",
+  rate_limit_exceeded: "rate_limit",
+  validation_failed: "validation",
+  request_invalid: "validation",
+  network_unreachable: "network",
+  storage_corrupted: "storage",
+  migration_failed: "migration",
+  config_invalid: "config",
+  privacy_violation: "privacy",
+  internal_error: "internal",
+};
+
 export interface DomainErrorDescriptor {
   code: DomainErrorCode;
   category: DomainErrorCategory;
   details?: Record<string, unknown>;
+}
+
+export interface LocalAppSettings {
+  profile: string;
+  source?: "fixture" | "monobank";
+  updatedAt: string;
+}
+
+export interface LocalAppSettingsUpdate {
+  source?: "fixture" | "monobank";
+}
+
+export function domainErrorCategoryForCode(
+  code: DomainErrorCode,
+): DomainErrorCategory {
+  return domainErrorCodeCategories[code];
+}
+
+export function createDomainErrorDescriptor(
+  code: DomainErrorCode,
+  details?: Record<string, unknown>,
+): DomainErrorDescriptor {
+  return {
+    code,
+    category: domainErrorCategoryForCode(code),
+    ...(details ? { details } : {}),
+  };
 }
 
 export class DomainError extends Error {
@@ -71,6 +114,53 @@ export const syncRunStatuses = [
 ] as const;
 
 export type SyncRunStatus = (typeof syncRunStatuses)[number];
+
+export const localActivityEventTypes = [
+  "sync_run",
+  "ledger_write",
+  "webhook_delivery",
+  "export",
+  "report_refresh",
+  "rule_application",
+  "warning",
+  "error",
+] as const;
+
+export type LocalActivityEventType = (typeof localActivityEventTypes)[number];
+
+export const localActivityEventSeverities = [
+  "info",
+  "success",
+  "partial",
+  "warning",
+  "error",
+] as const;
+
+export type LocalActivityEventSeverity =
+  (typeof localActivityEventSeverities)[number];
+
+export const webhookEventStatuses = [
+  "pending",
+  "processed",
+  "duplicate",
+  "ignored",
+  "failed",
+] as const;
+
+export type WebhookEventStatus = (typeof webhookEventStatuses)[number];
+
+export interface LocalActivityEvent {
+  id: string;
+  profile?: string;
+  type: LocalActivityEventType;
+  title: string;
+  details: string;
+  timestamp: string;
+  severity: LocalActivityEventSeverity;
+  source: string;
+  referenceId?: string;
+  correlationId?: string;
+}
 
 export type LedgerSource = "fixture" | "monobank";
 
@@ -201,6 +291,80 @@ export interface LedgerAccount {
   updatedAt: string;
 }
 
+export interface LedgerCashflowSummary {
+  month: string;
+  from: string;
+  to: string;
+  income: number;
+  expenses: number;
+  net: number;
+}
+
+export interface LedgerCategorySpending {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
+export interface BudgetProgress {
+  id: string;
+  budgetId: string;
+  profile: string;
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  periodStart: string;
+  periodEnd: string;
+  amountLimit: number;
+  actualAmount: number;
+  remainingAmount: number;
+  progressPercentage: number;
+  status: "on_track" | "near_limit" | "overspent";
+}
+
+export interface NetWorthTrendPoint {
+  date: string;
+  amount: number;
+  currencyCode: number;
+}
+
+export interface NetWorthTrend {
+  enabled: boolean;
+  reason?: string;
+  points: readonly NetWorthTrendPoint[];
+}
+
+export interface UpcomingRecurringPayment {
+  id: string;
+  recurringItemId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+  lastSeenAt?: string;
+  nextDueAt: string;
+  daysUntilDue: number;
+  isOverdue: boolean;
+}
+
+export interface LedgerJar {
+  id: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  balance: number;
+  goal: number;
+  updatedAt: string;
+}
+
+export type LedgerEntryCategorySource = "system_rule" | "user_rule" | "manual";
+
 export interface LedgerEntry {
   id: string;
   accountId: string;
@@ -211,6 +375,9 @@ export interface LedgerEntry {
   currencyCode: number;
   categoryId?: string;
   categoryName?: string;
+  categorySource?: LedgerEntryCategorySource;
+  categoryRuleId?: string;
+  categoryRuleVersion?: string;
   merchantName?: string;
   hold?: boolean;
   balance?: number;
@@ -230,6 +397,12 @@ export interface LedgerEntryAnnotationUpdate {
   tags?: readonly string[];
 }
 
+export interface LedgerEntryBulkEditUpdate {
+  categoryId?: string;
+  merchantName?: string;
+  tags?: readonly string[];
+}
+
 export interface LedgerEntrySplitPlanUpdate {
   lines?: readonly {
     category: string;
@@ -237,11 +410,20 @@ export interface LedgerEntrySplitPlanUpdate {
   }[];
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+  normalizedName: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface LedgerEntryQuery {
   profile: string;
   accountId?: string;
   categoryId?: string;
   merchantName?: string;
+  tag?: string;
   status?: "hold" | "posted";
   amountMin?: number;
   amountMax?: number;
@@ -268,8 +450,10 @@ export interface LedgerSummary {
   income: number;
   expenses: number;
   net: number;
+  monthToDate: LedgerCashflowSummary;
   currencies: readonly number[];
   lastSyncedAt?: string;
+  oldestSyncCursorUpdatedAt?: string;
 }
 
 export interface SyncCursor {
@@ -310,6 +494,7 @@ export interface StoredWebhookEvent {
   type: string;
   statementItemId?: string;
   receivedAt: string;
+  status: WebhookEventStatus;
   processedAt?: string;
 }
 
@@ -319,6 +504,44 @@ export interface Category {
   color?: string;
   description?: string;
   isSystem?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CategoryRule {
+  id: string;
+  categoryId: string;
+  name: string;
+  priority: number;
+  matchType: "condition" | "fallback";
+  merchantContains?: string;
+  descriptionContains?: string;
+  mcc?: number;
+  amountDirection?: "income" | "expense" | "any";
+  isSystem?: boolean;
+  isEnabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface Merchant {
+  id: string;
+  name: string;
+  normalizedName: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MerchantCleanupRule {
+  id: string;
+  name: string;
+  priority: number;
+  merchantContains: string;
+  canonicalName: string;
+  isSystem?: boolean;
+  isEnabled?: boolean;
   createdAt: string;
   updatedAt?: string;
 }
@@ -333,6 +556,19 @@ export interface Budget {
   amountLimit: number;
   rollover: boolean;
   includeInflows?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetPeriod {
+  id: string;
+  profile: string;
+  budgetId: string;
+  periodStart: string;
+  periodEnd: string;
+  plannedAmount: number;
+  actualAmount?: number;
+  status: "open" | "closed";
   createdAt: string;
   updatedAt: string;
 }
@@ -355,4 +591,6 @@ export interface RecurringItem {
   isActive: boolean;
   startedAt?: string;
   lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }

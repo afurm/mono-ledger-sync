@@ -69,6 +69,11 @@ const plan = createSyncPlan({
 - Use personal Monobank API tokens only for your own data on your own machine; do not use this project as a hosted or shared service for other people's banking data.
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
+- Secure token persistence should follow
+  [`docs/decisions/0008-secure-token-storage.md`](docs/decisions/0008-secure-token-storage.md):
+  use OS credential stores for packaged builds, keep SQLite out of token
+  storage, and fall back to session-only handling when no secure provider is
+  available.
 
 ## Webhook endpoint safety
 
@@ -79,9 +84,27 @@ The local server exposes webhook settings in `/api/app/config.webhook`:
 - `webhook.path`: one high-entropy per-instance path (for example `/api/webhooks/monobank-ab12...`)
 - `webhook.url`: full URL to register in Monobank personal webhook settings
 
-Webhook registration should always use the returned `webhook.url` and remain local-only.
-Webhook payloads are recorded as local hints and are reconciled through statement pulls before
-they affect the final ledger state.
+The default `webhook.url` is a loopback URL for the local app. It is useful for
+local health checks, but Monobank cannot deliver webhooks to `127.0.0.1` from
+outside your machine.
+
+If you need live personal webhook delivery while developing locally:
+
+1. Start the local app with the intended port, then read the current
+   `webhook.path` from the UI or `/api/app/config`.
+2. Expose only that local port through a temporary HTTPS tunnel controlled by
+   you.
+3. Register the tunnel origin plus the exact high-entropy `webhook.path` in
+   Monobank personal webhook settings.
+4. Keep the tunnel open only while you are actively using it, then remove the
+   webhook URL from Monobank or stop the tunnel.
+
+Do not bind the local API to a public interface, reuse stale tunnel URLs, share
+the tunnel URL publicly, or put tokens in webhook URLs. The route path is an
+unguessable local receiver path, not an authentication system.
+
+Webhook payloads are recorded as local hints and are reconciled through
+statement pulls before they affect the final ledger state.
 
 ## Disclaimer
 
@@ -94,6 +117,7 @@ npm install
 npm run dev
 npm run typecheck
 npm test
+npm run test:live-monobank
 npm run coverage
 npm run format
 ```
@@ -106,9 +130,45 @@ Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
 Use `npm run web:dev` when working on the Vite UI; it starts the same local API
 server and proxies browser requests through `http://127.0.0.1:5173`.
 
+`npm run test:live-monobank` is an opt-in smoke test for the real Monobank
+adapter. It skips unless `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1` and
+`MONOBANK_TOKEN` are set, so default local and pull-request validation never
+calls the live API.
+
+The local API token endpoint stores saved Monobank tokens through the default
+token store. Linux uses Secret Service when available. macOS and Windows keep
+session-only handling until a packaged desktop host can bridge Keychain Services
+and Credential Manager without passing secrets through shell arguments.
+Unsupported or unavailable secure stores fall back to the running session
+instead of writing plaintext credentials to SQLite or config files.
+
+### Rotating a Monobank token
+
+Rotate the personal API token from the local settings screen or the local API;
+do not edit SQLite, generated exports, or config files to change credentials.
+
+1. Create a replacement personal token in Monobank.
+2. Open **Settings -> Monobank token**, paste the replacement token, confirm the
+   local-only handling checkbox, and save it for the active local profile. The
+   same flow is available through `POST /api/app/token` with the active
+   `profile` and replacement `token`.
+3. Confirm the token status in settings. Persistent secure storage means the
+   token survived through the OS credential store; session-only storage means it
+   is available only until the local server process stops.
+4. Run a Monobank sync after saving the replacement token.
+5. Revoke the old token in Monobank after the replacement token works.
+
+If a token may have been exposed, remove it from **Settings -> Monobank token**
+with the explicit deletion checkbox, revoke it in Monobank, and restart the
+local server if the UI reported session-only token handling.
+
 Release automation is documented in [docs/release.md](docs/release.md).
+Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).
 Common local workflows are documented in
 [examples/sample-workflows](examples/sample-workflows).
+Start with the
+[minimum local product flow](examples/sample-workflows/minimum-product-flow.md)
+for the install, token, sync, review, categorization, and export path.
 
 ## License
 

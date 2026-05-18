@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { productArchitecture, version } from "mono-ledger-sync/core";
@@ -34,6 +35,200 @@ test("defines the local API and UI boundaries", () => {
     "rules-and-mappings",
     "sync-and-webhooks",
   ]);
+});
+
+test("documents the minimum local product flow", async () => {
+  const workflow = await readFile(
+    "examples/sample-workflows/minimum-product-flow.md",
+    "utf8",
+  );
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(workflow, /## 1\. Install and start the local app/);
+  assert.match(
+    workflow,
+    /## 2\. Add a Monobank token when live sync is needed/,
+  );
+  assert.match(workflow, /## 3\. Sync accounts and statements/);
+  assert.match(workflow, /## 4\. Review transactions/);
+  assert.match(workflow, /## 5\. Categorize spending/);
+  assert.match(workflow, /## 6\. Export local data/);
+  assert.match(readme, /minimum local product flow/);
+});
+
+test("documents the shared domain model contract", async () => {
+  const domainSource = await readFile("src/domain/index.ts", "utf8");
+  const domainDoc = await readFile("docs/domain-model.md", "utf8");
+  const readme = await readFile("README.md", "utf8");
+  const typeNames = [
+    "Profile",
+    "LedgerSource",
+    "MonobankAccount",
+    "MonobankJar",
+    "MonobankStatementItem",
+    "MonobankRawEvent",
+    "LedgerAccount",
+    "LedgerEntry",
+    "SyncCursor",
+    "SyncRun",
+    "Category",
+    "Budget",
+    "BudgetProgress",
+    "NetWorthTrend",
+    "RecurringItem",
+    "UpcomingRecurringPayment",
+    "DomainError",
+    "LocalActivityEvent",
+  ];
+
+  for (const typeName of typeNames) {
+    assert.match(
+      domainSource,
+      new RegExp(`export (interface|class|type) ${typeName}\\b`),
+    );
+    assert.match(domainDoc, new RegExp(`\\b${typeName}\\b`));
+  }
+
+  assert.match(readme, /docs\/domain-model\.md/);
+});
+
+test("documents secure token storage boundaries", async () => {
+  const decision = await readFile(
+    "docs/decisions/0008-secure-token-storage.md",
+    "utf8",
+  );
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(decision, /macOS: Keychain Services/);
+  assert.match(decision, /Windows: Credential Manager/);
+  assert.match(decision, /Linux: Secret Service/);
+  assert.match(decision, /CI and tests: no persistent provider by default/);
+  assert.match(decision, /SQLite remains out of scope for token persistence/);
+  assert.match(decision, /session-only token handling/);
+  assert.match(readme, /0008-secure-token-storage\.md/);
+});
+
+test("documents safe local webhook exposure", async () => {
+  const localFirstDoc = await readFile("docs/local-first.md", "utf8");
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(readme, /temporary HTTPS tunnel/);
+  assert.match(readme, /exact high-entropy `webhook\.path`/);
+  assert.match(readme, /statement pulls before/);
+  assert.match(localFirstDoc, /Local webhook exposure/);
+  assert.match(localFirstDoc, /temporary HTTPS tunnel/);
+  assert.match(localFirstDoc, /never place tokens in\s+webhook URLs/);
+});
+
+test("documents token cleanup during local account removal", async () => {
+  const localFirstDoc = await readFile("docs/local-first.md", "utf8");
+
+  assert.match(localFirstDoc, /Removing local account data/);
+  assert.match(localFirstDoc, /DELETE `?\/api\/app\/token`?/);
+  assert.match(localFirstDoc, /Token deletion is profile-scoped/);
+});
+
+test("local web UI exposes webhook settings panel fields", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /function WebhookSettingsPanel/);
+  assert.match(appSource, /Profile/);
+  assert.match(appSource, /Port/);
+  assert.match(appSource, /Path/);
+  assert.match(appSource, /Enabled/);
+  assert.match(appSource, /Webhook endpoint/);
+  assert.match(appSource, /Personal webhook payloads are hints/);
+  assert.match(appSource, /verifiable personal webhook signature/);
+  assert.match(appSource, /reconcile it through statement\s+pulls/);
+});
+
+test("local web UI exposes a privacy onboarding screen", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /function PrivacyOnboardingCard/);
+  assert.match(appSource, /Privacy-first local setup/);
+  assert.match(appSource, /No cloud account required/);
+  assert.match(appSource, /no hosted token relay/);
+  assert.match(appSource, /Review privacy settings/);
+});
+
+test("rules UI keeps current rule previews and conflicts aligned", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /matchType: CategoryRuleSummary\["matchType"\]/);
+  assert.match(appSource, /function findRuleHistoricalMatches/);
+  assert.match(appSource, /updateLedgerTransactionsBulk/);
+  assert.match(appSource, /function applyPreviewedChanges/);
+  assert.match(appSource, /categoryId: rule\.categoryId/);
+  assert.match(appSource, /Preview before applying/);
+  assert.match(appSource, /rule\.matchType !== "fallback"/);
+  assert.match(appSource, /function ruleHasMccOnlyHistoryConstraint/);
+  assert.match(appSource, /MCC-only preview unavailable/);
+  assert.match(appSource, /income amount/);
+  assert.match(appSource, /normalizedValue === "any merchant"/);
+  assert.doesNotMatch(appSource, /normalizedValue\.startsWith\("any"\)/);
+  assert.match(appSource, /const merchantText = entry\.merchantName \?\? ""/);
+  assert.doesNotMatch(
+    appSource,
+    /const merchantText = `\$\{entry\.merchantName \?\? ""\} \$\{entry\.description\}`/,
+  );
+  assert.match(
+    appSource,
+    /function findRuleConflicts\(\s*entries:[\s\S]*rules:/,
+  );
+  assert.match(appSource, /entry\.categorySource === "manual"/);
+  assert.match(appSource, /entry\.categorySource === "user_rule"/);
+  assert.match(appSource, /entry\.categorySource === "system_rule"/);
+  assert.match(appSource, /entry\.categoryRuleVersion/);
+  assert.match(appSource, /findRuleConflicts\(entries, rules\)/);
+  assert.match(appSource, /rules=\{categoryRuleSummaries\}/);
+  assert.doesNotMatch(
+    appSource,
+    /builtInRuleSummaries\.filter\(\(rule\) =>\s*ledgerEntryMatchesRule/,
+  );
+  assert.doesNotMatch(appSource, /historical apply controls stay disabled/);
+});
+
+test("web client caches local snapshots for offline browsing", async () => {
+  const apiSource = await readFile("src/web/api.ts", "utf8");
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(apiSource, /LOCAL_APP_SNAPSHOT_CACHE_PREFIX/);
+  assert.match(apiSource, /LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY/);
+  assert.match(apiSource, /function snapshotCacheKey/);
+  assert.match(apiSource, /encodeURIComponent\(\s*profile,/);
+  assert.match(apiSource, /encodeURIComponent\(databasePath\)/);
+  assert.match(apiSource, /readCachedActiveSnapshotKey/);
+  assert.match(apiSource, /writeCachedLocalAppSnapshot/);
+  assert.match(apiSource, /readCachedLocalAppSnapshot/);
+  assert.match(apiSource, /normalizeCachedLocalAppSnapshot/);
+  assert.match(apiSource, /jars: snapshot\.jars \?\? \[\]/);
+  assert.match(
+    apiSource,
+    /categorySpending: snapshot\.categorySpending \?\? \[\]/,
+  );
+  assert.match(apiSource, /budgetProgress: snapshot\.budgetProgress \?\? \[\]/);
+  assert.match(apiSource, /netWorthTrend: snapshot\.netWorthTrend \?\?/);
+  assert.match(
+    apiSource,
+    /upcomingRecurringPayments: snapshot\.upcomingRecurringPayments \?\? \[\]/,
+  );
+  assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
+  assert.match(apiSource, /try \{\s*return \(globalThis as/);
+  assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
+  assert.doesNotMatch(apiSource, /LEDGER_TRANSACTION_CACHE_PREFIX/);
+  assert.match(apiSource, /offline: \{/);
+  assert.match(appSource, /OVERVIEW_TRANSACTION_LIMIT = 8/);
+  assert.match(appSource, /canUseSnapshotTransactionFallback/);
+  assert.match(appSource, /snapshotTransactionFallbackPage/);
+  assert.match(appSource, /total: snapshot\.transactions\.entries\.length/);
+  assert.match(appSource, /Browsing last local snapshot/);
+  assert.match(appSource, /snapshot\?\.offline\?\.reason/);
+  assert.match(appSource, /MTD net cashflow/);
+  assert.match(appSource, /Budget progress/);
+  assert.match(appSource, /Net worth trend/);
+  assert.match(appSource, /Spending by category/);
+  assert.match(appSource, /Upcoming recurring payments/);
 });
 
 test("serves local API health through Fastify", async () => {
@@ -76,7 +271,7 @@ test("exposes local webhook settings in app config", async () => {
 
     assert.equal(response.statusCode, 200);
     assert.equal(body.webhook.enabled, true);
-    assert.match(body.webhook.path, /^\/api\/webhooks\/monobank-[a-f0-9]{16}$/);
+    assert.match(body.webhook.path, /^\/api\/webhooks\/monobank-[a-f0-9]{32}$/);
     assert.equal(body.webhook.host, "127.0.0.1");
     assert.equal(body.webhook.port, 55443);
     assert.equal(
