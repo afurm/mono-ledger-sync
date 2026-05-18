@@ -2883,6 +2883,61 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     })();
   }
 
+  async updateMonthlyBudgetPeriodStatus(
+    profile: string,
+    budgetPeriodId: string,
+    status: BudgetPeriod["status"],
+    actualAmount?: number,
+  ): Promise<BudgetPeriod | undefined> {
+    const normalizedProfile = profile.trim() || this.profile;
+    const normalizedPeriodId = budgetPeriodId.trim();
+    const timestamp = new Date().toISOString();
+    const update = this.#database.prepare(
+      `
+        UPDATE budget_periods
+        SET status = ?, actual_amount = ?, updated_at = ?
+        WHERE profile = ? AND id = ?
+      `,
+    );
+    const select = this.#database.prepare(
+      `
+        SELECT
+          id,
+          profile,
+          budget_id,
+          period_start,
+          period_end,
+          planned_amount,
+          actual_amount,
+          status,
+          created_at,
+          updated_at
+        FROM budget_periods
+        WHERE profile = ? AND id = ?
+      `,
+    );
+
+    return this.#database.transaction(() => {
+      const result = update.run(
+        status,
+        actualAmount ?? null,
+        timestamp,
+        normalizedProfile,
+        normalizedPeriodId,
+      );
+
+      if (result.changes === 0) {
+        return undefined;
+      }
+
+      const row = select.get(normalizedProfile, normalizedPeriodId) as
+        | SqliteBudgetPeriodRow
+        | undefined;
+
+      return row === undefined ? undefined : mapBudgetPeriodRow(row);
+    })();
+  }
+
   async listRecurringItems(
     profile = this.profile,
   ): Promise<readonly RecurringItem[]> {

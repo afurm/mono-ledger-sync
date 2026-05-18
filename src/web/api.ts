@@ -918,6 +918,28 @@ export async function deleteMonthlyCategoryBudget(
   );
 }
 
+export async function closeMonthlyBudgetPeriod(
+  budgetPeriodId: string,
+): Promise<BudgetProgress> {
+  return requestJson<BudgetProgress>(
+    `/api/ledger/budgets/monthly/${encodeURIComponent(budgetPeriodId)}/close`,
+    {
+      method: "PATCH",
+    },
+  );
+}
+
+export async function reopenMonthlyBudgetPeriod(
+  budgetPeriodId: string,
+): Promise<BudgetProgress> {
+  return requestJson<BudgetProgress>(
+    `/api/ledger/budgets/monthly/${encodeURIComponent(budgetPeriodId)}/reopen`,
+    {
+      method: "PATCH",
+    },
+  );
+}
+
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
   let config: LocalApiAppConfig | undefined;
 
