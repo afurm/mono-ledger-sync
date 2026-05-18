@@ -132,6 +132,7 @@ export interface MonthlyCategoryBudgetInput {
   currencyCode: number;
   month: string;
   amountLimit: number;
+  rollover?: boolean;
 }
 
 export interface LedgerServices {
@@ -155,6 +156,63 @@ const TRANSFER_DESCRIPTION_TERMS = [
   "переклад",
   "переказ",
 ];
+
+function findPreviousRolloverBudgetPeriod(
+  budgets: readonly Budget[],
+  periods: readonly BudgetPeriod[],
+  categoryId: string,
+  currencyCode: number,
+  periodStart: string,
+): { budget: Budget; period: BudgetPeriod } | undefined {
+  const budgetsById = new Map<string, Budget>(
+    budgets.map((budget) => [budget.id, budget]),
+  );
+  let bestPeriod: BudgetPeriod | undefined;
+
+  for (const period of periods) {
+    const budget = budgetsById.get(period.budgetId);
+
+    if (budget === undefined) {
+      continue;
+    }
+
+    if (!budget.rollover) {
+      continue;
+    }
+
+    if (
+      budget.categoryId !== categoryId ||
+      budget.currencyCode !== currencyCode
+    ) {
+      continue;
+    }
+
+    if (period.periodStart >= periodStart) {
+      continue;
+    }
+
+    if (
+      bestPeriod === undefined ||
+      period.periodStart > bestPeriod.periodStart ||
+      (period.periodStart === bestPeriod.periodStart &&
+        period.updatedAt > bestPeriod.updatedAt)
+    ) {
+      bestPeriod = period;
+    }
+  }
+
+  if (bestPeriod === undefined) {
+    return undefined;
+  }
+
+  const budget = budgetsById.get(bestPeriod.budgetId);
+
+  if (budget === undefined) {
+    return undefined;
+  }
+
+  return { budget, period: bestPeriod };
+}
 
 function coerceProfile(profile: string | undefined, fallback: string): string {
   return profile === undefined || profile.trim() === "" ? fallback : profile;
@@ -670,6 +728,7 @@ export function createLedgerWriteService({
       const categoryId = input.categoryId.trim();
       const amountLimit = Math.trunc(input.amountLimit);
       const currencyCode = Math.trunc(input.currencyCode);
+      const rollover = input.rollover === true;
       const { month, periodStart, periodEnd } = readBudgetMonth(input.month);
 
       if (!categoryId) {
@@ -692,6 +751,35 @@ export function createLedgerWriteService({
         throw new Error("Budget category was not found.");
       }
 
+      const [allBudgets, allPeriods] = await Promise.all([
+        db.listBudgets(resolvedProfile),
+        db.listBudgetPeriods(resolvedProfile),
+      ]);
+      const previous = rollover
+        ? findPreviousRolloverBudgetPeriod(
+            allBudgets,
+            allPeriods,
+            categoryId,
+            currencyCode,
+            periodStart,
+          )
+        : undefined;
+      const carryoverAmount =
+        previous === undefined
+          ? 0
+          : Math.max(
+              0,
+              (previous.period.plannedAmount || previous.budget.amountLimit) -
+                ((await calculateBudgetActualAmount(
+                  db,
+                  resolvedProfile,
+                  previous.budget,
+                  previous.period,
+                )) ??
+                  previous.period.actualAmount ??
+                  0),
+            );
+
       const timestamp = new Date().toISOString();
       const budgetId = `monthly-${categoryId}-${currencyCode}-${month}`;
       const periodId = `${budgetId}-period`;
@@ -706,7 +794,7 @@ export function createLedgerWriteService({
             periodStart,
             periodEnd,
             amountLimit,
-            rollover: false,
+            rollover,
             includeInflows: false,
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -719,7 +807,7 @@ export function createLedgerWriteService({
             budgetId,
             periodStart,
             periodEnd,
-            plannedAmount: amountLimit,
+            plannedAmount: amountLimit + carryoverAmount,
             status: "open",
             createdAt: timestamp,
             updatedAt: timestamp,
