@@ -145,6 +145,21 @@ export interface LedgerJar {
   updatedAt: string;
 }
 
+export interface SavingsGoalProgress {
+  id: string;
+  source: "jar";
+  sourceId: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  currentAmount: number;
+  targetAmount: number;
+  remainingAmount: number;
+  progressPercentage: number;
+  status: "not_started" | "in_progress" | "completed";
+  updatedAt: string;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -322,6 +337,7 @@ export interface LocalAppSnapshot {
   netWorthTrend: NetWorthTrend;
   accounts: readonly LedgerAccount[];
   jars: readonly LedgerJar[];
+  savingsGoalProgress: readonly SavingsGoalProgress[];
   categories: readonly Category[];
   categoryRules: readonly CategoryRule[];
   merchantCleanupRules: readonly MerchantCleanupRule[];
@@ -351,6 +367,7 @@ type PersistedLocalAppSnapshot = Omit<
   LocalAppSnapshot,
   | "netWorthTrend"
   | "jars"
+  | "savingsGoalProgress"
   | "categorySpending"
   | "budgetProgress"
   | "upcomingRecurringPayments"
@@ -359,6 +376,7 @@ type PersistedLocalAppSnapshot = Omit<
 > & {
   netWorthTrend?: NetWorthTrend;
   jars?: readonly LedgerJar[];
+  savingsGoalProgress?: readonly SavingsGoalProgress[];
   categorySpending?: readonly LedgerCategorySpending[];
   budgetProgress?: readonly BudgetProgress[];
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
@@ -458,6 +476,7 @@ function normalizeCachedLocalAppSnapshot(
         points: [],
       },
       jars: snapshot.jars ?? [],
+      savingsGoalProgress: snapshot.savingsGoalProgress ?? [],
       categorySpending: snapshot.categorySpending ?? [],
       budgetProgress: snapshot.budgetProgress ?? [],
       upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
@@ -911,6 +930,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       netWorthTrend,
       accounts,
       jars,
+      savingsGoalProgress,
       categories,
       categoryRules,
       merchantCleanupRules,
@@ -926,6 +946,9 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<NetWorthTrend>("/api/ledger/net-worth-trend"),
       requestJson<readonly LedgerAccount[]>("/api/ledger/accounts"),
       requestJson<readonly LedgerJar[]>("/api/ledger/jars"),
+      requestJson<readonly SavingsGoalProgress[]>(
+        "/api/ledger/savings-goal-progress",
+      ),
       requestJson<readonly Category[]>("/api/ledger/categories"),
       requestJson<readonly CategoryRule[]>("/api/ledger/category-rules"),
       requestJson<readonly MerchantCleanupRule[]>(
@@ -957,6 +980,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       netWorthTrend,
       accounts,
       jars,
+      savingsGoalProgress,
       categories,
       categoryRules,
       merchantCleanupRules,

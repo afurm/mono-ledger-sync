@@ -208,6 +208,10 @@ test("web client caches local snapshots for offline browsing", async () => {
     /categorySpending: snapshot\.categorySpending \?\? \[\]/,
   );
   assert.match(apiSource, /budgetProgress: snapshot\.budgetProgress \?\? \[\]/);
+  assert.match(
+    apiSource,
+    /savingsGoalProgress: snapshot\.savingsGoalProgress \?\? \[\]/,
+  );
   assert.match(apiSource, /netWorthTrend: snapshot\.netWorthTrend \?\?/);
   assert.match(
     apiSource,

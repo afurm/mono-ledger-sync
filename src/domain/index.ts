@@ -363,6 +363,21 @@ export interface LedgerJar {
   updatedAt: string;
 }
 
+export interface SavingsGoalProgress {
+  id: string;
+  source: "jar";
+  sourceId: string;
+  title: string;
+  description: string;
+  currencyCode: number;
+  currentAmount: number;
+  targetAmount: number;
+  remainingAmount: number;
+  progressPercentage: number;
+  status: "not_started" | "in_progress" | "completed";
+  updatedAt: string;
+}
+
 export type LedgerEntryCategorySource = "system_rule" | "user_rule" | "manual";
 
 export interface LedgerEntry {

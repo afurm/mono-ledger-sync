@@ -18,6 +18,7 @@ import type {
   MerchantCleanupRule,
   NetWorthTrend,
   RecurringItem,
+  SavingsGoalProgress,
   StoredWebhookEvent,
   SyncRun,
   UpcomingRecurringPayment,
@@ -38,6 +39,9 @@ export interface LedgerBalanceQueryService {
   getAccountBalances(profile?: string): Promise<readonly AccountBalance[]>;
   listAccounts(profile?: string): Promise<readonly LedgerAccount[]>;
   listJars(profile?: string): Promise<readonly LedgerJar[]>;
+  listSavingsGoalProgress(
+    profile?: string,
+  ): Promise<readonly SavingsGoalProgress[]>;
 }
 
 export interface LedgerCategoryQueryService {
@@ -360,6 +364,41 @@ function isTransferLikeEntry(entry: LedgerEntry): boolean {
     : tokens.some((token) => TRANSFER_DESCRIPTION_TERMS.includes(token));
 }
 
+function listSavingsGoalProgressFromJars(
+  jars: readonly LedgerJar[],
+): readonly SavingsGoalProgress[] {
+  return jars
+    .filter((jar) => jar.goal > 0)
+    .map((jar): SavingsGoalProgress => {
+      const remainingAmount = Math.max(0, jar.goal - jar.balance);
+      const progressPercentage = Math.min(
+        100,
+        Math.max(0, Math.round((jar.balance / jar.goal) * 100)),
+      );
+      const status =
+        jar.balance <= 0
+          ? "not_started"
+          : jar.balance >= jar.goal
+            ? "completed"
+            : "in_progress";
+
+      return {
+        id: `jar:${jar.id}`,
+        source: "jar",
+        sourceId: jar.id,
+        title: jar.title,
+        description: jar.description,
+        currencyCode: jar.currencyCode,
+        currentAmount: jar.balance,
+        targetAmount: jar.goal,
+        remainingAmount,
+        progressPercentage,
+        status,
+        updatedAt: jar.updatedAt,
+      };
+    });
+}
+
 function endOfLocalDateEpoch(dateKey: string): number {
   const epoch = Date.parse(`${dateKey}T23:59:59.999`);
 
@@ -611,6 +650,11 @@ export function createLedgerQueryService({
     listJars(profile) {
       return db.listJars(coerceProfile(profile, defaultProfile));
     },
+    async listSavingsGoalProgress(profile) {
+      return listSavingsGoalProgressFromJars(
+        await db.listJars(coerceProfile(profile, defaultProfile)),
+      );
+    },
     listCategories(profile) {
       return db.listCategories(coerceProfile(profile, defaultProfile));
     },
@@ -677,6 +721,7 @@ export function createLedgerQueryServices(
       getAccountBalances: query.getAccountBalances,
       listAccounts: query.listAccounts,
       listJars: query.listJars,
+      listSavingsGoalProgress: query.listSavingsGoalProgress,
     },
     categories: {
       listCategories: query.listCategories,
