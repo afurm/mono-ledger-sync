@@ -136,6 +136,7 @@ import {
   type LocalAppSnapshot,
   type SyncRun,
   type WebhookEvent,
+  deleteMonthlyCategoryBudget,
   createMonthlyCategoryBudget,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
@@ -4258,11 +4259,15 @@ function BudgetProgressCard({
   const [categoryId, setCategoryId] = useState(defaultCategoryId);
   const [month, setMonth] = useState(currentBudgetMonth);
   const [amount, setAmount] = useState("");
+  const [deletingBudgetPeriodId, setDeletingBudgetPeriodId] = useState<
+    string | null
+  >(null);
   const [status, setStatus] = useState<
     | { state: "idle" }
     | { state: "saving" }
+    | { state: "deleting" }
     | { state: "error"; message: string }
-    | { state: "saved" }
+    | { state: "saved"; message: string }
   >({ state: "idle" });
 
   useEffect(() => {
@@ -4294,7 +4299,7 @@ function BudgetProgressCard({
         amountLimit: Math.round(parsedAmount * 100),
       });
       setAmount("");
-      setStatus({ state: "saved" });
+      setStatus({ state: "saved", message: "Monthly budget saved." });
       await onRefresh();
     } catch (error) {
       setStatus({
@@ -4304,6 +4309,42 @@ function BudgetProgressCard({
             ? error.message
             : "Monthly budget could not be saved.",
       });
+    }
+  }
+
+  async function onDelete(budgetPeriodId: string) {
+    if (deletingBudgetPeriodId !== null) {
+      return;
+    }
+
+    const row = rows.find((item) => item.id === budgetPeriodId);
+
+    if (
+      row === undefined ||
+      !window.confirm(
+        `Delete budget for ${row.categoryName} (${row.periodStart}…${row.periodEnd})?`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingBudgetPeriodId(budgetPeriodId);
+    setStatus({ state: "deleting" });
+
+    try {
+      await deleteMonthlyCategoryBudget(row.id);
+      setStatus({ state: "saved", message: "Monthly budget deleted." });
+      await onRefresh();
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Monthly budget could not be deleted.",
+      });
+    } finally {
+      setDeletingBudgetPeriodId(null);
     }
   }
 
@@ -4361,9 +4402,7 @@ function BudgetProgressCard({
           {status.state === "error" ? (
             <p className="text-xs text-destructive">{status.message}</p>
           ) : status.state === "saved" ? (
-            <p className="text-xs text-muted-foreground">
-              Monthly budget saved.
-            </p>
+            <p className="text-xs text-muted-foreground">{status.message}</p>
           ) : null}
         </form>
         {rows.length === 0 ? (
@@ -4381,9 +4420,8 @@ function BudgetProgressCard({
             });
 
             return (
-              <a
-                className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
-                href={href}
+              <div
+                className="grid gap-2 rounded-md border border-border p-3"
                 key={row.id}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -4416,7 +4454,22 @@ function BudgetProgressCard({
                     style={{ width: `${width}%` }}
                   />
                 </div>
-              </a>
+                <div className="flex items-center justify-end gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={href}>Transactions</a>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={deletingBudgetPeriodId === row.id}
+                    aria-label={`Delete budget for ${row.categoryName} in ${row.periodStart} through ${row.periodEnd}`}
+                    onClick={() => void onDelete(row.id)}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                </div>
+              </div>
             );
           })
         )}

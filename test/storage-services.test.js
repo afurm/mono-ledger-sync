@@ -323,6 +323,50 @@ test("write service creates monthly category budgets with live transaction progr
   });
 });
 
+test("write service deletes monthly category budget periods", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+
+      const progress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 10_000,
+      });
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+
+      const notDeleted =
+        await writeService.deleteMonthlyCategoryBudget("non-existent");
+      assert.equal(notDeleted, false);
+
+      const deleted = await writeService.deleteMonthlyCategoryBudget(
+        progress.id,
+      );
+
+      assert.equal(deleted, true);
+      assert.deepEqual(await queryService.listBudgetProgress(), []);
+      assert.deepEqual(await queryService.listBudgets(), []);
+      assert.deepEqual(await queryService.listBudgetPeriods(), []);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("write service delegates annotation and split-plan updates", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
