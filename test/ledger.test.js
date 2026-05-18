@@ -4046,6 +4046,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/jars",
       });
+      const savingsGoalProgressResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/savings-goal-progress",
+      });
       const transactionsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/transactions?search=Silpo",
@@ -4234,6 +4238,23 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         ["fixture-jar-emergency-fund"],
       );
       assert.equal(jarsResponse.json()[0].title, "Emergency fund");
+      assert.equal(savingsGoalProgressResponse.statusCode, 200);
+      assert.deepEqual(savingsGoalProgressResponse.json(), [
+        {
+          id: "jar:fixture-jar-emergency-fund",
+          source: "jar",
+          sourceId: "fixture-jar-emergency-fund",
+          title: "Emergency fund",
+          description: "Synthetic local savings jar",
+          currencyCode: 980,
+          currentAmount: 1500000,
+          targetAmount: 6000000,
+          remainingAmount: 4500000,
+          progressPercentage: 25,
+          status: "in_progress",
+          updatedAt: savingsGoalProgressResponse.json()[0]?.updatedAt,
+        },
+      ]);
       assert.equal(transactionsResponse.statusCode, 200);
       assert.equal(transactionsResponse.json().total, 1);
       assert.match(

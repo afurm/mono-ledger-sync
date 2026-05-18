@@ -65,6 +65,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       const netWorthTrend = await queryService.getNetWorthTrend();
       const accounts = await queryService.listAccounts();
       const jars = await queryService.listJars();
+      const savingsGoalProgress = await queryService.listSavingsGoalProgress();
       const balances = await queryService.getAccountBalances();
       const page = await queryService.listLedgerEntries({
         limit: 3,
@@ -88,6 +89,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const groupedNetWorthTrend =
         await queryServices.balances.getNetWorthTrend();
       const groupedJars = await queryServices.balances.listJars();
+      const groupedSavingsGoalProgress =
+        await queryServices.balances.listSavingsGoalProgress();
       const groupedCategories = await queryServices.categories.listCategories();
       const groupedCategorySpending =
         await queryServices.categories.listCategorySpending();
@@ -117,6 +120,22 @@ test("query service defaults profile and wraps storage reads", async () => {
       });
       assert.equal(accounts.length, 2);
       assert.equal(jars.length, 1);
+      assert.deepEqual(savingsGoalProgress, [
+        {
+          id: "jar:fixture-jar-emergency-fund",
+          source: "jar",
+          sourceId: "fixture-jar-emergency-fund",
+          title: "Emergency fund",
+          description: "Synthetic local savings jar",
+          currencyCode: 980,
+          currentAmount: 1500000,
+          targetAmount: 6000000,
+          remainingAmount: 4500000,
+          progressPercentage: 25,
+          status: "in_progress",
+          updatedAt: savingsGoalProgress[0]?.updatedAt,
+        },
+      ]);
       assert.equal(balances.length, 2);
       assert.equal(page.limit, 3);
       assert.equal(page.entries.length, 3);
@@ -150,6 +169,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(groupedBalances.length, balances.length);
       assert.deepEqual(groupedNetWorthTrend, netWorthTrend);
       assert.equal(groupedJars.length, jars.length);
+      assert.deepEqual(groupedSavingsGoalProgress, savingsGoalProgress);
       assert.deepEqual(
         groupedCategories.map((category) => category.id),
         categoryIds,

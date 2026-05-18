@@ -64,6 +64,7 @@ import type {
   LedgerEntrySortDirection,
   LedgerEntrySortField,
   LedgerJar,
+  SavingsGoalProgress,
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
@@ -505,6 +506,14 @@ const upcomingRecurringPaymentsResponseSchema = {
 } as const;
 
 const budgetProgressResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const savingsGoalProgressResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2207,6 +2216,22 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listJars(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/savings-goal-progress`,
+    {
+      schema: {
+        response: {
+          200: savingsGoalProgressResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly SavingsGoalProgress[]> => {
+      const services = await getServices();
+
+      return services.queryService.listSavingsGoalProgress(services.profile);
     },
   );
 
