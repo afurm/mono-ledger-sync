@@ -18,6 +18,7 @@ import {
   CheckCircle2Icon,
   DatabaseIcon,
   DownloadIcon,
+  EyeOffIcon,
   EyeIcon,
   FilterXIcon,
   FileClockIcon,
@@ -36,6 +37,7 @@ import {
   StickyNoteIcon,
   StoreIcon,
   TagIcon,
+  Trash2Icon,
   UserRoundIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -121,9 +123,11 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
+  type CategoryRule,
   type LedgerAccount,
   type LedgerEntry,
   type LedgerEntryPage,
+  type LedgerJar,
   type LedgerTransactionFilters,
   type LedgerTransactionSortDirection,
   type LedgerTransactionSortField,
@@ -132,11 +136,17 @@ import {
   type LocalAppSnapshot,
   type SyncRun,
   type WebhookEvent,
+  createMonthlyCategoryBudget,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
+  clearMonobankToken,
+  initializeWorkspace,
+  saveMonobankToken,
   runFixtureSync,
+  setMonobankSource,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
+  updateLedgerTransactionsBulk,
 } from "./api";
 import {
   currencyLabel,
@@ -145,6 +155,11 @@ import {
   formatMinorAmount,
 } from "./format";
 import { type RouteId, isRouteId, routes, secondaryRoutes } from "./navigation";
+import {
+  type LedgerEntryReviewCandidate,
+  findLedgerEntryReviewCandidates,
+} from "./review";
+import { type SyncRunSummaryStats, summarizeSyncRuns } from "./sync-summary";
 
 type LoadState =
   | { status: "loading"; data?: LocalAppSnapshot; error?: undefined }
@@ -217,7 +232,9 @@ type LogEventTypeCounts = Record<LocalActivityEventType, number>;
 const DEFAULT_LOG_FILTERS: LogEventFilterState = {
   sync_run: true,
   webhook_delivery: true,
+  ledger_write: true,
   export: true,
+  report_refresh: true,
   rule_application: true,
   warning: true,
   error: true,
@@ -227,6 +244,8 @@ const LOG_EVENT_TYPE_LABELS: Readonly<Record<LocalActivityEventType, string>> =
   {
     sync_run: "Sync runs",
     webhook_delivery: "Webhook deliveries",
+    ledger_write: "Ledger writes",
+    report_refresh: "Report refreshes",
     export: "Exports",
     rule_application: "Rule application",
     warning: "Warnings",
@@ -234,6 +253,7 @@ const LOG_EVENT_TYPE_LABELS: Readonly<Record<LocalActivityEventType, string>> =
   };
 
 const TRANSACTION_PAGE_SIZE = 25;
+const OVERVIEW_TRANSACTION_LIMIT = 8;
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
 const THEME_STORAGE_KEY = "mono-ledger-sync-theme";
 const HOUR_MS = 60 * 60 * 1000;
@@ -370,6 +390,86 @@ const builtInRuleSummaries = [
     },
   },
   {
+    id: "utilities",
+    label: "Utilities",
+    priority: 25,
+    conditions: "MCC 4900 or utility text",
+    targetAction: "Set category to Utilities",
+    editor: {
+      merchantContains: "utility",
+      descriptionContains: "utility",
+      mcc: "4900",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "healthcare",
+    label: "Healthcare",
+    priority: 26,
+    conditions: "MCC 5912 or pharmacy text",
+    targetAction: "Set category to Healthcare",
+    editor: {
+      merchantContains: "pharmacy",
+      descriptionContains: "pharmacy",
+      mcc: "5912",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "shopping",
+    label: "Shopping",
+    priority: 27,
+    conditions: "MCC 5311 or marketplace text",
+    targetAction: "Set category to Shopping",
+    editor: {
+      merchantContains: "marketplace",
+      descriptionContains: "marketplace",
+      mcc: "5311",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "household",
+    label: "Household",
+    priority: 28,
+    conditions: "MCC 5200 or household text",
+    targetAction: "Set category to Household",
+    editor: {
+      merchantContains: "household",
+      descriptionContains: "household",
+      mcc: "5200",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "education",
+    label: "Education",
+    priority: 29,
+    conditions: "MCC 8299 or education text",
+    targetAction: "Set category to Education",
+    editor: {
+      merchantContains: "education",
+      descriptionContains: "education",
+      mcc: "8299",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
     id: "subscriptions",
     label: "Subscriptions",
     priority: 30,
@@ -434,6 +534,70 @@ const builtInRuleSummaries = [
     },
   },
   {
+    id: "taxes",
+    label: "Taxes",
+    priority: 65,
+    conditions: "MCC 9311 or tax text",
+    targetAction: "Set category to Taxes",
+    editor: {
+      merchantContains: "tax",
+      descriptionContains: "tax",
+      mcc: "9311",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "charity",
+    label: "Charity",
+    priority: 66,
+    conditions: "MCC 8398 or donation text",
+    targetAction: "Set category to Charity",
+    editor: {
+      merchantContains: "donation",
+      descriptionContains: "donation",
+      mcc: "8398",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "cash",
+    label: "Cash",
+    priority: 67,
+    conditions: "MCC 6011 or ATM text",
+    targetAction: "Set category to Cash",
+    editor: {
+      merchantContains: "atm",
+      descriptionContains: "atm",
+      mcc: "6011",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
+    id: "fees",
+    label: "Fees",
+    priority: 68,
+    conditions: "MCC 6012 or fee text",
+    targetAction: "Set category to Fees",
+    editor: {
+      merchantContains: "fee",
+      descriptionContains: "fee",
+      mcc: "6012",
+      amountRange: "Any expense amount",
+      transactionType: "Expense",
+      account: "All accounts",
+      date: "Any date",
+    },
+  },
+  {
     id: "transfers",
     label: "Transfers",
     priority: 70,
@@ -451,11 +615,147 @@ const builtInRuleSummaries = [
   },
 ] as const;
 
-const ruleEditorTransactionTypeOptions = ["Income", "Expense", "Transfer"];
+const ruleEditorTransactionTypeOptions = [
+  "Income",
+  "Expense",
+  "Transfer",
+  "Any",
+];
 const ruleEditorAccountOptions = ["All accounts"];
 const ruleEditorDateOptions = ["Any date", "Current statement window"];
 
-type BuiltInRuleSummary = (typeof builtInRuleSummaries)[number];
+type CategoryRuleSummary = {
+  id: string;
+  categoryId: string;
+  label: string;
+  priority: number;
+  matchType: "condition" | "fallback";
+  conditions: string;
+  targetAction: string;
+  editor: {
+    merchantContains: string;
+    descriptionContains: string;
+    mcc: string;
+    amountRange: string;
+    transactionType: string;
+    account: string;
+    date: string;
+  };
+  isEnabled: boolean;
+  isSystem: boolean;
+};
+type RuleMatchSummary = {
+  id: string;
+  priority: number;
+  matchType: CategoryRuleSummary["matchType"];
+  editor: CategoryRuleSummary["editor"];
+  isEnabled: boolean;
+};
+
+const fallbackCategoryRuleSummary: CategoryRuleSummary = {
+  id: "income",
+  categoryId: "income",
+  label: "Income",
+  priority: 10,
+  matchType: "condition",
+  conditions: "Positive amount",
+  targetAction: "Set category to Income",
+  editor: {
+    merchantContains: "Any merchant",
+    descriptionContains: "Any incoming description",
+    mcc: "Not required",
+    amountRange: "Greater than 0.00",
+    transactionType: "Income",
+    account: "All accounts",
+    date: "Any date",
+  },
+  isEnabled: true,
+  isSystem: true,
+};
+
+function categoryRuleConditions(rule: CategoryRule): string {
+  if (rule.matchType === "fallback") {
+    return "Fallback";
+  }
+
+  const conditions = [
+    rule.amountDirection === "income"
+      ? "income amount"
+      : rule.amountDirection === "expense"
+        ? "expense amount"
+        : undefined,
+    rule.mcc === undefined ? undefined : `MCC ${rule.mcc}`,
+    rule.merchantContains === undefined
+      ? undefined
+      : `merchant contains ${rule.merchantContains}`,
+    rule.descriptionContains === undefined
+      ? undefined
+      : `description contains ${rule.descriptionContains}`,
+  ].filter(Boolean);
+
+  return conditions.length > 0 ? conditions.join(" or ") : "Manual condition";
+}
+
+function categoryRuleTransactionType(rule: CategoryRule): string {
+  if (rule.amountDirection === "income") {
+    return "Income";
+  }
+
+  if (rule.amountDirection === "expense") {
+    return "Expense";
+  }
+
+  return "Any";
+}
+
+function categoryRuleSummariesFromSnapshot(
+  snapshot: LocalAppSnapshot | undefined,
+): readonly CategoryRuleSummary[] {
+  if (!snapshot?.categoryRules.length) {
+    return builtInRuleSummaries.map((rule) => ({
+      ...rule,
+      categoryId: rule.id,
+      matchType: "condition",
+      isEnabled: true,
+      isSystem: true,
+    }));
+  }
+
+  const categoryNames = new Map(
+    snapshot.categories.map((category) => [category.id, category.name]),
+  );
+
+  return snapshot.categoryRules.map((rule) => {
+    const categoryName = categoryNames.get(rule.categoryId) ?? rule.categoryId;
+
+    return {
+      id: rule.id,
+      categoryId: rule.categoryId,
+      label: rule.name,
+      priority: rule.priority,
+      matchType: rule.matchType,
+      conditions: categoryRuleConditions(rule),
+      targetAction: `Set category to ${categoryName}`,
+      editor: {
+        merchantContains: rule.merchantContains ?? "Any merchant",
+        descriptionContains:
+          rule.descriptionContains ?? "Any transaction description",
+        mcc: rule.mcc === undefined ? "Not required" : String(rule.mcc),
+        amountRange:
+          rule.amountDirection === "income"
+            ? "Greater than 0.00"
+            : rule.amountDirection === "expense"
+              ? "Less than 0.00"
+              : "Any amount",
+        transactionType: categoryRuleTransactionType(rule),
+        account: "All accounts",
+        date: "Any date",
+      },
+      isEnabled: rule.isEnabled !== false,
+      isSystem: rule.isSystem === true,
+    };
+  });
+}
 
 interface RuleTestSample {
   merchantName: string;
@@ -476,7 +776,7 @@ interface RuleTestCheck {
 
 interface RuleConflictPreview {
   entry: LedgerEntry;
-  rules: readonly BuiltInRuleSummary[];
+  rules: readonly CategoryRuleSummary[];
 }
 
 function getInitialRoute(): RouteId {
@@ -708,6 +1008,30 @@ function hasActiveTransactionFilters(
     amountInputToMinor(filters.amountMin) !== undefined ||
     amountInputToMinor(filters.amountMax) !== undefined
   );
+}
+
+function canUseSnapshotTransactionFallback(
+  filters: TransactionFilterFormState,
+): boolean {
+  const defaultFilters = defaultTransactionFilters();
+
+  return (
+    !hasActiveTransactionFilters(filters) &&
+    filters.page === 1 &&
+    filters.sortBy === defaultFilters.sortBy &&
+    filters.sortDirection === defaultFilters.sortDirection
+  );
+}
+
+function snapshotTransactionFallbackPage(
+  snapshot: LocalAppSnapshot,
+): LedgerEntryPage {
+  return {
+    ...snapshot.transactions,
+    total: snapshot.transactions.entries.length,
+    limit: snapshot.transactions.entries.length,
+    offset: 0,
+  };
 }
 
 function hasTransactionFilterInput(
@@ -980,6 +1304,30 @@ function getLedgerFreshnessWarning(
     };
   }
 
+  const oldestCursorUpdatedAt = snapshot.summary.oldestSyncCursorUpdatedAt;
+
+  if (oldestCursorUpdatedAt) {
+    const oldestCursorTime = Date.parse(oldestCursorUpdatedAt);
+
+    if (!Number.isFinite(oldestCursorTime)) {
+      return {
+        title: "Sync cursor needs attention",
+        description: `The local ledger has an unreadable cursor timestamp for ${snapshot.config.profile}. Run sync to refresh local statement progress.`,
+      };
+    }
+
+    const cursorAgeMs = now - oldestCursorTime;
+
+    if (cursorAgeMs > STALE_SYNC_THRESHOLD_MS) {
+      return {
+        title: "Statement cursor may be stale",
+        description: `${snapshot.config.profile} has a statement cursor last updated ${formatSyncAge(
+          cursorAgeMs,
+        )}. Run sync before reviewing reports or exporting local files.`,
+      };
+    }
+  }
+
   const ageMs = now - lastSyncedTime;
 
   if (ageMs <= STALE_SYNC_THRESHOLD_MS) {
@@ -1050,6 +1398,37 @@ function SyncRunStats({ run }: { run: SyncRun }) {
         <div className="rounded-lg border bg-muted/30 p-2" key={stat.label}>
           <p className="text-xs text-muted-foreground">{stat.label}</p>
           <p className="text-sm font-semibold">{stat.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SyncRunSummaryStatsPanel({
+  summary,
+}: {
+  summary: SyncRunSummaryStats;
+}) {
+  const stats = [
+    { label: "Runs", value: summary.runs },
+    { label: "API calls", value: summary.apiCalls },
+    { label: "Windows fetched", value: summary.windowsFetched },
+    { label: "Items seen", value: summary.itemsSeen },
+    { label: "Inserted", value: summary.itemsInserted },
+    { label: "Updated", value: summary.itemsUpdated },
+    { label: "Skipped", value: summary.itemsSkipped },
+    { label: "Rate-limited", value: summary.rateLimited },
+  ];
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {stats.map((stat) => (
+        <div
+          className="rounded-md border bg-muted/30 px-3 py-2"
+          key={stat.label}
+        >
+          <p className="text-xs text-muted-foreground">{stat.label}</p>
+          <p className="text-base font-semibold tabular-nums">{stat.value}</p>
         </div>
       ))}
     </div>
@@ -1253,7 +1632,9 @@ function activityEventCounts(
   const counts: LogEventTypeCounts = {
     sync_run: 0,
     webhook_delivery: 0,
+    ledger_write: 0,
     export: 0,
+    report_refresh: 0,
     rule_application: 0,
     warning: 0,
     error: 0,
@@ -1434,7 +1815,18 @@ function webhookDeliveryKey(event: WebhookEvent): string {
 }
 
 function webhookDeliveryStatus(event: WebhookEvent): string {
-  return event.processedAt ? "reconciled" : "pull required";
+  switch (event.status) {
+    case "processed":
+      return "reconciled";
+    case "pending":
+      return "pending reconcile";
+    case "duplicate":
+      return "duplicate";
+    case "ignored":
+      return "ignored";
+    case "failed":
+      return "failed";
+  }
 }
 
 function webhookEventLabel(event: WebhookEvent): string {
@@ -1518,7 +1910,17 @@ function RecentWebhookDeliveriesCard({
                       {event.statementItemId ?? event.id}
                     </p>
                   </div>
-                  <Badge variant={event.processedAt ? "default" : "secondary"}>
+                  <Badge
+                    variant={
+                      event.status === "failed"
+                        ? "destructive"
+                        : event.status === "processed"
+                          ? "default"
+                          : event.status === "duplicate"
+                            ? "outline"
+                            : "secondary"
+                    }
+                  >
                     {webhookDeliveryStatus(event)}
                   </Badge>
                 </div>
@@ -1687,6 +2089,89 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
   );
 }
 
+function WebhookSettingsPanel({
+  config,
+}: {
+  config: LocalAppSnapshot["config"] | undefined;
+}) {
+  const webhook = config?.webhook;
+  const settings = [
+    {
+      label: "Profile",
+      value: config?.profile ?? "Waiting for local API",
+      mono: false,
+    },
+    {
+      label: "Port",
+      value: webhook ? String(webhook.port) : "Unknown",
+      mono: true,
+    },
+    {
+      label: "Path",
+      value: webhook?.path ?? "Unknown",
+      mono: true,
+    },
+    {
+      label: "Enabled",
+      value: webhook?.enabled ? "Enabled" : "Disabled",
+      mono: false,
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Webhook settings</CardTitle>
+        <CardDescription>
+          Local endpoint configuration used by the Monobank personal API.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100">
+          <AlertCircleIcon />
+          <AlertTitle>Personal webhook payloads are hints</AlertTitle>
+          <AlertDescription className="text-amber-900/85 dark:text-amber-100/85">
+            Until Monobank documents a verifiable personal webhook signature,
+            treat every payload as advisory and reconcile it through statement
+            pulls before relying on ledger changes.
+          </AlertDescription>
+        </Alert>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {settings.map((setting) => (
+            <div
+              className="rounded-md border border-border bg-muted/30 px-3 py-2"
+              key={setting.label}
+            >
+              <p className="text-xs text-muted-foreground">{setting.label}</p>
+              {setting.label === "Enabled" ? (
+                <Badge variant={webhook?.enabled ? "default" : "secondary"}>
+                  {setting.value}
+                </Badge>
+              ) : (
+                <p
+                  className={
+                    setting.mono
+                      ? "break-all font-mono text-sm font-medium"
+                      : "break-all text-sm font-medium"
+                  }
+                >
+                  {setting.value}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Webhook endpoint</p>
+          <p className="break-all font-mono text-sm font-medium">
+            {webhook?.url ?? "Waiting for local API"}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StaleDataBanner({
   snapshot,
   syncing,
@@ -1750,8 +2235,11 @@ function OfflineBrowsingBanner({
       <AlertTitle>Browsing last local snapshot</AlertTitle>
       <AlertDescription className="text-sky-900/85 dark:text-sky-100/85">
         The local API did not respond: {error}. Existing ledger data for{" "}
-        {snapshot.config.profile} is still visible from the last successful
-        load.
+        {snapshot.config.profile} is still visible from the last successful load
+        {snapshot.offline
+          ? ` at ${formatDateTime(snapshot.offline.cachedAt)}`
+          : ""}
+        .
       </AlertDescription>
       <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
         <Button size="sm" type="button" disabled={loading} onClick={onRefresh}>
@@ -2088,8 +2576,8 @@ function MetricCard({
 
 function MetricLoadingGrid() {
   return (
-    <div className="grid gap-4 md:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      {Array.from({ length: 5 }).map((_, index) => (
         <Card key={index}>
           <CardHeader>
             <Skeleton className="h-4 w-24" />
@@ -2300,11 +2788,28 @@ function RouteLoadingSkeleton({ routeId }: { routeId: RouteId }) {
       return <TransactionsLoadingSkeleton />;
     case "sync":
       return <SyncLoadingSkeleton />;
+    case "settings":
+      return <SettingsLoadingSkeleton />;
     case "accounts":
       return <AccountsLoadingSkeleton />;
     default:
       return <PlaceholderLoadingSkeleton routeId={routeId} />;
   }
+}
+
+function SettingsLoadingSkeleton() {
+  return (
+    <Card aria-busy="true" aria-label="Settings loading">
+      <CardHeader>
+        <Skeleton className="h-5 w-36" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-28 w-full" />
+      </CardContent>
+    </Card>
+  );
 }
 
 function OverviewStatusItem({
@@ -2484,6 +2989,18 @@ function TransactionCategoryBadge({
 }
 
 function transactionCategoryRuleMatch(entry: LedgerEntry): string {
+  if (entry.categorySource === "manual") {
+    return "Manual category override";
+  }
+
+  if (entry.categorySource === "user_rule" && entry.categoryRuleId) {
+    return `User rule ${entry.categoryRuleId}`;
+  }
+
+  if (entry.categorySource === "system_rule" && entry.categoryRuleId) {
+    return `System rule ${entry.categoryRuleId}`;
+  }
+
   switch (entry.categoryId) {
     case "income":
       return "Built-in positive amount rule";
@@ -2497,6 +3014,24 @@ function transactionCategoryRuleMatch(entry: LedgerEntry): string {
       return "Built-in travel rule: MCC 4722 or travel text";
     case "dining":
       return "Built-in dining rule: MCC 5814 or coffee text";
+    case "utilities":
+      return "Built-in utilities rule: MCC 4900 or utility text";
+    case "healthcare":
+      return "Built-in healthcare rule: MCC 5912 or pharmacy text";
+    case "shopping":
+      return "Built-in shopping rule: MCC 5311 or marketplace text";
+    case "household":
+      return "Built-in household rule: MCC 5200 or household text";
+    case "education":
+      return "Built-in education rule: MCC 8299 or education text";
+    case "taxes":
+      return "Built-in taxes rule: MCC 9311 or tax text";
+    case "charity":
+      return "Built-in charity rule: MCC 8398 or donation text";
+    case "cash":
+      return "Built-in cash rule: MCC 6011 or ATM text";
+    case "fees":
+      return "Built-in fees rule: MCC 6012 or fee text";
     case "transfers":
       return "Built-in transfer rule: MCC 4829 or transfer text";
     case "uncategorized":
@@ -2545,6 +3080,14 @@ function transactionCategoryHistory(entry: LedgerEntry): string {
     return "Initial ledger assignment only; no category changes recorded";
   }
 
+  if (entry.categorySource === "manual") {
+    return "Category was manually assigned";
+  }
+
+  if (entry.categoryRuleVersion) {
+    return `Assigned from current sync rules at version ${entry.categoryRuleVersion}`;
+  }
+
   return "Initial ledger assignment from the current sync rules";
 }
 
@@ -2587,9 +3130,16 @@ function webhookHintSummary(event: WebhookEvent | undefined): string {
     return "No matching webhook hint recorded";
   }
 
-  const processed = event.processedAt
-    ? `processed ${formatDateTime(event.processedAt)}`
-    : "pending reconcile";
+  const processed =
+    event.status === "processed"
+      ? `processed ${formatDateTime(event.processedAt ?? event.receivedAt)}`
+      : event.status === "failed"
+        ? `failed ${formatDateTime(event.receivedAt)}`
+        : event.status === "duplicate"
+          ? "duplicate ignored"
+          : event.status === "ignored"
+            ? "ignored"
+            : "pending reconcile";
 
   return `${event.type} received ${formatDateTime(event.receivedAt)}; ${processed}`;
 }
@@ -3412,14 +3962,536 @@ function TransactionRowActions({
   );
 }
 
+function PrivacyOnboardingCard({
+  snapshot,
+  onRouteChange,
+}: {
+  snapshot: LocalAppSnapshot;
+  onRouteChange: (routeId: RouteId) => void;
+}) {
+  const tokenStatus = tokenStateLabel(snapshot.config.token);
+
+  return (
+    <Card className="border-primary/30 bg-primary/5">
+      <CardHeader>
+        <CardTitle>Privacy-first local setup</CardTitle>
+        <CardDescription>
+          Review where sensitive data lives before connecting a Monobank token
+          or syncing statements.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">No cloud account required</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border border-border bg-background/80 p-3">
+            <DatabaseIcon className="mb-2 size-4 text-primary" />
+            <p className="text-sm font-medium">Local database</p>
+            <p className="break-all text-sm text-muted-foreground">
+              {snapshot.config.databasePath}
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-background/80 p-3">
+            <ShieldCheckIcon className="mb-2 size-4 text-primary" />
+            <p className="text-sm font-medium">Token control</p>
+            <p className="text-sm text-muted-foreground">
+              {tokenStatus.description}
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-background/80 p-3">
+            <DownloadIcon className="mb-2 size-4 text-primary" />
+            <p className="text-sm font-medium">Portable records</p>
+            <p className="text-sm text-muted-foreground">
+              Backups and exports stay as local files you control.
+            </p>
+          </div>
+        </div>
+        <Alert>
+          <ShieldCheckIcon />
+          <AlertTitle>Local-first privacy model</AlertTitle>
+          <AlertDescription>
+            Tokens, raw Monobank payloads, ledger data, backups, and exports
+            stay on this machine. There is no hosted token relay or required
+            cloud account for local setup.
+          </AlertDescription>
+        </Alert>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2">
+        <Button type="button" onClick={() => onRouteChange("settings")}>
+          <ShieldCheckIcon data-icon="inline-start" />
+          Review privacy settings
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onRouteChange("sync")}
+        >
+          <RefreshCwIcon data-icon="inline-start" />
+          Continue to sync
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  const rows = snapshot.categorySpending.slice(0, 6);
+  const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Spending by category</CardTitle>
+        <CardDescription>
+          Expense categories from the local ledger snapshot.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No expense categories found in the current ledger.
+          </p>
+        ) : (
+          rows.map((row) => {
+            const width =
+              maxAmount > 0 ? Math.max(4, (row.amount / maxAmount) * 100) : 0;
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              categoryId: row.categoryId,
+              amountMax: "-0.01",
+            });
+
+            return (
+              <a
+                className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={`${row.categoryId}:${row.currencyCode}`}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {row.categoryName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.transactionCount} transactions
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-semibold">
+                      {formatMinorAmount(row.amount, row.currencyCode)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {currencyLabel(row.currencyCode)}
+                    </p>
+                  </div>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function recurringPaymentAmountLabel(
+  payment: LocalAppSnapshot["upcomingRecurringPayments"][number],
+): string {
+  if (
+    payment.expectedAmountMin !== undefined &&
+    payment.expectedAmountMax !== undefined &&
+    payment.expectedAmountMin !== payment.expectedAmountMax
+  ) {
+    return `${formatMinorAmount(
+      payment.expectedAmountMin,
+      payment.currencyCode,
+    )} - ${formatMinorAmount(payment.expectedAmountMax, payment.currencyCode)}`;
+  }
+
+  const amount = payment.expectedAmountMax ?? payment.expectedAmountMin;
+
+  return amount === undefined
+    ? currencyLabel(payment.currencyCode)
+    : formatMinorAmount(amount, payment.currencyCode);
+}
+
+function recurringPaymentDueLabel(
+  payment: LocalAppSnapshot["upcomingRecurringPayments"][number],
+): string {
+  if (payment.daysUntilDue < 0) {
+    return `${Math.abs(payment.daysUntilDue)}d overdue`;
+  }
+
+  if (payment.daysUntilDue === 0) {
+    return "Due today";
+  }
+
+  return `Due in ${payment.daysUntilDue}d`;
+}
+
+function UpcomingRecurringPaymentsCard({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot;
+}) {
+  const rows = snapshot.upcomingRecurringPayments.slice(0, 6);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Upcoming recurring payments</CardTitle>
+        <CardDescription>
+          Active recurring charges projected from local schedule data.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No active recurring payments found in the current ledger.
+          </p>
+        ) : (
+          rows.map((payment) => {
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              accountId: payment.accountId,
+              ...(payment.categoryId === undefined
+                ? {}
+                : { categoryId: payment.categoryId }),
+              ...(payment.merchantName === undefined
+                ? {}
+                : { merchantName: payment.merchantName }),
+            });
+
+            return (
+              <a
+                className="flex items-start justify-between gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={payment.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <FileClockIcon className="size-4 shrink-0 text-primary" />
+                    <p className="truncate text-sm font-medium">
+                      {payment.merchantName ?? payment.recurringItemId}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatDate(Date.parse(payment.nextDueAt) / 1000)} ·{" "}
+                    {payment.frequency}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold">
+                    {recurringPaymentAmountLabel(payment)}
+                  </p>
+                  <Badge
+                    variant={payment.isOverdue ? "destructive" : "secondary"}
+                  >
+                    {recurringPaymentDueLabel(payment)}
+                  </Badge>
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function budgetProgressBadgeVariant(
+  status: LocalAppSnapshot["budgetProgress"][number]["status"],
+) {
+  switch (status) {
+    case "overspent":
+      return "destructive";
+    case "near_limit":
+      return "secondary";
+    case "on_track":
+      return "outline";
+  }
+}
+
+function budgetProgressStatusLabel(
+  status: LocalAppSnapshot["budgetProgress"][number]["status"],
+): string {
+  switch (status) {
+    case "overspent":
+      return "Overspent";
+    case "near_limit":
+      return "Near limit";
+    case "on_track":
+      return "On track";
+  }
+}
+
+function currentBudgetMonth(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  return `${now.getFullYear()}-${month}`;
+}
+
+function BudgetProgressCard({
+  snapshot,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot;
+  onRefresh: () => Promise<void>;
+}) {
+  const rows = snapshot.budgetProgress.slice(0, 6);
+  const categories = snapshot.categories.filter(
+    (category) => category.id !== "uncategorized",
+  );
+  const defaultCategoryId = categories[0]?.id ?? "";
+  const defaultCurrencyCode =
+    snapshot.accounts[0]?.currencyCode ??
+    snapshot.categorySpending[0]?.currencyCode ??
+    980;
+  const [categoryId, setCategoryId] = useState(defaultCategoryId);
+  const [month, setMonth] = useState(currentBudgetMonth);
+  const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState<
+    | { state: "idle" }
+    | { state: "saving" }
+    | { state: "error"; message: string }
+    | { state: "saved" }
+  >({ state: "idle" });
+
+  useEffect(() => {
+    if (!categoryId && defaultCategoryId) {
+      setCategoryId(defaultCategoryId);
+    }
+  }, [categoryId, defaultCategoryId]);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const parsedAmount = Number(amount);
+
+    if (!categoryId || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setStatus({
+        state: "error",
+        message: "Choose a category and enter a positive monthly limit.",
+      });
+      return;
+    }
+
+    setStatus({ state: "saving" });
+
+    try {
+      await createMonthlyCategoryBudget({
+        categoryId,
+        currencyCode: defaultCurrencyCode,
+        month,
+        amountLimit: Math.round(parsedAmount * 100),
+      });
+      setAmount("");
+      setStatus({ state: "saved" });
+      await onRefresh();
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Monthly budget could not be saved.",
+      });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Budget progress</CardTitle>
+        <CardDescription>
+          Current budget periods ranked by overspend risk.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <form
+          className="grid gap-2 rounded-md border border-border p-3"
+          onSubmit={(event) => void onSubmit(event)}
+        >
+          <div className="grid gap-2 sm:grid-cols-[1.2fr_0.8fr_0.8fr_auto]">
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger aria-label="Budget category">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {categories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Input
+              aria-label="Budget month"
+              type="month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+            />
+            <Input
+              aria-label="Monthly budget limit"
+              inputMode="decimal"
+              min="0"
+              placeholder="Limit"
+              type="number"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+            />
+            <Button
+              type="submit"
+              disabled={status.state === "saving" || categories.length === 0}
+            >
+              <PlusIcon />
+              Add
+            </Button>
+          </div>
+          {status.state === "error" ? (
+            <p className="text-xs text-destructive">{status.message}</p>
+          ) : status.state === "saved" ? (
+            <p className="text-xs text-muted-foreground">
+              Monthly budget saved.
+            </p>
+          ) : null}
+        </form>
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No active budget periods found in the current ledger.
+          </p>
+        ) : (
+          rows.map((row) => {
+            const width = Math.min(Math.max(row.progressPercentage, 2), 100);
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              categoryId: row.categoryId,
+              dateFrom: row.periodStart,
+              dateTo: row.periodEnd,
+            });
+
+            return (
+              <a
+                className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={row.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {row.categoryName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.periodStart} through {row.periodEnd}
+                    </p>
+                  </div>
+                  <Badge variant={budgetProgressBadgeVariant(row.status)}>
+                    {budgetProgressStatusLabel(row.status)}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-muted-foreground">
+                    {formatMinorAmount(row.actualAmount, row.currencyCode)} /{" "}
+                    {formatMinorAmount(row.amountLimit, row.currencyCode)}
+                  </span>
+                  <span className="font-medium">{row.progressPercentage}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={
+                      row.status === "overspent"
+                        ? "h-full rounded-full bg-destructive"
+                        : "h-full rounded-full bg-primary"
+                    }
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function NetWorthTrendCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  if (
+    !snapshot.netWorthTrend.enabled ||
+    snapshot.netWorthTrend.points.length === 0
+  ) {
+    return null;
+  }
+
+  const points = snapshot.netWorthTrend.points.slice(-8);
+  const amounts = points.map((point) => point.amount);
+  const minAmount = Math.min(...amounts);
+  const maxAmount = Math.max(...amounts);
+  const latest = points[points.length - 1];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Net worth trend</CardTitle>
+        <CardDescription>
+          Manual accounts and assets included in local net worth history.
+        </CardDescription>
+        {latest ? (
+          <CardAction>
+            <Badge variant="outline">
+              {formatMinorAmount(latest.amount, latest.currencyCode)}
+            </Badge>
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent>
+        <div className="flex h-32 items-end gap-2">
+          {points.map((point) => {
+            const range = maxAmount - minAmount;
+            const height =
+              range > 0 ? 20 + ((point.amount - minAmount) / range) * 80 : 60;
+
+            return (
+              <div
+                className="flex min-w-0 flex-1 flex-col items-center gap-2"
+                key={`${point.date}:${point.currencyCode}`}
+              >
+                <div
+                  className="w-full rounded-t-md bg-primary"
+                  style={{ height: `${height}%` }}
+                />
+                <span className="truncate text-[10px] text-muted-foreground">
+                  {point.date}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function OverviewRoute({
   snapshot,
   loading,
   onRouteChange,
+  onRefresh,
 }: {
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
   onRouteChange: (routeId: RouteId) => void;
+  onRefresh: () => Promise<void>;
 }) {
   if (loading && !snapshot) {
     return <OverviewLoadingSkeleton />;
@@ -3432,21 +4504,41 @@ function OverviewRoute({
   const transactionsHref = buildTransactionFiltersHash(
     defaultTransactionFilters(),
   );
-  const incomeHref = buildTransactionFiltersHash({
+  const monthToDate = snapshot.summary.monthToDate;
+  const monthFilters = {
     ...defaultTransactionFilters(),
+    dateFrom: monthToDate.from === "cached" ? "" : monthToDate.from,
+    dateTo: monthToDate.to === "cached" ? "" : monthToDate.to,
+  };
+  const incomeHref = buildTransactionFiltersHash({
+    ...monthFilters,
     amountMin: "0.01",
   });
   const expensesHref = buildTransactionFiltersHash({
-    ...defaultTransactionFilters(),
+    ...monthFilters,
     amountMax: "-0.01",
   });
+  const monthHref = buildTransactionFiltersHash(monthFilters);
+  const monthDetail =
+    monthToDate.from === "cached"
+      ? "Cached snapshot totals"
+      : `${monthToDate.from} through ${monthToDate.to}`;
   const freshness = dataFreshnessLabel(snapshot.summary.lastSyncedAt);
   const webhookHints = snapshot.fixtures?.webhookEvents ?? 0;
   const databaseHealth = snapshot.health.status;
+  const showPrivacyOnboarding =
+    snapshot.summary.accounts === 0 && snapshot.summary.ledgerEntries === 0;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 md:grid-cols-4">
+      {showPrivacyOnboarding ? (
+        <PrivacyOnboardingCard
+          snapshot={snapshot}
+          onRouteChange={onRouteChange}
+        />
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           title="Accounts"
           value={String(snapshot.summary.accounts)}
@@ -3464,24 +4556,34 @@ function OverviewRoute({
           drillDownLabel="Review rows"
         />
         <MetricCard
-          title="Income"
-          value={formatMinorAmount(snapshot.summary.income)}
-          description="Synced into the local ledger"
+          title="MTD income"
+          value={formatMinorAmount(monthToDate.income)}
+          description={monthDetail}
           freshness={freshness}
           drillDownHref={incomeHref}
-          drillDownLabel="Review income"
+          drillDownLabel="Review MTD income"
         />
         <MetricCard
-          title="Expenses"
-          value={formatMinorAmount(snapshot.summary.expenses)}
-          description="Categorized from fixture rules"
+          title="MTD expenses"
+          value={formatMinorAmount(monthToDate.expenses)}
+          description={monthDetail}
           freshness={freshness}
           drillDownHref={expensesHref}
-          drillDownLabel="Review expenses"
+          drillDownLabel="Review MTD expenses"
+        />
+        <MetricCard
+          title="MTD net cashflow"
+          value={formatMinorAmount(monthToDate.net)}
+          description={monthDetail}
+          freshness={monthToDate.month}
+          drillDownHref={monthHref}
+          drillDownLabel="Review month"
         />
       </div>
 
       <SyncHealthChart runs={snapshot.syncRuns} />
+
+      <NetWorthTrendCard snapshot={snapshot} />
 
       <Card>
         <CardHeader>
@@ -3535,7 +4637,12 @@ function OverviewRoute({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <TransactionTable entries={snapshot.transactions.entries} />
+            <TransactionTable
+              entries={snapshot.transactions.entries.slice(
+                0,
+                OVERVIEW_TRANSACTION_LIMIT,
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -3544,6 +4651,9 @@ function OverviewRoute({
             events={snapshot.webhookEvents}
             onRouteChange={onRouteChange}
           />
+          <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />
+          <UpcomingRecurringPaymentsCard snapshot={snapshot} />
+          <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard
             runs={snapshot.syncRuns}
             onRouteChange={onRouteChange}
@@ -3588,6 +4698,16 @@ function TransactionsRoute({
       })
       .catch((error) => {
         if (!cancelled) {
+          const cachedTransactions =
+            snapshot?.offline && canUseSnapshotTransactionFallback(filters)
+              ? snapshotTransactionFallbackPage(snapshot)
+              : undefined;
+
+          if (cachedTransactions) {
+            setPageState({ status: "ready", data: cachedTransactions });
+            return;
+          }
+
           setPageState((current) => ({
             status: "error",
             ...(current.data ? { data: current.data } : {}),
@@ -3604,13 +4724,19 @@ function TransactionsRoute({
     };
   }, [
     filters,
+    snapshot?.offline,
     snapshot?.summary.lastSyncedAt,
     snapshot?.summary.ledgerEntries,
+    snapshot?.transactions,
     transactionsReloadToken,
   ]);
 
   const categoryOptions = useMemo(() => {
     const categories = new Map<string, string>();
+
+    for (const category of snapshot?.categories ?? []) {
+      categories.set(category.id, category.name);
+    }
 
     for (const entry of [
       ...(snapshot?.transactions.entries ?? []),
@@ -3632,6 +4758,7 @@ function TransactionsRoute({
   }, [
     filters.categoryId,
     pageState.data?.entries,
+    snapshot?.categories,
     snapshot?.transactions.entries,
   ]);
 
@@ -4179,6 +5306,9 @@ function SyncRoute({
   snapshot: LocalAppSnapshot | undefined;
   onRouteChange: (routeId: RouteId) => void;
 }) {
+  const syncRuns = snapshot?.syncRuns ?? [];
+  const summaryStats = summarizeSyncRuns(syncRuns);
+
   return (
     <Tabs defaultValue="runs">
       <TabsList>
@@ -4205,8 +5335,9 @@ function SyncRoute({
               </Button>
             </CardAction>
           </CardHeader>
-          <CardContent>
-            <SyncRunsTable runs={snapshot?.syncRuns ?? []} />
+          <CardContent className="grid gap-4">
+            <SyncRunSummaryStatsPanel summary={summaryStats} />
+            <SyncRunsTable runs={syncRuns} />
           </CardContent>
         </Card>
       </TabsContent>
@@ -4248,55 +5379,580 @@ function SyncRoute({
             </AlertDescription>
           </Alert>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Webhook settings</CardTitle>
-              <CardDescription>
-                Local endpoint configuration used by the Monobank personal API.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 text-sm">
-              <div>
-                <p className="text-muted-foreground">Profile</p>
-                <p className="font-medium">{snapshot?.config.profile}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Host</p>
-                <p className="font-medium">
-                  {snapshot?.config.webhook.host ?? "Unknown"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Port</p>
-                <p className="font-medium">{snapshot?.config.webhook.port}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Path</p>
-                <p className="break-all font-mono font-medium">
-                  {snapshot?.config.webhook.path}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Enabled</p>
-                <Badge
-                  variant={
-                    snapshot?.config.webhook.enabled ? "default" : "secondary"
-                  }
-                >
-                  {snapshot?.config.webhook.enabled ? "Enabled" : "Disabled"}
-                </Badge>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Webhook endpoint</p>
-                <p className="break-all font-mono font-medium">
-                  {snapshot?.config.webhook.url}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <WebhookSettingsPanel config={snapshot?.config} />
         </div>
       </TabsContent>
     </Tabs>
+  );
+}
+
+function tokenStateLabel(token: LocalAppSnapshot["config"]["token"]): {
+  state: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+  description: string;
+} {
+  if (token.hasToken && token.persistence === "persistent") {
+    return {
+      state: "Configured",
+      variant: "default",
+      description: "A Monobank token is available from secure local storage.",
+    };
+  }
+
+  if (token.hasToken) {
+    return {
+      state: "Session only",
+      variant: "secondary",
+      description:
+        token.fallbackReason === "secure_storage_write_failed"
+          ? "Secure storage was unavailable during save, so the token is available only until this server stops."
+          : "A Monobank token is available only for the running server session.",
+    };
+  }
+
+  return {
+    state: "Not configured",
+    variant: "outline",
+    description:
+      "No token is configured for this workspace. Monobank sync will not run.",
+  };
+}
+
+function normalizePastedToken(value: string): string {
+  return value.trim();
+}
+
+function validateTokenInput(value: string): string | undefined {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return "Monobank token cannot be empty or whitespace.";
+  }
+
+  if (/\s/.test(normalized)) {
+    return "Monobank token cannot contain spaces or line breaks.";
+  }
+
+  return undefined;
+}
+
+function maskTokenPreview(value: string): string {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return "No token entered";
+  }
+
+  if (normalized.length <= 4) {
+    return "••••";
+  }
+
+  return `•••• ${normalized.slice(-4)}`;
+}
+
+function SettingsRoute({
+  snapshot,
+  loading,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  loading: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenError, setTokenError] = useState<string | undefined>();
+  const [tokenActionError, setTokenActionError] = useState<
+    string | undefined
+  >();
+  const [tokenActionMessage, setTokenActionMessage] = useState<
+    string | undefined
+  >();
+  const [isSavingToken, setIsSavingToken] = useState(false);
+  const [isDeletingToken, setIsDeletingToken] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [acknowledgedLocalToken, setAcknowledgedLocalToken] = useState(false);
+  const [confirmedTokenRemoval, setConfirmedTokenRemoval] = useState(false);
+  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
+  const [sourceActionError, setSourceActionError] = useState<
+    string | undefined
+  >();
+  const [sourceActionMessage, setSourceActionMessage] = useState<
+    string | undefined
+  >();
+  const [isInitializingWorkspace, setIsInitializingWorkspace] = useState(false);
+  const [workspaceActionError, setWorkspaceActionError] = useState<
+    string | undefined
+  >();
+  const [workspaceActionMessage, setWorkspaceActionMessage] = useState<
+    string | undefined
+  >();
+
+  if (loading && !snapshot) {
+    return <SettingsLoadingSkeleton />;
+  }
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const {
+    state: tokenState,
+    variant: tokenVariant,
+    description,
+  } = tokenStateLabel(snapshot.config.token);
+  const isBusy = isSavingToken || isDeletingToken;
+  const tokenValidationMessage = tokenInput
+    ? validateTokenInput(tokenInput)
+    : undefined;
+  const isTokenInputValid =
+    tokenInput.trim().length > 0 &&
+    tokenValidationMessage === undefined &&
+    acknowledgedLocalToken;
+  const maskedTokenPreview = maskTokenPreview(tokenInput);
+  const isMonobankSource = snapshot.config.source === "monobank";
+  const isConfigBusy = isSavingToken || isDeletingToken || isSwitchingSource;
+  const activeProfile = snapshot.config.profile;
+
+  async function saveToken(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    const nextToken = tokenInput.trim();
+    const validationMessage = validateTokenInput(tokenInput);
+
+    if (validationMessage !== undefined) {
+      setTokenError(validationMessage);
+      return;
+    }
+
+    if (!acknowledgedLocalToken) {
+      setTokenError("Confirm local-only token handling before saving.");
+      return;
+    }
+
+    setIsSavingToken(true);
+    setTokenError(undefined);
+    setTokenActionError(undefined);
+    setTokenActionMessage(undefined);
+
+    try {
+      const tokenStatus = await saveMonobankToken(nextToken, activeProfile);
+      setTokenInput("");
+      setShowToken(false);
+      setAcknowledgedLocalToken(false);
+      setConfirmedTokenRemoval(false);
+      setTokenActionMessage(
+        `Monobank token saved for the ${tokenStatus.profile} local profile.`,
+      );
+      await onRefresh();
+    } catch (error) {
+      setTokenActionError(
+        error instanceof Error ? error.message : "Unable to save token.",
+      );
+    } finally {
+      setIsSavingToken(false);
+    }
+  }
+
+  async function removeToken(): Promise<void> {
+    if (!confirmedTokenRemoval) {
+      setTokenActionError("Confirm token removal before deleting it.");
+      return;
+    }
+
+    setIsDeletingToken(true);
+    setTokenActionError(undefined);
+    setTokenActionMessage(undefined);
+
+    try {
+      const tokenStatus = await clearMonobankToken();
+      setAcknowledgedLocalToken(false);
+      setConfirmedTokenRemoval(false);
+      setTokenActionMessage(
+        `Monobank token removed from the ${tokenStatus.profile} local profile.`,
+      );
+      await onRefresh();
+    } catch (error) {
+      setTokenActionError(
+        error instanceof Error ? error.message : "Unable to remove token.",
+      );
+    } finally {
+      setIsDeletingToken(false);
+    }
+  }
+
+  async function setSource(
+    nextSource: LocalAppSnapshot["config"]["source"],
+  ): Promise<void> {
+    setIsSwitchingSource(true);
+    setSourceActionError(undefined);
+    setSourceActionMessage(undefined);
+
+    try {
+      await setMonobankSource(nextSource);
+      setSourceActionMessage(
+        `Source switched to ${nextSource} mode for the local API session.`,
+      );
+      await onRefresh();
+    } catch (error) {
+      setSourceActionError(
+        error instanceof Error ? error.message : "Unable to switch source.",
+      );
+    } finally {
+      setIsSwitchingSource(false);
+    }
+  }
+
+  async function setupWorkspace(): Promise<void> {
+    setIsInitializingWorkspace(true);
+    setWorkspaceActionError(undefined);
+    setWorkspaceActionMessage(undefined);
+
+    try {
+      const config = await initializeWorkspace();
+      setWorkspaceActionMessage(
+        `Workspace ${config.profile} is ready at ${config.databasePath}.`,
+      );
+      await onRefresh();
+    } catch (error) {
+      setWorkspaceActionError(
+        error instanceof Error ? error.message : "Unable to set up workspace.",
+      );
+    } finally {
+      setIsInitializingWorkspace(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace setup</CardTitle>
+          <CardDescription>
+            Create the local profile workspace and SQLite database before
+            importing data.
+          </CardDescription>
+          <CardAction>
+            <Badge variant="secondary">{activeProfile}</Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Database
+            </span>
+            <span className="break-all font-medium">
+              {snapshot.config.databasePath}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={isInitializingWorkspace || loading}
+              onClick={() => void setupWorkspace()}
+            >
+              <DatabaseIcon data-icon="inline-start" />
+              {isInitializingWorkspace ? "Creating..." : "Create workspace"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading}
+              onClick={() => void onRefresh()}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              Refresh status
+            </Button>
+          </div>
+          {workspaceActionError && (
+            <Alert variant="destructive">
+              <AlertCircleIcon />
+              <AlertTitle>Workspace setup failed</AlertTitle>
+              <AlertDescription>{workspaceActionError}</AlertDescription>
+            </Alert>
+          )}
+          {workspaceActionMessage && (
+            <Alert>
+              <CheckCircle2Icon />
+              <AlertTitle>Workspace ready</AlertTitle>
+              <AlertDescription>{workspaceActionMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Monobank token</CardTitle>
+          <CardDescription>
+            Manage local token onboarding and deletion for the selected profile.
+          </CardDescription>
+          <CardAction>
+            <Badge variant="secondary">{activeProfile}</Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Token status
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={tokenVariant}>{tokenState}</Badge>
+              <p className="text-sm text-muted-foreground">{description}</p>
+            </div>
+          </div>
+
+          <form className="grid gap-3" onSubmit={saveToken}>
+            <label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Monobank personal API token
+              </span>
+              <Input
+                type={showToken ? "text" : "password"}
+                value={tokenInput}
+                placeholder={
+                  isMonobankSource
+                    ? "Paste token from Monobank"
+                    : "Enter token for Monobank when switching source"
+                }
+                autoComplete="new-password"
+                inputMode="text"
+                onChange={(event) => {
+                  setTokenInput(event.target.value);
+                  setTokenError(validateTokenInput(event.target.value));
+                  setTokenActionError(undefined);
+                  setTokenActionMessage(undefined);
+                }}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const pasted = normalizePastedToken(
+                    event.clipboardData.getData("text"),
+                  );
+
+                  setTokenInput(pasted);
+                  setTokenError(validateTokenInput(pasted));
+                  setTokenActionError(undefined);
+                  setTokenActionMessage(undefined);
+                }}
+                aria-invalid={tokenError ? true : undefined}
+                aria-describedby={
+                  tokenError ? "monobank-token-error" : undefined
+                }
+              />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline">{maskedTokenPreview}</Badge>
+                <span>
+                  Paste trims surrounding whitespace before validation.
+                </span>
+              </div>
+              {tokenError && (
+                <span
+                  id="monobank-token-error"
+                  className="text-xs text-destructive"
+                >
+                  {tokenError}
+                </span>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowToken((current) => !current)}
+                >
+                  {showToken ? (
+                    <>
+                      <EyeOffIcon data-icon="inline-start" />
+                      Hide token
+                    </>
+                  ) : (
+                    <>
+                      <EyeIcon data-icon="inline-start" />
+                      Show token
+                    </>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setTokenInput("");
+                    setTokenError(undefined);
+                    setAcknowledgedLocalToken(false);
+                  }}
+                  disabled={tokenInput.length === 0}
+                >
+                  <XIcon data-icon="inline-start" />
+                  Clear input
+                </Button>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-primary"
+                checked={acknowledgedLocalToken}
+                onChange={(event) => {
+                  setAcknowledgedLocalToken(event.target.checked);
+                  setTokenError(
+                    tokenInput ? validateTokenInput(tokenInput) : undefined,
+                  );
+                }}
+              />
+              <span className="text-muted-foreground">
+                I understand this token is used only by the local API on this
+                device for the {activeProfile} profile.
+              </span>
+            </label>
+
+            {snapshot.config.token.hasToken && (
+              <label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-destructive"
+                  checked={confirmedTokenRemoval}
+                  disabled={isBusy}
+                  onChange={(event) => {
+                    setConfirmedTokenRemoval(event.target.checked);
+                    setTokenActionError(undefined);
+                    setTokenActionMessage(undefined);
+                  }}
+                />
+                <span className="text-muted-foreground">
+                  Delete the saved Monobank token for the {activeProfile} local
+                  profile.
+                </span>
+              </label>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="submit"
+                disabled={isBusy || !isTokenInputValid || loading}
+              >
+                {isSavingToken ? "Saving..." : "Save token"}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={
+                  isBusy ||
+                  !snapshot.config.token.hasToken ||
+                  !confirmedTokenRemoval
+                }
+                onClick={removeToken}
+              >
+                <Trash2Icon data-icon="inline-start" />
+                {isDeletingToken ? "Removing..." : "Remove token"}
+              </Button>
+            </div>
+          </form>
+
+          {tokenActionError && (
+            <Alert variant="destructive">
+              <AlertCircleIcon />
+              <AlertTitle>Token update failed</AlertTitle>
+              <AlertDescription>{tokenActionError}</AlertDescription>
+            </Alert>
+          )}
+
+          {tokenActionMessage && (
+            <Alert>
+              <CheckCircle2Icon />
+              <AlertTitle>Token state updated</AlertTitle>
+              <AlertDescription>{tokenActionMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Local runtime guidance</CardTitle>
+          <CardDescription>
+            Token scope and workspace behavior for local-first mode.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          <Alert>
+            <ShieldCheckIcon />
+            <AlertTitle>Local-only token policy</AlertTitle>
+            <AlertDescription>
+              Tokens are used only by the local API server process. They are not
+              included in exported payloads or persisted to the local ledger.{" "}
+              {snapshot.config.token.hasToken &&
+              snapshot.config.token.persistence === "persistent"
+                ? "This profile is using persistent secure token storage."
+                : snapshot.config.token.hasToken
+                  ? "This profile is using session-only token handling; restarting the local process drops the cached token."
+                  : "No Monobank token is currently configured for this profile."}
+            </AlertDescription>
+          </Alert>
+
+          <p className="text-muted-foreground">
+            Source:{" "}
+            <span className="font-medium">{snapshot.config.source}</span>
+          </p>
+          <div className="grid gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              Data source
+            </span>
+            <div className="flex items-center gap-2">
+              <Select
+                value={snapshot.config.source}
+                onValueChange={(value) =>
+                  void setSource(value as LocalAppSnapshot["config"]["source"])
+                }
+                disabled={isConfigBusy}
+              >
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="Select source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="fixture">
+                      Fixture (offline demo)
+                    </SelectItem>
+                    <SelectItem value="monobank">Monobank API</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                {isConfigBusy ? "Updating source..." : "Switch source"}
+              </span>
+            </div>
+          </div>
+          <p className="text-muted-foreground">
+            Data directory:{" "}
+            <span className="break-all font-medium">
+              {snapshot.config.dataDir}
+            </span>
+          </p>
+          <p className="text-muted-foreground">
+            Database:{" "}
+            <span className="break-all font-medium">
+              {snapshot.config.databasePath}
+            </span>
+          </p>
+        </CardContent>
+      </Card>
+      {sourceActionError && (
+        <Alert variant="destructive">
+          <AlertCircleIcon />
+          <AlertTitle>Source update failed</AlertTitle>
+          <AlertDescription>{sourceActionError}</AlertDescription>
+        </Alert>
+      )}
+
+      {sourceActionMessage && (
+        <Alert>
+          <CheckCircle2Icon />
+          <AlertTitle>Source updated</AlertTitle>
+          <AlertDescription>{sourceActionMessage}</AlertDescription>
+        </Alert>
+      )}
+    </div>
   );
 }
 
@@ -4345,6 +6001,45 @@ function AccountCard({ account }: { account: LedgerAccount }) {
   );
 }
 
+function JarCard({ jar }: { jar: LedgerJar }) {
+  const progress =
+    jar.goal > 0
+      ? Math.min(100, Math.max(0, (jar.balance / jar.goal) * 100))
+      : 0;
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardDescription>{jar.id}</CardDescription>
+        <CardTitle>{jar.title}</CardTitle>
+        <CardAction>
+          <Badge variant="outline">{currencyLabel(jar.currencyCode)}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <AccountDetailRow
+          label="Balance"
+          value={formatMinorAmount(jar.balance, jar.currencyCode)}
+        />
+        <AccountDetailRow
+          label="Goal"
+          value={formatMinorAmount(jar.goal, jar.currencyCode)}
+        />
+        <div className="h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-emerald-500"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">{jar.description}</p>
+      </CardContent>
+      <CardFooter className="text-xs text-muted-foreground">
+        Updated {formatDateTime(jar.updatedAt)}
+      </CardFooter>
+    </Card>
+  );
+}
+
 function AccountsRoute({
   snapshot,
 }: {
@@ -4366,8 +6061,13 @@ function AccountsRoute({
     );
   }
 
-  const jarCount = snapshot.fixtures?.jars ?? 0;
+  const latestRun = snapshot.syncRuns[0];
+  const jarCount = snapshot.jars.length;
   const currencies = snapshot.summary.currencies.map(currencyLabel).join(", ");
+  const syncHealth =
+    latestRun === undefined
+      ? "No sync run recorded"
+      : `${latestRun.status}: ${latestSyncRunSummary(latestRun)}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -4388,14 +6088,27 @@ function AccountsRoute({
             detail={`${snapshot.summary.accounts} accounts in ledger summary`}
           />
           <OverviewStatusItem
-            label="Fixture jars"
+            label="Local jars"
             value={String(jarCount)}
-            detail="Jar coverage from bundled fixture client info"
+            detail="Local jars loaded from the profile ledger"
           />
           <OverviewStatusItem
             label="Currencies"
             value={currencies || "None"}
             detail="Currency set present in local ledger rows"
+          />
+          <OverviewStatusItem
+            label="Latest sync"
+            value={formatDateTime(snapshot.summary.lastSyncedAt)}
+            detail={dataFreshnessLabel(snapshot.summary.lastSyncedAt)}
+            badge={latestRun?.status ?? "none"}
+            badgeVariant={statusVariant(latestRun?.status ?? "")}
+          />
+          <OverviewStatusItem
+            label="Sync health"
+            value={latestRun?.status ?? "none"}
+            detail={syncHealth}
+            badge={snapshot.config.source}
           />
         </CardContent>
       </Card>
@@ -4415,29 +6128,16 @@ function AccountsRoute({
           ))}
         </div>
       )}
+
+      {snapshot.jars.length === 0 ? null : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {snapshot.jars.map((jar) => (
+            <JarCard jar={jar} key={jar.id} />
+          ))}
+        </div>
+      )}
     </div>
   );
-}
-
-function duplicateCandidateCount(entries: readonly LedgerEntry[]): number {
-  const counts = new Map<string, number>();
-
-  for (const entry of entries) {
-    const merchant = entry.merchantName ?? entry.description;
-    const key = `${merchant}:${entry.amount}:${entry.time}`;
-
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-
-  let candidates = 0;
-
-  for (const count of counts.values()) {
-    if (count > 1) {
-      candidates += count;
-    }
-  }
-
-  return candidates;
 }
 
 function RuleEditorPreviewField({
@@ -4492,7 +6192,12 @@ function RuleEditorPreviewSelect({
 function ruleConstraintTerms(value: string): string[] {
   const normalizedValue = value.trim().toLowerCase();
 
-  if (normalizedValue.startsWith("any") || normalizedValue === "not required") {
+  if (
+    normalizedValue === "any merchant" ||
+    normalizedValue === "any incoming description" ||
+    normalizedValue === "any transaction description" ||
+    normalizedValue === "not required"
+  ) {
     return [];
   }
 
@@ -4506,17 +6211,66 @@ function firstRuleConstraintTerm(value: string, fallback: string): string {
   return ruleConstraintTerms(value)[0] ?? fallback;
 }
 
+function ruleConstraintTermVariants(term: string): readonly string[] {
+  const normalizedTerm = term.toLowerCase();
+  const variants = [
+    normalizedTerm,
+    `${normalizedTerm}s`,
+    `${normalizedTerm}es`,
+  ];
+
+  if (normalizedTerm.endsWith("y")) {
+    variants.push(`${normalizedTerm.slice(0, -1)}ies`);
+  }
+
+  return variants;
+}
+
+function tokenizeRuleConstraintText(text: string): readonly string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+function tokenSequenceIncludes(
+  textTokens: readonly string[],
+  termTokens: readonly string[],
+): boolean {
+  if (termTokens.length === 0 || termTokens.length > textTokens.length) {
+    return false;
+  }
+
+  return textTokens.some((_, startIndex) => {
+    return termTokens.every(
+      (termToken, offset) => textTokens[startIndex + offset] === termToken,
+    );
+  });
+}
+
 function textMatchesRuleConstraint(value: string, text: string): boolean {
   const terms = ruleConstraintTerms(value);
-  const normalizedText = text.toLowerCase();
+  const textTokens = tokenizeRuleConstraintText(text);
+  const textTokenSet = new Set(textTokens);
 
   return (
-    terms.length === 0 || terms.some((term) => normalizedText.includes(term))
+    terms.length === 0 ||
+    terms.some((term) => {
+      const termTokens = tokenizeRuleConstraintText(term);
+
+      if (termTokens.length > 1) {
+        return tokenSequenceIncludes(textTokens, termTokens);
+      }
+
+      return ruleConstraintTermVariants(term).some((variant) =>
+        textTokenSet.has(variant),
+      );
+    })
   );
 }
 
 function createRuleTestSample(
-  rule: BuiltInRuleSummary,
+  rule: CategoryRuleSummary,
   account: LedgerAccount | undefined,
 ): RuleTestSample {
   const transactionType = rule.editor.transactionType;
@@ -4547,7 +6301,7 @@ function createRuleTestSample(
 }
 
 function createRuleTestChecks(
-  rule: BuiltInRuleSummary,
+  rule: CategoryRuleSummary,
   sample: RuleTestSample,
 ): RuleTestCheck[] {
   const amountTypeMatches =
@@ -4643,7 +6397,7 @@ function RuleTestPanel({
   rule,
 }: {
   account: LedgerAccount | undefined;
-  rule: BuiltInRuleSummary;
+  rule: CategoryRuleSummary;
 }) {
   const sample = createRuleTestSample(rule, account);
   const checks = createRuleTestChecks(rule, sample);
@@ -4701,18 +6455,33 @@ function RuleTestPanel({
 
 function ledgerEntryMatchesRule(
   entry: LedgerEntry,
-  rule: BuiltInRuleSummary,
+  rule: RuleMatchSummary,
 ): boolean {
-  const merchantText = `${entry.merchantName ?? ""} ${entry.description}`;
+  if (!rule.isEnabled || rule.matchType === "fallback") {
+    return false;
+  }
+
+  const merchantText = entry.merchantName ?? "";
   const descriptionText = entry.description;
   const merchantTerms = ruleConstraintTerms(rule.editor.merchantContains);
   const descriptionTerms = ruleConstraintTerms(rule.editor.descriptionContains);
   const hasTextConstraint =
     merchantTerms.length > 0 || descriptionTerms.length > 0;
+  const hasMccConstraint = rule.editor.mcc !== "Not required";
+
+  if (hasMccConstraint && !hasTextConstraint) {
+    return false;
+  }
+
   const textMatches =
     !hasTextConstraint ||
-    textMatchesRuleConstraint(rule.editor.merchantContains, merchantText) ||
-    textMatchesRuleConstraint(rule.editor.descriptionContains, descriptionText);
+    (merchantTerms.length > 0 &&
+      textMatchesRuleConstraint(rule.editor.merchantContains, merchantText)) ||
+    (descriptionTerms.length > 0 &&
+      textMatchesRuleConstraint(
+        rule.editor.descriptionContains,
+        descriptionText,
+      ));
   const amountTypeMatches =
     rule.editor.transactionType === "Income"
       ? entry.amount > 0
@@ -4723,15 +6492,81 @@ function ledgerEntryMatchesRule(
   return textMatches && amountTypeMatches;
 }
 
+function ruleHasMccOnlyHistoryConstraint(rule: RuleMatchSummary): boolean {
+  return (
+    rule.editor.mcc !== "Not required" &&
+    ruleConstraintTerms(rule.editor.merchantContains).length === 0 &&
+    ruleConstraintTerms(rule.editor.descriptionContains).length === 0
+  );
+}
+
+function ledgerEntryMatchesRuleAmountType(
+  entry: LedgerEntry,
+  rule: RuleMatchSummary,
+): boolean {
+  return rule.editor.transactionType === "Income"
+    ? entry.amount > 0
+    : rule.editor.transactionType === "Expense"
+      ? entry.amount < 0
+      : true;
+}
+
+function rulePrecedes(
+  left: RuleMatchSummary,
+  right: RuleMatchSummary,
+): boolean {
+  return (
+    left.priority < right.priority ||
+    (left.priority === right.priority && left.id < right.id)
+  );
+}
+
+function findRuleHistoricalMatches(
+  entries: readonly LedgerEntry[],
+  rule: CategoryRuleSummary,
+  rules: readonly CategoryRuleSummary[],
+): readonly LedgerEntry[] {
+  if (!rule.isEnabled) {
+    return [];
+  }
+
+  if (ruleHasMccOnlyHistoryConstraint(rule)) {
+    return [];
+  }
+
+  if (rule.matchType !== "fallback") {
+    return entries.filter((entry) => ledgerEntryMatchesRule(entry, rule));
+  }
+
+  const earlierRules = rules.filter(
+    (candidate) =>
+      candidate.id !== rule.id &&
+      candidate.isEnabled &&
+      candidate.matchType !== "fallback" &&
+      rulePrecedes(candidate, rule),
+  );
+
+  return entries.filter(
+    (entry) =>
+      ledgerEntryMatchesRuleAmountType(entry, rule) &&
+      !earlierRules.some((candidate) =>
+        ledgerEntryMatchesRule(entry, candidate),
+      ),
+  );
+}
+
 function findRuleConflicts(
   entries: readonly LedgerEntry[],
+  rules: readonly CategoryRuleSummary[],
 ): RuleConflictPreview[] {
+  const activeRules = rules.filter(
+    (rule) => rule.isEnabled && rule.matchType !== "fallback",
+  );
+
   return entries
     .map((entry) => ({
       entry,
-      rules: builtInRuleSummaries.filter((rule) =>
-        ledgerEntryMatchesRule(entry, rule),
-      ),
+      rules: activeRules.filter((rule) => ledgerEntryMatchesRule(entry, rule)),
     }))
     .filter((preview) => preview.rules.length > 1);
 }
@@ -4747,27 +6582,71 @@ function RuleHistoryMetric({ label, value }: { label: string; value: string }) {
 
 function RuleHistoricalPreviewPanel({
   entries,
+  onApplied,
   rule,
+  rules,
   totalRows,
 }: {
   entries: readonly LedgerEntry[];
-  rule: BuiltInRuleSummary;
+  onApplied: () => Promise<void>;
+  rule: CategoryRuleSummary;
+  rules: readonly CategoryRuleSummary[];
   totalRows: number;
 }) {
-  const matchedEntries = entries.filter((entry) =>
-    ledgerEntryMatchesRule(entry, rule),
+  const [applyState, setApplyState] = useState<
+    "idle" | "applying" | "applied" | "error"
+  >("idle");
+  const matchedEntries = useMemo(
+    () => findRuleHistoricalMatches(entries, rule, rules),
+    [entries, rule, rules],
   );
+  const mccOnlyPreviewUnavailable = ruleHasMccOnlyHistoryConstraint(rule);
   const previewEntries = matchedEntries.slice(0, 3);
+  const applyDisabled =
+    applyState === "applying" ||
+    mccOnlyPreviewUnavailable ||
+    !rule.isEnabled ||
+    matchedEntries.length === 0;
+  const previewDescription = mccOnlyPreviewUnavailable
+    ? "MCC-only impact needs raw statement metadata that is not available in loaded ledger rows."
+    : rule.matchType === "fallback"
+      ? "Fallback estimate for rows that do not match earlier active rules."
+      : "Read-only impact estimate against loaded local rows.";
+
+  useEffect(() => {
+    setApplyState("idle");
+  }, [rule.id, matchedEntries.length]);
+
+  async function applyPreviewedChanges(): Promise<void> {
+    if (applyDisabled) {
+      return;
+    }
+
+    setApplyState("applying");
+
+    try {
+      await updateLedgerTransactionsBulk({
+        ids: matchedEntries.map((entry) => entry.id),
+        categoryId: rule.categoryId,
+      });
+      await onApplied();
+      setApplyState("applied");
+    } catch {
+      setApplyState("error");
+    }
+  }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Historical preview</CardTitle>
-        <CardDescription>
-          Read-only impact estimate against loaded local rows.
-        </CardDescription>
+        <CardDescription>{previewDescription}</CardDescription>
         <CardAction>
-          <Badge variant="secondary">{matchedEntries.length} affected</Badge>
+          <Badge variant="secondary">
+            {mccOnlyPreviewUnavailable
+              ? "MCC preview unavailable"
+              : `${matchedEntries.length} affected`}
+          </Badge>
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -4780,14 +6659,40 @@ function RuleHistoricalPreviewPanel({
         </div>
         <Alert>
           <FileClockIcon />
-          <AlertTitle>Preview only</AlertTitle>
+          <AlertTitle>Preview before applying</AlertTitle>
           <AlertDescription>
-            MCC matching is not available on normalized local history rows yet.
-            This estimate uses merchant text, description text, and amount
-            direction.
+            Review the affected local rows before applying this rule to loaded
+            history. MCC matching is not available on normalized history rows
+            yet, so MCC-only rules cannot be applied from this preview.
           </AlertDescription>
         </Alert>
-        {entries.length === 0 ? (
+        {applyState === "applied" ? (
+          <Alert>
+            <CheckCircle2Icon />
+            <AlertTitle>Previewed changes applied</AlertTitle>
+            <AlertDescription>
+              The matched loaded rows were updated to {rule.label}.
+            </AlertDescription>
+          </Alert>
+        ) : applyState === "error" ? (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertTitle>Could not apply previewed changes</AlertTitle>
+            <AlertDescription>
+              Refresh the local data and try the preview again.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {mccOnlyPreviewUnavailable ? (
+          <Alert>
+            <AlertCircleIcon />
+            <AlertTitle>MCC-only preview unavailable</AlertTitle>
+            <AlertDescription>
+              Sync can apply this rule from raw statement MCC values, but the
+              current history preview only has normalized ledger rows.
+            </AlertDescription>
+          </Alert>
+        ) : entries.length === 0 ? (
           <Alert>
             <AlertCircleIcon />
             <AlertTitle>No transactions loaded</AlertTitle>
@@ -4837,9 +6742,19 @@ function RuleHistoricalPreviewPanel({
           <SearchIcon data-icon="inline-start" />
           Refresh preview
         </Button>
-        <Button disabled size="sm" type="button" variant="outline">
+        <Button
+          disabled={applyDisabled}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => {
+            void applyPreviewedChanges();
+          }}
+        >
           <CheckCheckIcon data-icon="inline-start" />
-          Apply previewed changes
+          {applyState === "applying"
+            ? "Applying preview"
+            : "Apply previewed changes"}
         </Button>
       </CardFooter>
     </Card>
@@ -4848,10 +6763,15 @@ function RuleHistoricalPreviewPanel({
 
 function RuleConflictDetectionPanel({
   entries,
+  rules,
 }: {
   entries: readonly LedgerEntry[];
+  rules: readonly CategoryRuleSummary[];
 }) {
-  const conflicts = useMemo(() => findRuleConflicts(entries), [entries]);
+  const conflicts = useMemo(
+    () => findRuleConflicts(entries, rules),
+    [entries, rules],
+  );
   const previewConflicts = conflicts.slice(0, 3);
 
   return (
@@ -4859,7 +6779,7 @@ function RuleConflictDetectionPanel({
       <CardHeader>
         <CardTitle>Rule conflicts</CardTitle>
         <CardDescription>
-          Loaded rows that match more than one built-in rule.
+          Loaded rows that match more than one active category rule.
         </CardDescription>
         <CardAction>
           <Badge variant="secondary">{conflicts.length} conflicts</Badge>
@@ -4888,7 +6808,7 @@ function RuleConflictDetectionPanel({
             <CheckCircle2Icon />
             <AlertTitle>No loaded rule conflicts</AlertTitle>
             <AlertDescription>
-              The currently loaded rows match at most one built-in rule each.
+              The currently loaded rows match at most one active rule each.
             </AlertDescription>
           </Alert>
         ) : (
@@ -4949,19 +6869,59 @@ function RuleConflictDetectionPanel({
   );
 }
 
-function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
+function reviewCandidateLabel(candidate: LedgerEntryReviewCandidate): string {
+  switch (candidate.kind) {
+    case "duplicate":
+      return "Duplicate";
+    case "needs_review":
+      return "Needs review";
+    case "transfer":
+      return "Transfer";
+    case "reversal":
+      return "Reversal";
+    case "refund":
+      return "Refund";
+  }
+}
+
+function reviewCandidateBadgeVariant(
+  candidate: LedgerEntryReviewCandidate,
+): "default" | "secondary" | "outline" {
+  switch (candidate.kind) {
+    case "duplicate":
+      return "secondary";
+    case "needs_review":
+      return "outline";
+    case "transfer":
+      return "default";
+    case "reversal":
+      return "outline";
+    case "refund":
+      return "default";
+  }
+}
+
+function RulesRoute({
+  onRefresh,
+  snapshot,
+}: {
+  onRefresh: () => Promise<void>;
+  snapshot: LocalAppSnapshot | undefined;
+}) {
   const [rulesSearch, setRulesSearch] = useState("");
-  const [selectedRuleId, setSelectedRuleId] = useState<
-    (typeof builtInRuleSummaries)[number]["id"]
-  >(builtInRuleSummaries[0].id);
+  const [selectedRuleId, setSelectedRuleId] = useState<string>("income");
   const entries = snapshot?.transactions.entries ?? [];
   const normalizedRulesSearch = rulesSearch.trim().toLowerCase();
+  const categoryRuleSummaries = useMemo(
+    () => categoryRuleSummariesFromSnapshot(snapshot),
+    [snapshot],
+  );
   const filteredRules = useMemo(() => {
     if (!normalizedRulesSearch) {
-      return builtInRuleSummaries;
+      return categoryRuleSummaries;
     }
 
-    return builtInRuleSummaries.filter((rule) => {
+    return categoryRuleSummaries.filter((rule) => {
       const searchableText =
         `${rule.label} ${rule.conditions} ${rule.targetAction} ${Object.values(
           rule.editor,
@@ -4969,21 +6929,26 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
 
       return searchableText.includes(normalizedRulesSearch);
     });
-  }, [normalizedRulesSearch]);
+  }, [categoryRuleSummaries, normalizedRulesSearch]);
   const selectedRule =
-    builtInRuleSummaries.find((rule) => rule.id === selectedRuleId) ??
+    categoryRuleSummaries.find((rule) => rule.id === selectedRuleId) ??
     filteredRules[0] ??
-    builtInRuleSummaries[0];
-  const categoryCount = new Set(
-    entries.map((entry) => entry.categoryId ?? "uncategorized"),
-  ).size;
+    categoryRuleSummaries[0] ??
+    fallbackCategoryRuleSummary;
+  const categoryCount =
+    snapshot?.categories.length ??
+    new Set(entries.map((entry) => entry.categoryId ?? "uncategorized")).size;
   const merchants = [
     ...new Set(entries.map((entry) => entry.merchantName ?? entry.description)),
   ].filter(Boolean);
   const uncategorizedCount = entries.filter((entry) => {
     return !entry.categoryId || entry.categoryId === "uncategorized";
   }).length;
-  const duplicateCandidates = duplicateCandidateCount(entries);
+  const reviewCandidates = useMemo(
+    () => findLedgerEntryReviewCandidates(entries),
+    [entries],
+  );
+  const duplicateCandidates = reviewCandidates.length;
   const exportTargets = [
     "Accountant handoff",
     "Monthly personal finance",
@@ -4991,13 +6956,13 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
     "Raw transaction archive",
   ];
   const ruleTestAccount = snapshot?.accounts[0];
+  const merchantCleanupRules = snapshot?.merchantCleanupRules ?? [];
 
   useEffect(() => {
-    if (
-      filteredRules.length > 0 &&
-      !filteredRules.some((rule) => rule.id === selectedRuleId)
-    ) {
-      setSelectedRuleId(filteredRules[0].id);
+    const nextRule = filteredRules[0];
+
+    if (nextRule && !filteredRules.some((rule) => rule.id === selectedRuleId)) {
+      setSelectedRuleId(nextRule.id);
     }
   }, [filteredRules, selectedRuleId]);
 
@@ -5018,9 +6983,9 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-4">
           <OverviewStatusItem
-            label="Built-in rules"
-            value={String(builtInRuleSummaries.length)}
-            detail="Read-only rules currently applied during sync"
+            label="Category rules"
+            value={String(categoryRuleSummaries.length)}
+            detail={`${categoryRuleSummaries.filter((rule) => !rule.isSystem).length} user-defined`}
           />
           <OverviewStatusItem
             label="Categories seen"
@@ -5035,7 +7000,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
           <OverviewStatusItem
             label="Duplicate candidates"
             value={String(duplicateCandidates)}
-            detail="Potential same merchant, amount, and time matches"
+            detail="Uncategorized, hold, duplicate, transfer, reversal, and refund matches"
           />
         </CardContent>
       </Card>
@@ -5066,7 +7031,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               <CardHeader>
                 <CardTitle>Categorization rules</CardTitle>
                 <CardDescription>
-                  Current built-in rules that assign initial local categories.
+                  Current local rules that assign initial local categories.
                 </CardDescription>
                 <CardAction>
                   <Button disabled size="sm" type="button" variant="outline">
@@ -5143,7 +7108,11 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                           <TableCell>{rule.conditions}</TableCell>
                           <TableCell>{rule.targetAction}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">Active</Badge>
+                            <Badge
+                              variant={rule.isEnabled ? "outline" : "secondary"}
+                            >
+                              {rule.isEnabled ? "Active" : "Disabled"}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             <DropdownMenu>
@@ -5195,12 +7164,13 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 <Alert>
                   <ShieldCheckIcon />
                   <AlertTitle>
-                    Manual rule writes are not enabled yet
+                    Manual rule editing is not enabled yet
                   </AlertTitle>
                   <AlertDescription>
-                    This route shows current local rule coverage first. Editing,
-                    preview, and historical apply controls stay disabled until
-                    storage write flows are stable.
+                    This route shows current local rule coverage and can apply
+                    previewed matches to loaded history. Creating and editing
+                    rule definitions stays disabled until storage write flows
+                    are stable.
                   </AlertDescription>
                 </Alert>
               </CardContent>
@@ -5286,10 +7256,15 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
               <RuleTestPanel account={ruleTestAccount} rule={selectedRule} />
               <RuleHistoricalPreviewPanel
                 entries={entries}
+                onApplied={onRefresh}
                 rule={selectedRule}
+                rules={categoryRuleSummaries}
                 totalRows={snapshot?.transactions.total ?? entries.length}
               />
-              <RuleConflictDetectionPanel entries={entries} />
+              <RuleConflictDetectionPanel
+                entries={entries}
+                rules={categoryRuleSummaries}
+              />
             </div>
           </div>
         </TabsContent>
@@ -5299,7 +7274,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             <CardHeader>
               <CardTitle>Merchant mapping</CardTitle>
               <CardDescription>
-                Local merchant labels ready for future cleanup rules.
+                Local merchant labels and cleanup rules applied during sync.
               </CardDescription>
               <CardAction>
                 <Button disabled size="sm" type="button" variant="outline">
@@ -5326,10 +7301,37 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                   ))}
                 </div>
               )}
-              <p className="text-sm text-muted-foreground">
-                Merchant edits will stay local and reversible once write flows
-                are enabled.
-              </p>
+              <Separator />
+              <div className="grid gap-2">
+                {merchantCleanupRules.length === 0 ? (
+                  <Alert>
+                    <AlertCircleIcon />
+                    <AlertTitle>No cleanup rules configured</AlertTitle>
+                    <AlertDescription>
+                      Synced merchant names will be stored as received.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  merchantCleanupRules.map((rule) => (
+                    <div
+                      className="grid gap-2 rounded-md border border-border px-3 py-2 sm:grid-cols-[1fr_auto] sm:items-center"
+                      key={rule.id}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {rule.canonicalName}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          Contains {rule.merchantContains}
+                        </div>
+                      </div>
+                      <Badge variant={rule.isEnabled ? "secondary" : "outline"}>
+                        Priority {rule.priority}
+                      </Badge>
+                    </div>
+                  ))
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -5339,7 +7341,8 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             <CardHeader>
               <CardTitle>Duplicate detection</CardTitle>
               <CardDescription>
-                Review queue for potential duplicate or reversal records.
+                Review queue for uncategorized, hold, duplicate, transfer,
+                reversal, or refund records.
               </CardDescription>
               <CardAction>
                 <Button disabled size="sm" type="button" variant="outline">
@@ -5348,7 +7351,7 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 </Button>
               </CardAction>
             </CardHeader>
-            <CardContent>
+            <CardContent className="grid gap-4">
               <Alert>
                 {duplicateCandidates > 0 ? (
                   <AlertCircleIcon />
@@ -5358,14 +7361,65 @@ function RulesRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
                 <AlertTitle>
                   {duplicateCandidates > 0
                     ? "Potential duplicates found"
-                    : "No duplicate candidates in the current local page"}
+                    : "No review candidates in the current local page"}
                 </AlertTitle>
                 <AlertDescription>
-                  The first pass checks local rows with the same merchant,
-                  amount, and time. Merge and ignore controls will be added
-                  after review writes are available.
+                  The read-only detector checks uncategorized and hold rows,
+                  exact duplicates, matched transfers between accounts,
+                  short-window reversals, and later positive refunds. History is
+                  preserved until review writes are available.
                 </AlertDescription>
               </Alert>
+              {reviewCandidates.length > 0 && (
+                <div className="grid gap-2">
+                  {reviewCandidates.slice(0, 5).map((candidate) => {
+                    const primaryEntry = candidate.entries[0];
+                    const amount =
+                      primaryEntry === undefined
+                        ? ""
+                        : formatMinorAmount(
+                            primaryEntry.amount,
+                            primaryEntry.currencyCode,
+                          );
+                    const title =
+                      primaryEntry?.merchantName ??
+                      primaryEntry?.description ??
+                      "Ledger review candidate";
+
+                    return (
+                      <div
+                        className="grid gap-2 rounded-md border border-border px-3 py-2"
+                        key={`${candidate.kind}:${candidate.entries
+                          .map((entry) => entry.id)
+                          .join(":")}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">
+                              {title}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {candidate.reason}
+                            </div>
+                          </div>
+                          <Badge
+                            variant={reviewCandidateBadgeVariant(candidate)}
+                          >
+                            {reviewCandidateLabel(candidate)}
+                          </Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          <span>{candidate.entries.length} records</span>
+                          {amount && <span>{amount}</span>}
+                          {primaryEntry && (
+                            <span>{formatDateTime(primaryEntry.time)}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -5433,11 +7487,13 @@ function RouteContent({
   snapshot,
   loading,
   onRouteChange,
+  onRefresh,
 }: {
   activeRoute: RouteId;
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
   onRouteChange: (routeId: RouteId) => void;
+  onRefresh: () => Promise<void>;
 }) {
   if (loading && !snapshot) {
     return <RouteLoadingSkeleton routeId={activeRoute} />;
@@ -5450,20 +7506,28 @@ function RouteContent({
           loading={loading}
           snapshot={snapshot}
           onRouteChange={onRouteChange}
+          onRefresh={onRefresh}
         />
       );
     case "transactions":
       return <TransactionsRoute snapshot={snapshot} />;
     case "sync":
       return <SyncRoute snapshot={snapshot} onRouteChange={onRouteChange} />;
+    case "settings":
+      return (
+        <SettingsRoute
+          snapshot={snapshot}
+          loading={loading}
+          onRefresh={onRefresh}
+        />
+      );
     case "accounts":
       return <AccountsRoute snapshot={snapshot} />;
     case "rules":
-      return <RulesRoute snapshot={snapshot} />;
+      return <RulesRoute snapshot={snapshot} onRefresh={onRefresh} />;
     case "exports":
     case "logs":
       return <LogsRoute snapshot={snapshot} />;
-    case "settings":
     case "help":
       return <PlaceholderRoute routeId={activeRoute} />;
   }
@@ -5614,7 +7678,11 @@ export default function App() {
             )}
 
             <OfflineBrowsingBanner
-              error={loadState.status === "error" ? loadState.error : undefined}
+              error={
+                loadState.status === "error"
+                  ? loadState.error
+                  : snapshot?.offline?.reason
+              }
               snapshot={snapshot}
               loading={loading}
               onRefresh={refresh}
@@ -5641,6 +7709,7 @@ export default function App() {
               activeRoute={activeRoute}
               loading={loading}
               onRouteChange={onRouteChange}
+              onRefresh={refresh}
               snapshot={snapshot}
             />
 

@@ -58,6 +58,18 @@ export interface SyncLedgerStats {
   rateLimited: number;
 }
 
+export type ProcessInterruptSignal = "SIGINT" | "SIGTERM";
+
+export interface ProcessSignalTarget {
+  on(signal: ProcessInterruptSignal, listener: () => void): unknown;
+  off(signal: ProcessInterruptSignal, listener: () => void): unknown;
+}
+
+export interface ProcessSignalAbortController {
+  signal: AbortSignal;
+  dispose(): void;
+}
+
 const fixtureSyncTo = 4_102_444_800;
 const liveSyncWindowSeconds = 31 * 24 * 60 * 60;
 
@@ -167,10 +179,139 @@ function statsFromWriteStats(
   };
 }
 
+const expenseCategoryMappings: readonly {
+  categoryId: string;
+  categoryName: string;
+  mccs: readonly number[];
+  descriptionTerms: readonly string[];
+}[] = [
+  {
+    categoryId: "groceries",
+    categoryName: "Groceries",
+    mccs: [5411],
+    descriptionTerms: ["grocery"],
+  },
+  {
+    categoryId: "utilities",
+    categoryName: "Utilities",
+    mccs: [4900],
+    descriptionTerms: ["utility"],
+  },
+  {
+    categoryId: "healthcare",
+    categoryName: "Healthcare",
+    mccs: [5912],
+    descriptionTerms: ["pharmacy"],
+  },
+  {
+    categoryId: "shopping",
+    categoryName: "Shopping",
+    mccs: [5311],
+    descriptionTerms: ["marketplace"],
+  },
+  {
+    categoryId: "household",
+    categoryName: "Household",
+    mccs: [5200],
+    descriptionTerms: ["household"],
+  },
+  {
+    categoryId: "education",
+    categoryName: "Education",
+    mccs: [8299],
+    descriptionTerms: ["education"],
+  },
+  {
+    categoryId: "subscriptions",
+    categoryName: "Subscriptions",
+    mccs: [5734],
+    descriptionTerms: ["subscription"],
+  },
+  {
+    categoryId: "transport",
+    categoryName: "Transport",
+    mccs: [4111],
+    descriptionTerms: ["metro"],
+  },
+  {
+    categoryId: "travel",
+    categoryName: "Travel",
+    mccs: [4722],
+    descriptionTerms: ["travel"],
+  },
+  {
+    categoryId: "dining",
+    categoryName: "Dining",
+    mccs: [5814],
+    descriptionTerms: ["coffee"],
+  },
+  {
+    categoryId: "taxes",
+    categoryName: "Taxes",
+    mccs: [9311],
+    descriptionTerms: ["tax"],
+  },
+  {
+    categoryId: "charity",
+    categoryName: "Charity",
+    mccs: [8398],
+    descriptionTerms: ["donation"],
+  },
+  {
+    categoryId: "cash",
+    categoryName: "Cash",
+    mccs: [6011],
+    descriptionTerms: ["atm"],
+  },
+  {
+    categoryId: "fees",
+    categoryName: "Fees",
+    mccs: [6012],
+    descriptionTerms: ["fee"],
+  },
+  {
+    categoryId: "transfers",
+    categoryName: "Transfers",
+    mccs: [4829],
+    descriptionTerms: ["transfer"],
+  },
+];
+
+function descriptionTermVariants(term: string): readonly string[] {
+  const normalizedTerm = term.toLowerCase();
+  const variants = [
+    normalizedTerm,
+    `${normalizedTerm}s`,
+    `${normalizedTerm}es`,
+  ];
+
+  if (normalizedTerm.endsWith("y")) {
+    variants.push(`${normalizedTerm.slice(0, -1)}ies`);
+  }
+
+  return variants;
+}
+
+function tokenizeCategoryText(text: string): readonly string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+function descriptionMatchesTerm(
+  descriptionTokens: readonly string[],
+  term: string,
+): boolean {
+  const tokenSet = new Set(descriptionTokens);
+
+  return descriptionTermVariants(term).some((variant) => tokenSet.has(variant));
+}
+
 export function categorizeStatementItem(
   item: MonobankStatementItem,
 ): LedgerCategoryMatch {
-  const description = item.description.toLowerCase();
+  const descriptionTokens = tokenizeCategoryText(item.description);
 
   if (item.amount > 0) {
     return {
@@ -179,46 +320,18 @@ export function categorizeStatementItem(
     };
   }
 
-  if (item.mcc === 5411 || description.includes("grocery")) {
-    return {
-      categoryId: "groceries",
-      categoryName: "Groceries",
-    };
-  }
-
-  if (item.mcc === 5734 || description.includes("subscription")) {
-    return {
-      categoryId: "subscriptions",
-      categoryName: "Subscriptions",
-    };
-  }
-
-  if (item.mcc === 4111 || description.includes("metro")) {
-    return {
-      categoryId: "transport",
-      categoryName: "Transport",
-    };
-  }
-
-  if (item.mcc === 4722 || description.includes("travel")) {
-    return {
-      categoryId: "travel",
-      categoryName: "Travel",
-    };
-  }
-
-  if (item.mcc === 5814 || description.includes("coffee")) {
-    return {
-      categoryId: "dining",
-      categoryName: "Dining",
-    };
-  }
-
-  if (item.mcc === 4829 || description.includes("transfer")) {
-    return {
-      categoryId: "transfers",
-      categoryName: "Transfers",
-    };
+  for (const mapping of expenseCategoryMappings) {
+    if (
+      mapping.mccs.includes(item.mcc) ||
+      mapping.descriptionTerms.some((term) =>
+        descriptionMatchesTerm(descriptionTokens, term),
+      )
+    ) {
+      return {
+        categoryId: mapping.categoryId,
+        categoryName: mapping.categoryName,
+      };
+    }
   }
 
   return {
@@ -318,7 +431,43 @@ function throwIfAborted(signal?: AbortSignal): void {
     return;
   }
 
+  if (signal.reason instanceof Error) {
+    throw signal.reason;
+  }
+
   throw new DOMException("Sync was interrupted", "AbortError");
+}
+
+export function createProcessSignalAbortController(
+  target: ProcessSignalTarget = process,
+): ProcessSignalAbortController {
+  const controller = new AbortController();
+  const listeners = new Map<ProcessInterruptSignal, () => void>();
+  const signals: readonly ProcessInterruptSignal[] = ["SIGINT", "SIGTERM"];
+
+  for (const signal of signals) {
+    const listener = (): void => {
+      if (!controller.signal.aborted) {
+        controller.abort(
+          new DOMException(`Sync was interrupted by ${signal}`, "AbortError"),
+        );
+      }
+    };
+
+    listeners.set(signal, listener);
+    target.on(signal, listener);
+  }
+
+  return {
+    signal: controller.signal,
+    dispose() {
+      for (const [signal, listener] of listeners) {
+        target.off(signal, listener);
+      }
+
+      listeners.clear();
+    },
+  };
 }
 
 async function callAdapter<T>(
@@ -354,6 +503,41 @@ function shouldFetchAccount(
   accountIds: readonly string[] | undefined,
 ): boolean {
   return !accountIds?.length || accountIds.includes(accountId);
+}
+
+function windowsForRange(
+  source: "fixture" | "monobank",
+  from: number,
+  to: number,
+  sliceSeconds: number | undefined,
+): readonly StatementSyncWindow[] {
+  if (source === "monobank" || sliceSeconds !== undefined) {
+    return createStatementSyncWindows(from, to, sliceSeconds);
+  }
+
+  return to < from ? [] : [{ from, to }];
+}
+
+function mergeStatementWindows(
+  windows: readonly StatementSyncWindow[],
+): readonly StatementSyncWindow[] {
+  const sortedWindows = [...windows].sort((left, right) => {
+    return left.from - right.from || left.to - right.to;
+  });
+  const mergedWindows: StatementSyncWindow[] = [];
+
+  for (const window of sortedWindows) {
+    const previousWindow = mergedWindows.at(-1);
+
+    if (!previousWindow || window.from > previousWindow.to) {
+      mergedWindows.push({ ...window });
+      continue;
+    }
+
+    previousWindow.to = Math.max(previousWindow.to, window.to);
+  }
+
+  return mergedWindows;
 }
 
 export async function syncLedgerWithMonobank(
@@ -416,15 +600,39 @@ export async function syncLedgerWithMonobank(
         options.source,
         cursor?.statementTo,
       );
+      const pendingWebhookWindows =
+        options.from === undefined && options.to === undefined
+          ? await options.db.listPendingWebhookStatementWindows(
+              options.profile,
+              account.id,
+            )
+          : [];
       const from = options.from ?? defaultWindow.from;
       const to = options.to ?? defaultWindow.to;
-      const windows =
-        options.source === "monobank" || options.sliceSeconds !== undefined
-          ? createStatementSyncWindows(from, to, options.sliceSeconds)
-          : [{ from, to }];
+      const mergedWindows = mergeStatementWindows([
+        ...windowsForRange(options.source, from, to, options.sliceSeconds),
+        ...pendingWebhookWindows.flatMap((window) =>
+          windowsForRange(
+            options.source,
+            window.from,
+            window.to,
+            options.sliceSeconds,
+          ),
+        ),
+      ]);
+      const windows = mergedWindows.flatMap((window) => {
+        return windowsForRange(
+          options.source,
+          window.from,
+          window.to,
+          options.sliceSeconds,
+        );
+      });
+      const accountFrom = windows[0]?.from ?? from;
+      const accountTo = windows.at(-1)?.to ?? to;
       let accountStats = emptyWriteStats();
       let accountItemsSeen = 0;
-      let accountCompletedWindow: { from: number; to: number } | undefined;
+      let accountCompletedWindowCount = 0;
 
       for (const window of windows) {
         throwIfAborted(options.signal);
@@ -456,10 +664,20 @@ export async function syncLedgerWithMonobank(
             entries,
           );
 
-          accountCompletedWindow = {
-            from: window.from,
-            to: window.to,
-          };
+          if (cursor === undefined || window.to > cursor.statementTo) {
+            await options.db.transaction(async (tx) => {
+              await tx.setSyncCursor({
+                profile: options.profile,
+                accountId: account.id,
+                source: options.source,
+                statementFrom: window.from,
+                statementTo: window.to,
+                updatedAt: nowIso(),
+              });
+            });
+          }
+
+          accountCompletedWindowCount += 1;
         }
 
         accountItemsSeen += statementItems.length;
@@ -470,27 +688,22 @@ export async function syncLedgerWithMonobank(
         );
       }
 
-      if (
-        !options.dryRun &&
-        accountCompletedWindow !== undefined &&
-        windows.length > 0
-      ) {
-        await options.db.transaction(async (tx) => {
-          await tx.setSyncCursor({
-            profile: options.profile,
-            accountId: account.id,
-            source: options.source,
-            statementFrom: accountCompletedWindow.from,
-            statementTo: accountCompletedWindow.to,
-            updatedAt: nowIso(),
-          });
-        });
+      if (!options.dryRun && accountCompletedWindowCount > 0) {
+        const webhookProcessedAt = nowIso();
+
+        await options.db.markWebhookEventsAsProcessed(
+          options.profile,
+          account.id,
+          webhookProcessedAt,
+          windows,
+          startedAt,
+        );
       }
 
       accountResults.push({
         accountId: account.id,
-        from,
-        to,
+        from: accountFrom,
+        to: accountTo,
         windowsFetched: windows.length,
         itemsSeen: accountItemsSeen,
         writeStats: accountStats,
