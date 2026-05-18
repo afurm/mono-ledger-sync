@@ -323,6 +323,188 @@ test("write service creates monthly category budgets with live transaction progr
   });
 });
 
+test("write service carries over remaining amount from previous rollover budget period", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      await db.upsertAccounts([
+        {
+          id: accountId,
+          type: "account-uah",
+          currencyCode: 980,
+          balance: 200_000,
+          creditLimit: 0,
+        },
+      ]);
+
+      const previousMonthExpense = {
+        id: "fixture-transfer-from-previous-month",
+        time: Math.floor(
+          Date.parse("2026-04-20T11:00:00.000Z") / 1000,
+        ),
+        description: "Store groceries",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -4_000,
+        operationAmount: -4_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 196_000,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [previousMonthExpense],
+        [
+          {
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              previousMonthExpense,
+            ),
+            categoryId: "groceries",
+            categoryName: "Groceries",
+            categorySource: "system_rule",
+          },
+        ],
+      );
+
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+
+      await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 10_000,
+        rollover: true,
+      });
+
+      const newProgress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-05",
+        amountLimit: 10_000,
+        rollover: true,
+      });
+      const currentProgress = (await queryService.listBudgetProgress()).find(
+        (row) => row.budgetId === newProgress.budgetId,
+      );
+
+      assert.equal(currentProgress?.amountLimit, 16_000);
+      assert.equal(currentProgress?.remainingAmount, 16_000);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("write service does not inherit carryover without previous rollover flag", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      await db.upsertAccounts([
+        {
+          id: accountId,
+          type: "account-uah",
+          currencyCode: 980,
+          balance: 200_000,
+          creditLimit: 0,
+        },
+      ]);
+
+      const previousMonthExpense = {
+        id: "fixture-previous-month-no-rollover",
+        time: Math.floor(
+          Date.parse("2026-04-22T11:00:00.000Z") / 1000,
+        ),
+        description: "Store groceries",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -5_000,
+        operationAmount: -5_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 195_000,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [previousMonthExpense],
+        [
+          {
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              previousMonthExpense,
+            ),
+            categoryId: "groceries",
+            categoryName: "Groceries",
+            categorySource: "system_rule",
+          },
+        ],
+      );
+
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+
+      await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 10_000,
+        rollover: false,
+      });
+
+      const newProgress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-05",
+        amountLimit: 10_000,
+        rollover: true,
+      });
+      const currentProgress = (await queryService.listBudgetProgress()).find(
+        (row) => row.budgetId === newProgress.budgetId,
+      );
+
+      assert.equal(currentProgress?.amountLimit, 10_000);
+      assert.equal(currentProgress?.remainingAmount, 10_000);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("write service ignores transfer-like entries when calculating budget progress", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";

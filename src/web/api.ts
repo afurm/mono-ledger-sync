@@ -229,6 +229,7 @@ export interface MonthlyCategoryBudgetInput {
   currencyCode?: number;
   month: string;
   amountLimit: number;
+  rollover?: boolean;
 }
 
 export interface LedgerEntryPage {

@@ -120,6 +120,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
@@ -4259,6 +4260,7 @@ function BudgetProgressCard({
   const [categoryId, setCategoryId] = useState(defaultCategoryId);
   const [month, setMonth] = useState(currentBudgetMonth);
   const [amount, setAmount] = useState("");
+  const [rollover, setRollover] = useState(false);
   const [deletingBudgetPeriodId, setDeletingBudgetPeriodId] = useState<
     string | null
   >(null);
@@ -4297,8 +4299,10 @@ function BudgetProgressCard({
         currencyCode: defaultCurrencyCode,
         month,
         amountLimit: Math.round(parsedAmount * 100),
+        rollover,
       });
       setAmount("");
+      setRollover(false);
       setStatus({ state: "saved", message: "Monthly budget saved." });
       await onRefresh();
     } catch (error) {
@@ -4398,6 +4402,16 @@ function BudgetProgressCard({
               <PlusIcon />
               Add
             </Button>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              Rollover remaining budget from previous month
+            </span>
+            <Toggle
+              aria-label="Enable budget rollover"
+              pressed={rollover}
+              onPressedChange={setRollover}
+            />
           </div>
           {status.state === "error" ? (
             <p className="text-xs text-destructive">{status.message}</p>

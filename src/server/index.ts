@@ -521,6 +521,7 @@ const monthlyCategoryBudgetBodySchema = {
     month: { type: "string", pattern: "^\\d{4}-\\d{2}$" },
     amountLimit: { type: "number", exclusiveMinimum: 0 },
     currencyCode: { type: "number", minimum: 1 },
+    rollover: { type: "boolean" },
   },
 } as const;
 
@@ -1215,6 +1216,7 @@ function readMonthlyCategoryBudgetInput(
     month: typeof record.month === "string" ? record.month.trim() : "",
     amountLimit:
       typeof record.amountLimit === "number" ? record.amountLimit : 0,
+    rollover: record.rollover === true,
   };
 }
 
