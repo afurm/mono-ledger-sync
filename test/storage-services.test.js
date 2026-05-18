@@ -323,6 +323,128 @@ test("write service creates monthly category budgets with live transaction progr
   });
 });
 
+test("write service creates monthly income plans with live inflow progress", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const salaryStatementItem = {
+        id: "monthly-income-plan-salary",
+        time: Math.floor(Date.parse("2026-04-05T09:00:00.000Z") / 1000),
+        description: "Salary payment",
+        mcc: 0,
+        originalMcc: 0,
+        amount: 85_000,
+        operationAmount: 85_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 185_000,
+        hold: false,
+      };
+      const refundStatementItem = {
+        id: "monthly-income-plan-refund",
+        time: Math.floor(Date.parse("2026-04-08T09:00:00.000Z") / 1000),
+        description: "Store refund",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: 5_000,
+        operationAmount: 5_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 190_000,
+        hold: false,
+      };
+      const expenseStatementItem = {
+        id: "monthly-income-plan-expense",
+        time: Math.floor(Date.parse("2026-04-10T09:00:00.000Z") / 1000),
+        description: "Store groceries",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -6_000,
+        operationAmount: -6_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 184_000,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [salaryStatementItem, refundStatementItem, expenseStatementItem],
+        [
+          {
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              salaryStatementItem,
+            ),
+            categoryId: "income",
+            categoryName: "Income",
+            categorySource: "system_rule",
+          },
+          {
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              refundStatementItem,
+            ),
+            categoryId: "income",
+            categoryName: "Income",
+            categorySource: "system_rule",
+          },
+          {
+            ...createLedgerEntryFromStatementItem(
+              accountId,
+              expenseStatementItem,
+            ),
+            categoryId: "income",
+            categoryName: "Income",
+            categorySource: "system_rule",
+          },
+        ],
+      );
+
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const progress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "income",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 100_000,
+        rollover: true,
+      });
+      const incomeBudget = (await queryService.listBudgets()).find(
+        (budget) => budget.id === progress.budgetId,
+      );
+
+      assert.equal(incomeBudget?.includeInflows, true);
+      assert.equal(incomeBudget?.rollover, false);
+      assert.equal(progress.categoryName, "Income");
+      assert.equal(progress.amountLimit, 100_000);
+      assert.equal(progress.actualAmount, 90_000);
+      assert.equal(progress.remainingAmount, 10_000);
+      assert.equal(progress.progressPercentage, 90);
+      assert.equal(progress.status, "on_track");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("write service carries over remaining amount from previous rollover budget period", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
