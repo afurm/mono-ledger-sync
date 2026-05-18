@@ -884,6 +884,20 @@ export async function createMonthlyCategoryBudget(
   });
 }
 
+export async function deleteMonthlyCategoryBudget(
+  budgetPeriodId: string,
+): Promise<{ deleted: boolean }> {
+  return requestJson<{ deleted: boolean }>(
+    `/api/ledger/budgets/monthly/${encodeURIComponent(budgetPeriodId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+      },
+    },
+  );
+}
+
 export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
   let config: LocalApiAppConfig | undefined;
 

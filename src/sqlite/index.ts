@@ -144,6 +144,10 @@ export interface SqliteLedgerDb extends LedgerDb {
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
+  deleteMonthlyCategoryBudget(
+    profile: string,
+    budgetPeriodId: string,
+  ): Promise<boolean>;
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
   listTags(profile?: string): Promise<readonly Tag[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
@@ -2818,6 +2822,65 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteBudgetPeriodRow[];
 
     return rows.map(mapBudgetPeriodRow);
+  }
+
+  async deleteMonthlyCategoryBudget(
+    profile: string,
+    budgetPeriodId: string,
+  ): Promise<boolean> {
+    const normalizedProfile = profile.trim() || this.profile;
+    const normalizedPeriodId = budgetPeriodId.trim();
+
+    const getBudgetId = this.#database.prepare(
+      `
+        SELECT budget_id
+        FROM budget_periods
+        WHERE profile = ? AND id = ?
+      `,
+    );
+    const deleteBudgetPeriod = this.#database.prepare(
+      `
+        DELETE FROM budget_periods
+        WHERE profile = ? AND id = ?
+      `,
+    );
+    const countBudgetPeriods = this.#database.prepare(
+      `
+        SELECT COUNT(1) AS count
+        FROM budget_periods
+        WHERE profile = ? AND budget_id = ?
+      `,
+    );
+    const deleteBudget = this.#database.prepare(
+      `
+        DELETE FROM budgets
+        WHERE profile = ? AND id = ?
+      `,
+    );
+
+    return this.#database.transaction(() => {
+      const budgetRow = getBudgetId.get(
+        normalizedProfile,
+        normalizedPeriodId,
+      ) as { budget_id: string } | undefined;
+
+      if (!budgetRow || !budgetRow.budget_id) {
+        return false;
+      }
+
+      deleteBudgetPeriod.run(normalizedProfile, normalizedPeriodId);
+
+      const remaining = countBudgetPeriods.get(
+        normalizedProfile,
+        budgetRow.budget_id,
+      ) as { count: number } | undefined;
+
+      if (!remaining || remaining.count === 0) {
+        deleteBudget.run(normalizedProfile, budgetRow.budget_id);
+      }
+
+      return true;
+    })();
   }
 
   async listRecurringItems(

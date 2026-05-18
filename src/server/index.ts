@@ -524,6 +524,15 @@ const monthlyCategoryBudgetBodySchema = {
   },
 } as const;
 
+const deleteMonthlyBudgetParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id"],
+  properties: {
+    id: { type: "string", minLength: 1 },
+  },
+} as const;
+
 const ledgerEntriesPageResponseSchema = {
   type: "object",
   required: ["entries", "total", "limit", "offset"],
@@ -2328,6 +2337,71 @@ function registerLocalApiRoutes(
             error instanceof Error
               ? error.message
               : "Monthly category budget could not be created.",
+        };
+      }
+    },
+  );
+
+  app.delete(
+    `${localApiRoutePrefix}/ledger/budgets/monthly/:id`,
+    {
+      schema: {
+        params: deleteMonthlyBudgetParamsSchema,
+        response: {
+          200: {
+            type: "object",
+            required: ["deleted"],
+            properties: {
+              deleted: { type: "boolean" },
+            },
+          },
+          400: localApiErrorResponseSchema,
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<{ deleted: true } | { error: string; message: string }> => {
+      const services = await getServices();
+      const params = request.params as { id?: string };
+      const budgetPeriodId = params.id?.trim() ?? "";
+
+      if (!budgetPeriodId) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message: "Budget period ID is required.",
+        };
+      }
+
+      try {
+        const deleted = await services.writeService.deleteMonthlyCategoryBudget(
+          budgetPeriodId,
+          services.profile,
+        );
+
+        if (!deleted) {
+          reply.code(404);
+
+          return {
+            error: "budget_not_found",
+            message: "Monthly budget period could not be found.",
+          };
+        }
+
+        return { deleted: true };
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_budget",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Monthly category budget could not be deleted.",
         };
       }
     },
