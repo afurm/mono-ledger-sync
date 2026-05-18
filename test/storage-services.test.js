@@ -323,6 +323,99 @@ test("write service creates monthly category budgets with live transaction progr
   });
 });
 
+test("write service ignores transfer-like entries when calculating budget progress", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      await db.upsertAccounts([
+        {
+          id: accountId,
+          type: "account-uah",
+          currencyCode: 980,
+          balance: 200_000,
+          creditLimit: 0,
+        },
+      ]);
+
+      const groceryStatementItem = {
+        id: "fixture-grocery-2026-04",
+        time: Math.floor(
+          Date.parse("2026-04-12T10:00:00.000Z") / 1000,
+        ),
+        description: "Store groceries",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -3_000,
+        operationAmount: -3_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 197_000,
+        hold: false,
+      };
+      const transferStatementItem = {
+        id: "fixture-transfer-2026-04",
+        time: Math.floor(
+          Date.parse("2026-04-12T11:00:00.000Z") / 1000,
+        ),
+        description: "Переказ на рахунок заощаджень",
+        mcc: 6012,
+        originalMcc: 6012,
+        amount: -1_200,
+        operationAmount: -1_200,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 195_800,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        accountId,
+        [groceryStatementItem, transferStatementItem],
+        [
+          {
+            ...createLedgerEntryFromStatementItem(accountId, groceryStatementItem),
+            categoryId: "groceries",
+            categoryName: "Groceries",
+            categorySource: "system_rule",
+          },
+          {
+            ...createLedgerEntryFromStatementItem(accountId, transferStatementItem),
+            categoryId: "groceries",
+            categoryName: "Groceries",
+            categorySource: "system_rule",
+          },
+        ],
+      );
+
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
+      const progress = await writeService.createMonthlyCategoryBudget({
+        categoryId: "groceries",
+        currencyCode: 980,
+        month: "2026-04",
+        amountLimit: 10_000,
+      });
+
+      assert.equal(progress.actualAmount, 3_000);
+      assert.equal(progress.status, "on_track");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("write service deletes monthly category budget periods", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";

@@ -148,6 +148,13 @@ interface CreateLedgerServicesOptions {
 const DEFAULT_SYNC_LIST_LIMIT = 20;
 const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
 const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
+const TRANSFER_CATEGORY_ID = "transfers";
+const TRANSFER_DESCRIPTION_TERMS = [
+  "transfer",
+  "transfers",
+  "переклад",
+  "переказ",
+];
 
 function coerceProfile(profile: string | undefined, fallback: string): string {
   return profile === undefined || profile.trim() === "" ? fallback : profile;
@@ -274,6 +281,22 @@ function localDateKey(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function isTransferLikeEntry(entry: LedgerEntry): boolean {
+  if (entry.categoryId === TRANSFER_CATEGORY_ID) {
+    return true;
+  }
+
+  const normalizedDescription = entry.description
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  const tokens = normalizedDescription.length === 0 ? [] : normalizedDescription.split(/\s+/u);
+
+  return TRANSFER_DESCRIPTION_TERMS.includes(entry.description.toLowerCase().trim())
+    ? true
+    : tokens.some((token) => TRANSFER_DESCRIPTION_TERMS.includes(token));
+}
+
 function endOfLocalDateEpoch(dateKey: string): number {
   const epoch = Date.parse(`${dateKey}T23:59:59.999`);
 
@@ -313,6 +336,10 @@ async function calculateBudgetActualAmount(
     countedEntries = true;
 
     totalActualAmount += page.entries.reduce((sum, entry) => {
+      if (isTransferLikeEntry(entry)) {
+        return sum;
+      }
+
       if (entry.currencyCode !== budget.currencyCode) {
         return sum;
       }
