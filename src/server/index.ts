@@ -3305,6 +3305,7 @@ export function createLocalApiServer(
     monobankToken = undefined;
     monobankTokenSource = undefined;
     await rebuildServices();
+    await autoDemoteSourceOnTokenDelete();
     const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
 
     return {
@@ -3362,6 +3363,7 @@ export function createLocalApiServer(
         monobankToken = token;
         monobankTokenSource = "store";
         await rebuildServices();
+        await autoPromoteSourceOnTokenSave();
 
         logStructured(
           "info",
@@ -3424,6 +3426,7 @@ export function createLocalApiServer(
     monobankToken = token;
     monobankTokenSource = "store";
     await rebuildServices();
+    await autoPromoteSourceOnTokenSave();
     const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
 
     return {
@@ -3441,6 +3444,20 @@ export function createLocalApiServer(
     const services = await servicesPromise;
     await services.db.close();
     servicesPromise = undefined;
+  }
+
+  async function autoPromoteSourceOnTokenSave(): Promise<void> {
+    if (source === "monobank") {
+      return;
+    }
+    await updateSource("monobank");
+  }
+
+  async function autoDemoteSourceOnTokenDelete(): Promise<void> {
+    if (source === "fixture") {
+      return;
+    }
+    await updateSource("fixture");
   }
 
   async function updateSource(nextSource: LedgerSource): Promise<void> {
