@@ -26,15 +26,17 @@ import {
 import { DomainError } from "../domain/index.js";
 import {
   assertMonobankPersonalWebhookEvent,
-  MonobankApiError,
-  MonobankValidationError,
   createBundledFixtureMonobankAdapter,
   createMonobankHttpAdapter,
+  createMonobankRateLimitState,
   loadMonobankFixtureSet,
+  MonobankApiError,
+  MonobankValidationError,
   type MonobankAdapter,
   type MonobankClientInfo,
   type MonobankFixtureSet,
   type MonobankPersonalWebhookEvent,
+  type MonobankRateLimitState,
   type MonobankStatementItem,
 } from "../monobank/index.js";
 import { createSqliteLedgerDb, type SqliteLedgerDb } from "../sqlite/index.js";
@@ -183,6 +185,11 @@ export interface LocalApiMonobankClientInfoSummary {
   masked: true;
 }
 
+export interface LocalApiAppConfigSyncState {
+  lastSyncedAt?: string;
+  nextSyncAllowedAt?: number;
+}
+
 export interface LocalApiAppConfig {
   profile: string;
   source: LedgerSource;
@@ -191,6 +198,7 @@ export interface LocalApiAppConfig {
   localOnly: true;
   webhook: LocalApiWebhookSettings;
   token: LocalApiMonobankTokenStatus;
+  sync: LocalApiAppConfigSyncState;
 }
 
 export interface LocalApiFixtureSummary {
@@ -338,6 +346,7 @@ const appConfigResponseSchema = {
     "localOnly",
     "webhook",
     "token",
+    "sync",
   ],
   properties: {
     profile: { type: "string" },
@@ -370,6 +379,13 @@ const appConfigResponseSchema = {
         fallbackReason: {
           enum: ["secure_storage_unavailable", "secure_storage_write_failed"],
         },
+      },
+    },
+    sync: {
+      type: "object",
+      properties: {
+        lastSyncedAt: { type: "string" },
+        nextSyncAllowedAt: { type: "number" },
       },
     },
   },
@@ -1056,6 +1072,7 @@ async function createServices(
   source: LedgerSource,
   monobankToken: string | undefined,
   monobankBaseUrl: string | undefined,
+  monobankRateLimitState: MonobankRateLimitState,
 ): Promise<LocalAppServices> {
   const profile = resolveProfile(options);
   const dataDir = resolveDataDir(options);
@@ -1070,6 +1087,7 @@ async function createServices(
             ...(monobankBaseUrl === undefined
               ? {}
               : { baseUrl: monobankBaseUrl }),
+            rateLimitState: monobankRateLimitState,
           });
   const db = createSqliteLedgerDb({
     filePath: databasePath,
@@ -1883,6 +1901,7 @@ function registerLocalApiRoutes(
     LocalApiWebhookSettings,
     "enabled" | "path"
   >,
+  monobankRateLimitState: MonobankRateLimitState,
 ): void {
   const now = options.now ?? (() => Date.now());
   const webhookRateLimitWindowMs =
@@ -1989,6 +2008,18 @@ function registerLocalApiRoutes(
     const tokenStoreStatus = await getMonobankTokenStoreStatus(
       services.profile,
     );
+    const syncRuns = await services.db.listSyncRuns(services.profile, 1);
+    const lastSuccessfulRun = syncRuns.find((run) => run.status === "success");
+    const lastSyncedAt = lastSuccessfulRun?.startedAt;
+    const nextSyncAllowedAt = monobankRateLimitState.getNextAllowedAt(
+      "personal",
+      Date.now(),
+    );
+    const personalEverCalled =
+      monobankRateLimitState.getNextAllowedAt(
+        "personal",
+        Number.NEGATIVE_INFINITY,
+      ) > Number.NEGATIVE_INFINITY;
 
     return {
       profile: services.profile,
@@ -2005,6 +2036,10 @@ function registerLocalApiRoutes(
         enabled: true,
         path: localWebhookRoutePath,
         ...resolveWebhookSettings(),
+      },
+      sync: {
+        ...(lastSyncedAt !== undefined ? { lastSyncedAt } : {}),
+        ...(personalEverCalled ? { nextSyncAllowedAt } : {}),
       },
     };
   }
@@ -3158,6 +3193,8 @@ export function createLocalApiServer(
   const monobankTokenStore =
     options.monobankTokenStore ?? createDefaultMonobankTokenStore();
   const monobankBaseUrl = resolveMonobankBaseUrl(options);
+  const monobankRateLimitState: MonobankRateLimitState =
+    createMonobankRateLimitState();
   const configuredSource = resolveConfiguredSource(options);
   let source = configuredSource ?? "fixture";
   let storedSettingsLoadPromise: Promise<void> | undefined;
@@ -3269,6 +3306,7 @@ export function createLocalApiServer(
       source,
       monobankToken,
       monobankBaseUrl,
+      monobankRateLimitState,
     );
 
     return servicesPromise;
@@ -3334,6 +3372,7 @@ export function createLocalApiServer(
             ...(options.monobankBaseUrl !== undefined
               ? { baseUrl: options.monobankBaseUrl }
               : {}),
+            rateLimitState: monobankRateLimitState,
           });
 
       try {
@@ -3500,6 +3539,7 @@ export function createLocalApiServer(
     getMonobankTokenStoreStatus,
     localWebhookRoutePath,
     resolveWebhookSettings,
+    monobankRateLimitState,
   );
 
   return {
