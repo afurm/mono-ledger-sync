@@ -4695,16 +4695,17 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       assert.equal(deletedTokenConfig.statusCode, 200);
       assert.equal(deletedTokenConfig.json().token.profile, "demo");
       assert.equal(deletedTokenConfig.json().token.hasToken, false);
+      // After a successful token save, the workspace auto-promotes
+      // to monobank; after a token delete, it auto-demotes to fixture
+      // so a tokenless workspace never references a missing token.
+      assert.equal(deletedTokenConfig.json().source, "fixture");
       assert.equal(
         await monobankTokenStore.getToken("other"),
         "other-profile-token",
       );
-      assert.equal(deletedTokenSync.statusCode, 400);
-      assert.deepEqual(deletedTokenSync.json(), {
-        error: "auth_required",
-        message:
-          "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
-      });
+      // With source=fixture, /api/sync/run now runs against fixture
+      // data instead of returning auth_required.
+      assert.equal(deletedTokenSync.statusCode, 200);
     } finally {
       await server.close();
     }

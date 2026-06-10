@@ -81,7 +81,7 @@ function okClientInfo() {
   };
 }
 
-test("POST /api/app/token probes live client-info before storing the token (happy path)", async () => {
+test("POST /api/app/token probes live client-info, stores the token, and auto-promotes source fixture→monobank (happy path)", async () => {
   const handler = createMonobankMockHttpHandler({
     clientInfo: okClientInfo(),
     currencyRates: [],
@@ -93,7 +93,7 @@ test("POST /api/app/token probes live client-info before storing the token (happ
       const monobankTokenStore = createSessionMonobankTokenStore();
       const server = createLocalApiServer({
         profile: "demo",
-        source: "monobank",
+        source: "fixture",
         dataDir: tempRoot,
         host: "127.0.0.1",
         port: 55701,
@@ -109,6 +109,14 @@ test("POST /api/app/token probes live client-info before storing the token (happ
       });
 
       try {
+        // Confirm the workspace really starts in fixture mode.
+        const beforeConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        assert.equal(beforeConfig.json().source, "fixture");
+        assert.equal(beforeConfig.json().token.hasToken, false);
+
         const saveResponse = await server.inject({
           method: "POST",
           url: "/api/app/token",
@@ -136,12 +144,14 @@ test("POST /api/app/token probes live client-info before storing the token (happ
           "live-good-token",
         );
 
-        // The config endpoint must reflect the saved token.
-        const configResponse = await server.inject({
+        // The workspace source must have been auto-promoted to
+        // monobank, and the token status must be reflected.
+        const afterConfig = await server.inject({
           method: "GET",
           url: "/api/app/config",
         });
-        assert.equal(configResponse.json().token.hasToken, true);
+        assert.equal(afterConfig.json().source, "monobank");
+        assert.equal(afterConfig.json().token.hasToken, true);
       } finally {
         await server.close();
       }
@@ -494,6 +504,201 @@ test("POST /api/app/token masks sensitive fields in the masked clientInfo summar
         assert.doesNotMatch(serialized, /\["6666"\]/);
         // The summary itself is intentionally labeled as masked.
         assert.equal(body.clientInfo.masked, true);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+});
+
+test("DELETE /api/app/token auto-demotes source monobank→fixture so a tokenless workspace never references a missing token", async () => {
+  const handler = createMonobankMockHttpHandler({
+    clientInfo: okClientInfo(),
+    currencyRates: [],
+    statementByAccount: {},
+  });
+
+  await withMockMonobankServer(handler, async (mockBaseUrl) => {
+    await withTempLedger(async ({ tempRoot }) => {
+      const monobankTokenStore = createSessionMonobankTokenStore();
+      await monobankTokenStore.setToken("demo", "pre-existing-token");
+      const server = createLocalApiServer({
+        profile: "demo",
+        source: "monobank",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55707,
+        monobankTokenStore,
+        monobankBaseUrl: mockBaseUrl,
+        validateMonobankTokenOnSave: true,
+        monobankTokenProbeAdapter: createMonobankHttpAdapter({
+          token: "pre-existing-token",
+          baseUrl: mockBaseUrl,
+          maxRetries: 0,
+          timeoutMs: 5000,
+        }),
+      });
+
+      try {
+        const beforeConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        assert.equal(beforeConfig.json().source, "monobank");
+        assert.equal(beforeConfig.json().token.hasToken, true);
+
+        const deleteResponse = await server.inject({
+          method: "DELETE",
+          url: "/api/app/token",
+        });
+        assert.equal(deleteResponse.statusCode, 200);
+        assert.equal(deleteResponse.json().hasToken, false);
+
+        const afterConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        assert.equal(afterConfig.json().source, "fixture");
+        assert.equal(afterConfig.json().token.hasToken, false);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+});
+
+test("POST /api/app/token on a failed probe does NOT change the source", async () => {
+  const rejectingServer = createMonobankMockServer(
+    async (request, response) => {
+      const requestUrl = new URL(request.url, "http://127.0.0.1");
+      if (requestUrl.pathname === "/personal/client-info") {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ errorDescription: "Invalid token" }));
+        return;
+      }
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end('{"message":"not found"}');
+    },
+  );
+
+  try {
+    const baseUrl = await rejectingServer.listen();
+
+    await withTempLedger(async ({ tempRoot }) => {
+      const monobankTokenStore = createSessionMonobankTokenStore();
+      const server = createLocalApiServer({
+        profile: "demo",
+        source: "fixture",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55708,
+        monobankTokenStore,
+        monobankBaseUrl: baseUrl,
+        validateMonobankTokenOnSave: true,
+        monobankTokenProbeAdapter: createMonobankHttpAdapter({
+          token: "rejected-token",
+          baseUrl,
+          maxRetries: 0,
+          timeoutMs: 5000,
+        }),
+      });
+
+      try {
+        const saveResponse = await server.inject({
+          method: "POST",
+          url: "/api/app/token",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profile: "demo",
+            token: "rejected-token",
+          }),
+        });
+        assert.equal(saveResponse.statusCode, 400);
+
+        const afterConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        // Source must stay fixture — a failed probe does NOT promote.
+        assert.equal(afterConfig.json().source, "fixture");
+        assert.equal(afterConfig.json().token.hasToken, false);
+        assert.equal(await monobankTokenStore.getToken("demo"), undefined);
+      } finally {
+        await server.close();
+      }
+    });
+  } finally {
+    await rejectingServer.close();
+  }
+});
+
+test("explicit POST /api/app/source is respected; later token save keeps the explicit source", async () => {
+  const handler = createMonobankMockHttpHandler({
+    clientInfo: okClientInfo(),
+    currencyRates: [],
+    statementByAccount: {},
+  });
+
+  await withMockMonobankServer(handler, async (mockBaseUrl) => {
+    await withTempLedger(async ({ tempRoot }) => {
+      const monobankTokenStore = createSessionMonobankTokenStore();
+      const server = createLocalApiServer({
+        profile: "demo",
+        source: "monobank",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55709,
+        monobankTokenStore,
+        monobankBaseUrl: mockBaseUrl,
+        validateMonobankTokenOnSave: true,
+        monobankTokenProbeAdapter: createMonobankHttpAdapter({
+          token: "stay-monobank-token",
+          baseUrl: mockBaseUrl,
+          maxRetries: 0,
+          timeoutMs: 5000,
+        }),
+      });
+
+      try {
+        // The source is already monobank; a save should leave it.
+        const saveResponse = await server.inject({
+          method: "POST",
+          url: "/api/app/token",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profile: "demo",
+            token: "stay-monobank-token",
+          }),
+        });
+        assert.equal(saveResponse.statusCode, 200);
+
+        const afterConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        assert.equal(afterConfig.json().source, "monobank");
+        assert.equal(afterConfig.json().token.hasToken, true);
+
+        // An explicit source switch to fixture demotes without
+        // touching the saved token — the user might want to keep
+        // the token for later while browsing fixture data.
+        const switchResponse = await server.inject({
+          method: "POST",
+          url: "/api/app/source",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source: "fixture" }),
+        });
+        assert.equal(switchResponse.statusCode, 200);
+        assert.equal(switchResponse.json().source, "fixture");
+
+        const stillTokenConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        assert.equal(stillTokenConfig.json().source, "fixture");
+        // Token is still saved — only an explicit DELETE should
+        // remove it.
+        assert.equal(stillTokenConfig.json().token.hasToken, true);
       } finally {
         await server.close();
       }
