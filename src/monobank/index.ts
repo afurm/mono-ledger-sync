@@ -59,6 +59,24 @@ export interface MonobankFixtureLoaderOptions {
   fixturesDir?: string;
 }
 
+export interface MonobankRateLimitState {
+  recordRequest(key: "personal" | "bank", atMs: number): void;
+  getNextAllowedAt(key: "personal" | "bank", nowMs: number): number;
+}
+
+export function createMonobankRateLimitState(): MonobankRateLimitState {
+  const nextRequestAt = new Map<"personal" | "bank", number>();
+
+  return {
+    recordRequest(key, atMs) {
+      nextRequestAt.set(key, atMs);
+    },
+    getNextAllowedAt(key, nowMs) {
+      return nextRequestAt.get(key) ?? nowMs;
+    },
+  };
+}
+
 export interface MonobankHttpAdapterOptions {
   token: string;
   baseUrl?: string;
@@ -68,6 +86,7 @@ export interface MonobankHttpAdapterOptions {
   userAgent?: string;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  rateLimitState?: MonobankRateLimitState;
 }
 
 export const bundledMonobankFixturesDir = fileURLToPath(
@@ -599,7 +618,12 @@ export function createMonobankHttpAdapter(
   const userAgent = options.userAgent ?? "mono-ledger-sync";
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? defaultSleep;
-  const nextRequestAt = new Map<string, number>();
+  const rateLimitState =
+    options.rateLimitState ?? createMonobankRateLimitState();
+  // The waitMs calculation still needs the same Map the state uses, so
+  // we re-read the latest allowed-at each time rather than caching.
+  // (The state is the single source of truth; this closure just
+  // dispatches reads to it.)
 
   if (!token) {
     throw new MonobankValidationError("token", "a non-empty string");
@@ -607,7 +631,7 @@ export function createMonobankHttpAdapter(
 
   async function waitForRateLimit(endpoint: string): Promise<void> {
     const key = rateLimitKey(endpoint);
-    const scheduledAt = nextRequestAt.get(key) ?? 0;
+    const scheduledAt = rateLimitState.getNextAllowedAt(key, now());
     const waitMs = scheduledAt - now();
 
     if (waitMs > 0) {
@@ -615,7 +639,7 @@ export function createMonobankHttpAdapter(
     }
 
     if (key === "personal") {
-      nextRequestAt.set(key, now() + 60_000);
+      rateLimitState.recordRequest(key, now() + 60_000);
     }
   }
 
