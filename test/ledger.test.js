@@ -4575,6 +4575,7 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       host: "127.0.0.1",
       port: 55666,
       monobankTokenStore,
+      validateMonobankTokenOnSave: false,
     });
 
     try {
@@ -4731,6 +4732,7 @@ test("local API supports legacy custom monobank token stores without status meta
       host: "127.0.0.1",
       port: 55667,
       monobankTokenStore,
+      validateMonobankTokenOnSave: false,
     });
 
     try {
@@ -4794,6 +4796,7 @@ test("local API loads saved monobank token from token store", async () => {
       host: "127.0.0.1",
       port: 55667,
       monobankTokenStore,
+      validateMonobankTokenOnSave: false,
     });
 
     try {
@@ -4832,6 +4835,7 @@ test("local API loads saved monobank token from token store", async () => {
         host: "127.0.0.1",
         port: 55668,
         monobankTokenStore,
+        validateMonobankTokenOnSave: false,
       });
 
       const configResponse = await secondServer.inject({
