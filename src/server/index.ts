@@ -26,6 +26,7 @@ import {
 import { DomainError } from "../domain/index.js";
 import {
   assertMonobankPersonalWebhookEvent,
+  MonobankApiError,
   MonobankValidationError,
   createBundledFixtureMonobankAdapter,
   createMonobankHttpAdapter,
@@ -112,6 +113,8 @@ export interface LocalApiServerOptions {
   monobankToken?: string;
   monobankBaseUrl?: string;
   monobankTokenStore?: MonobankTokenStore;
+  monobankTokenProbeAdapter?: MonobankAdapter;
+  validateMonobankTokenOnSave?: boolean;
   now?: () => number;
   webhookRateLimitMaxRequests?: number;
   webhookRateLimitWindowMs?: number;
@@ -169,6 +172,15 @@ interface LocalApiMonobankTokenStatus {
   storage: MonobankTokenStoreStorage;
   persistence: MonobankTokenStorePersistence;
   fallbackReason?: MonobankTokenStoreFallbackReason;
+  clientInfo?: LocalApiMonobankClientInfoSummary;
+}
+
+export interface LocalApiMonobankClientInfoSummary {
+  clientId: string;
+  name: string;
+  accounts: number;
+  jars: number;
+  masked: true;
 }
 
 export interface LocalApiAppConfig {
@@ -392,6 +404,17 @@ const monobankTokenResponseSchema = {
     persistence: { enum: ["persistent", "session"] },
     fallbackReason: {
       enum: ["secure_storage_unavailable", "secure_storage_write_failed"],
+    },
+    clientInfo: {
+      type: "object",
+      required: ["clientId", "name", "accounts", "jars", "masked"],
+      properties: {
+        clientId: { type: "string" },
+        name: { type: "string" },
+        accounts: { type: "number" },
+        jars: { type: "number" },
+        masked: { const: true },
+      },
     },
   },
 } as const;
@@ -733,6 +756,7 @@ const localApiErrorResponseSchema = {
   properties: {
     error: { type: "string" },
     message: { type: "string" },
+    upstreamStatus: { type: "number" },
   },
 } as const;
 
@@ -2139,7 +2163,14 @@ function registerLocalApiRoutes(
         };
       }
 
-      return saveMonobankToken(token, profile);
+      const result = await saveMonobankToken(token, profile);
+
+      if ("error" in result) {
+        reply.code(400);
+        return result;
+      }
+
+      return result;
     },
   );
 
@@ -3286,7 +3317,109 @@ export function createLocalApiServer(
   async function saveMonobankToken(
     token: string,
     profile: string,
-  ): Promise<LocalApiMonobankTokenStatus> {
+  ): Promise<
+    LocalApiMonobankTokenStatus & {
+      clientInfo?: LocalApiMonobankClientInfoSummary;
+      error?: string;
+      message?: string;
+      upstreamStatus?: number;
+    }
+  > {
+    if (options.validateMonobankTokenOnSave !== false) {
+      const probe = options.monobankTokenProbeAdapter
+        ? options.monobankTokenProbeAdapter
+        : createMonobankHttpAdapter({
+            token,
+            ...(options.monobankBaseUrl !== undefined
+              ? { baseUrl: options.monobankBaseUrl }
+              : {}),
+          });
+
+      try {
+        const clientInfo = await probe.getClientInfo();
+        const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
+        const storage = tokenStoreStatus.storage;
+        const persistence = tokenStoreStatus.persistence;
+        const fallbackReason = tokenStoreStatus.fallbackReason;
+        const status: LocalApiMonobankTokenStatus & {
+          clientInfo: LocalApiMonobankClientInfoSummary;
+        } = {
+          profile,
+          hasToken: false,
+          storage,
+          persistence,
+          ...(fallbackReason !== undefined ? { fallbackReason } : {}),
+          clientInfo: {
+            clientId: clientInfo.clientId,
+            name: clientInfo.name,
+            accounts: clientInfo.accounts.length,
+            jars: clientInfo.jars?.length ?? 0,
+            masked: true,
+          },
+        };
+
+        await monobankTokenStore.setToken(profile, token);
+        monobankToken = token;
+        monobankTokenSource = "store";
+        await rebuildServices();
+
+        logStructured(
+          "info",
+          "Monobank token saved after live client-info probe.",
+          {
+            profile,
+            accountCount: clientInfo.accounts.length,
+            jarCount: clientInfo.jars?.length ?? 0,
+            clientId: clientInfo.clientId,
+          },
+          {
+            secrets: [token],
+            ...(options.logSink !== undefined
+              ? { logger: options.logSink }
+              : {}),
+          },
+        );
+
+        return { ...status, hasToken: true };
+      } catch (error) {
+        const upstreamStatus =
+          error instanceof MonobankApiError
+            ? error.response.statusCode
+            : undefined;
+        const upstreamMessage =
+          error instanceof MonobankApiError
+            ? error.response.message
+            : error instanceof Error
+              ? error.message
+              : "Monobank personal API probe failed.";
+
+        logStructured(
+          "warn",
+          "Monobank token was not saved because the live client-info probe failed.",
+          {
+            profile,
+            ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+          },
+          {
+            secrets: [token],
+            ...(options.logSink !== undefined
+              ? { logger: options.logSink }
+              : {}),
+          },
+        );
+
+        return {
+          profile,
+          hasToken: false,
+          storage: "session",
+          persistence: "session",
+          error: "monobank_token_invalid",
+          message: upstreamMessage,
+          ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+        };
+      }
+    }
+
     await monobankTokenStore.setToken(profile, token);
     monobankToken = token;
     monobankTokenSource = "store";
