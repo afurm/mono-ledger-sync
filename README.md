@@ -10,9 +10,15 @@ Local-first TypeScript app for syncing Monobank transactions into a private pers
 
 ## Status
 
-This package now includes a fixture-first local ledger loop: a Fastify local app, SQLite-backed storage, fixture sync, a typed Monobank HTTP adapter, ledger queries, webhook hint recording, CSV/JSON exports, and a compact browser UI. Fixture mode is the default so the app works without network access or banking credentials.
+This package ships a local-first Monobank personal finance workspace: a Fastify local app, SQLite-backed storage, a typed Monobank HTTP adapter, ledger queries, webhook hint recording, CSV/JSON exports, and a compact browser UI. The product talks to the real Monobank personal API at `https://api.monobank.ua` for a real user session. Sanitized JSON fixtures exist only to drive offline development, tests, and contributor onboarding; they are never used to render data for a real user.
 
-Live Monobank sync is available through the same adapter boundary when `MONOBANK_TOKEN` is present. The first production hardening pass should still focus on secure token storage, richer category rules, and packaged Vite UI assets.
+## Live by default
+
+For a real user, every account, jar, statement, currency rate, and webhook comes from that user's own Monobank account via the personal API. The first-run flow leads with **Sign in with Monobank**: open `https://api.monobank.ua/` to create a personal API token, paste it into the local app, and the local Fastify server validates the token with a live `GET /personal/client-info` before saving it. The product never sends the token to any server controlled by this project.
+
+The Monobank personal API is for the user's own data on their own machine. Do not use this project as a hosted, team, or business service for other people's banking data.
+
+`MONOBANK_TOKEN` is a CI-only escape hatch. It exists so the opt-in live smoke test (`npm run test:live-monobank`, gated by `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1`) can call the real bank without going through the in-app paste-token flow. It is not part of the user-facing product flow and should not be set in a normal local dev shell.
 
 ## Goals
 
@@ -43,11 +49,7 @@ Export presets are available through the local API and browser UI for
 deterministic for the same database state and filters so users can diff or
 version their own local data.
 
-For live personal Monobank sync, keep the token in the environment for the current shell session:
-
-```sh
-MONOBANK_TOKEN=... MONO_LEDGER_SYNC_SOURCE=monobank npm run dev
-```
+The in-app sign-in flow is the supported way to start syncing a real Monobank account: open `http://127.0.0.1:3000`, paste a personal API token from `https://api.monobank.ua/`, and the local server validates it before saving. `MONOBANK_TOKEN` is for the opt-in live smoke test only — see **Live by default** above.
 
 ## Library API
 
@@ -122,10 +124,14 @@ npm run coverage
 npm run format
 ```
 
-`npm run dev` starts the local Fastify app server against sanitized fixture data
-on `http://127.0.0.1:3000`. The app exposes the browser UI at `/`, health and
-configuration endpoints, fixture endpoints, ledger summary/account/transaction
-endpoints, sync run endpoints, webhook hint ingestion, and CSV/JSON/JSONL exports.
+`npm run dev` starts the local Fastify app server on `http://127.0.0.1:3000`.
+The app exposes the browser UI at `/`, health and configuration endpoints,
+ledger summary/account/transaction endpoints, sync run endpoints, webhook
+hint ingestion, and CSV/JSON/JSONL exports. The default product path is
+live — the local server talks to `https://api.monobank.ua` once a personal
+API token is saved in the in-app sign-in flow. Sanitized fixture endpoints
+remain available for development; pass `MONO_LEDGER_SYNC_SOURCE=fixture npm
+run dev` to skip live calls.
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
 Use `npm run web:dev` when working on the Vite UI; it starts the same local API
 server and proxies browser requests through `http://127.0.0.1:5173`.
@@ -133,7 +139,7 @@ server and proxies browser requests through `http://127.0.0.1:5173`.
 `npm run test:live-monobank` is an opt-in smoke test for the real Monobank
 adapter. It skips unless `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1` and
 `MONOBANK_TOKEN` are set, so default local and pull-request validation never
-calls the live API.
+calls the live API. This is the only supported use of `MONOBANK_TOKEN`.
 
 The local API token endpoint stores saved Monobank tokens through the default
 token store. Linux uses Secret Service when available. macOS and Windows keep
