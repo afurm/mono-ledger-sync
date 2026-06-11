@@ -6,6 +6,9 @@ import type {
   CashflowReport,
   CashflowReportCurrencyTotal,
   CashflowReportPoint,
+  CategoryTrendReport,
+  CategoryTrendReportCategory,
+  CategoryTrendReportPoint,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -75,6 +78,10 @@ export interface LedgerBudgetQueryService {
 
 export interface LedgerReportQueryService {
   getCashflowReport(profile?: string, months?: number): Promise<CashflowReport>;
+  getCategoryTrendReport(
+    profile?: string,
+    months?: number,
+  ): Promise<CategoryTrendReport>;
   getMonthlySpendingReport(
     profile?: string,
     month?: string,
@@ -802,6 +809,24 @@ function readCashflowReportMonths(months: number | undefined): number {
   return normalizedMonths;
 }
 
+function readCategoryTrendReportMonths(months: number | undefined): number {
+  if (months === undefined) {
+    return DEFAULT_CASHFLOW_REPORT_MONTHS;
+  }
+
+  if (!Number.isFinite(months)) {
+    throw new Error("Category trend report months must be a finite number.");
+  }
+
+  const normalizedMonths = Math.trunc(months);
+
+  if (normalizedMonths < 1 || normalizedMonths > MAX_CASHFLOW_REPORT_MONTHS) {
+    throw new Error("Category trend report months must be between 1 and 24.");
+  }
+
+  return normalizedMonths;
+}
+
 function isTransferLikeEntry(entry: LedgerEntry): boolean {
   if (entry.categoryId === TRANSFER_CATEGORY_ID) {
     return true;
@@ -882,7 +907,7 @@ function sharePercentage(amount: number, total: number): number {
   return Math.round((amount / total) * 10_000) / 100;
 }
 
-async function resolveCashflowReportPeriod(
+async function resolveTrailingMonthReportPeriod(
   db: SqliteLedgerDb,
   profile: string,
   months: number,
@@ -950,7 +975,7 @@ async function buildCashflowReport(
   monthsInput: number | undefined,
 ): Promise<CashflowReport> {
   const months = readCashflowReportMonths(monthsInput);
-  const period = await resolveCashflowReportPeriod(db, profile, months);
+  const period = await resolveTrailingMonthReportPeriod(db, profile, months);
   const from = startOfLocalDateEpoch(period.from);
   const to = endOfLocalDateEpoch(period.to);
   const totals = new Map<number, CashflowReportCurrencyTotal>();
@@ -1051,6 +1076,122 @@ async function buildCashflowReport(
     transactionCount,
     currencies: sortedTotals.map((row) => row.currencyCode),
     totals: sortedTotals,
+    points: sortedPoints,
+  };
+}
+
+async function buildCategoryTrendReport(
+  db: SqliteLedgerDb,
+  profile: string,
+  monthsInput: number | undefined,
+): Promise<CategoryTrendReport> {
+  const months = readCategoryTrendReportMonths(monthsInput);
+  const period = await resolveTrailingMonthReportPeriod(db, profile, months);
+  const from = startOfLocalDateEpoch(period.from);
+  const to = endOfLocalDateEpoch(period.to);
+  const categories = new Map<string, CategoryTrendReportCategory>();
+  const points = new Map<string, CategoryTrendReportPoint>();
+  let offset = 0;
+  let totalExpenses = 0;
+  let transactionCount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      from,
+      to,
+      amountMax: -1,
+      limit: CASHFLOW_REPORT_TRANSACTION_PAGE_SIZE,
+      offset,
+      sortBy: "time",
+      sortDirection: "asc",
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    for (const entry of page.entries) {
+      const amount = Math.abs(entry.amount);
+      const month = localMonthKey(new Date(entry.time * 1000));
+      const monthPeriod = readReportMonth(month);
+      const category = monthlyReportCategory(entry);
+      const categoryKey = `${category.categoryId}:${entry.currencyCode}`;
+      const pointKey = `${month}:${category.categoryId}:${entry.currencyCode}`;
+      const categoryTotal = categories.get(categoryKey) ?? {
+        categoryId: category.categoryId,
+        categoryName: category.categoryName,
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+        averageMonthlyAmount: 0,
+      };
+      const point = points.get(pointKey) ?? {
+        month,
+        from: monthPeriod.periodStart,
+        to: monthPeriod.periodEnd,
+        categoryId: category.categoryId,
+        categoryName: category.categoryName,
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+      };
+
+      totalExpenses += amount;
+      transactionCount += 1;
+      categoryTotal.amount += amount;
+      categoryTotal.transactionCount += 1;
+      point.amount += amount;
+      point.transactionCount += 1;
+      categories.set(categoryKey, categoryTotal);
+      points.set(pointKey, point);
+    }
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  const sortedCategories = [...categories.values()]
+    .map((row): CategoryTrendReportCategory => {
+      return {
+        ...row,
+        averageMonthlyAmount: averageMinorAmount(row.amount, months),
+      };
+    })
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.categoryName.localeCompare(right.categoryName);
+    });
+  const sortedPoints = [...points.values()].sort((left, right) => {
+    const monthDiff = left.month.localeCompare(right.month);
+
+    if (monthDiff !== 0) {
+      return monthDiff;
+    }
+
+    if (right.amount !== left.amount) {
+      return right.amount - left.amount;
+    }
+
+    return left.categoryName.localeCompare(right.categoryName);
+  });
+
+  return {
+    profile,
+    from: period.from,
+    to: period.to,
+    months,
+    generatedAt: new Date().toISOString(),
+    totalExpenses,
+    transactionCount,
+    currencies: [...new Set(sortedCategories.map((row) => row.currencyCode))],
+    categories: sortedCategories,
     points: sortedPoints,
   };
 }
@@ -2082,6 +2223,13 @@ export function createLedgerQueryService({
         months,
       );
     },
+    getCategoryTrendReport(profile, months) {
+      return buildCategoryTrendReport(
+        db,
+        coerceProfile(profile, defaultProfile),
+        months,
+      );
+    },
     getMonthlySpendingReport(profile, month) {
       return buildMonthlySpendingReport(
         db,
@@ -2175,6 +2323,7 @@ export function createLedgerQueryServices(
     },
     reports: {
       getCashflowReport: query.getCashflowReport,
+      getCategoryTrendReport: query.getCategoryTrendReport,
       getMonthlySpendingReport: query.getMonthlySpendingReport,
     },
     recurringItems: {

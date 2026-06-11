@@ -4052,6 +4052,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/reports/cashflow?months=25",
       });
+      const categoryTrendReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/category-trends",
+      });
+      const invalidCategoryTrendReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/category-trends?months=25",
+      });
       const emptyMonthlySpendingReportResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/reports/monthly-spending?month=2026-05",
@@ -4322,6 +4330,31 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(
         invalidCashflowReportResponse.json().error,
         "invalid_cashflow_report_query",
+      );
+      assert.equal(categoryTrendReportResponse.statusCode, 200);
+      assert.equal(categoryTrendReportResponse.json().months, 6);
+      assert.equal(categoryTrendReportResponse.json().totalExpenses, 408650);
+      assert.deepEqual(
+        categoryTrendReportResponse
+          .json()
+          .categories.map((row) => [
+            row.categoryId,
+            row.currencyCode,
+            row.amount,
+            row.averageMonthlyAmount,
+          ]),
+        [
+          ["transfers", 980, 250000, 41667],
+          ["groceries", 980, 84250, 14042],
+          ["subscriptions", 840, 52900, 8817],
+          ["travel", 978, 20000, 3333],
+          ["transport", 980, 1500, 250],
+        ],
+      );
+      assert.equal(invalidCategoryTrendReportResponse.statusCode, 400);
+      assert.equal(
+        invalidCategoryTrendReportResponse.json().error,
+        "invalid_category_trend_report_query",
       );
       assert.deepEqual(
         monthlySpendingReportResponse

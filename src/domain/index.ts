@@ -381,6 +381,39 @@ export interface CashflowReport {
   points: readonly CashflowReportPoint[];
 }
 
+export interface CategoryTrendReportPoint {
+  month: string;
+  from: string;
+  to: string;
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
+export interface CategoryTrendReportCategory {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  averageMonthlyAmount: number;
+}
+
+export interface CategoryTrendReport {
+  profile: string;
+  from: string;
+  to: string;
+  months: number;
+  generatedAt: string;
+  totalExpenses: number;
+  transactionCount: number;
+  currencies: readonly number[];
+  categories: readonly CategoryTrendReportCategory[];
+  points: readonly CategoryTrendReportPoint[];
+}
+
 export interface BudgetProgress {
   id: string;
   budgetId: string;
