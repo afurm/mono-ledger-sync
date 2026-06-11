@@ -166,6 +166,11 @@ import {
 } from "./review";
 import { type SyncRunSummaryStats, summarizeSyncRuns } from "./sync-summary";
 import {
+  type FirstRunEmptyStateView,
+  buildFirstRunEmptyStateView,
+  shouldShowFirstRunSignInPrompt,
+} from "./empty-state";
+import {
   type FirstRunSignInCardView,
   buildFirstRunSignInCardView,
 } from "./signin-card";
@@ -5524,6 +5529,61 @@ function maskTokenPreview(value: string): string {
   return `•••• ${normalized.slice(-4)}`;
 }
 
+function FirstRunEmptyStatePrompt({
+  view,
+  onOpenSettings,
+}: {
+  view: FirstRunEmptyStateView;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <Card data-testid="empty-state-signin-prompt">
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="grid gap-1">
+            <CardTitle className="flex items-center gap-2">
+              <KeyRoundIcon
+                aria-hidden="true"
+                className="size-4 text-primary"
+              />
+              <span data-testid="empty-state-signin-heading">
+                {view.heading}
+              </span>
+            </CardTitle>
+            <CardDescription>{view.description}</CardDescription>
+          </div>
+          <Badge variant="outline">{view.profile}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="outline">
+            <a
+              href={view.getTokenHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="empty-state-get-token"
+            >
+              <ExternalLinkIcon data-icon="inline-start" />
+              {view.getTokenLabel}
+            </a>
+          </Button>
+          <Button
+            size="sm"
+            variant="default"
+            type="button"
+            onClick={onOpenSettings}
+            data-testid="empty-state-open-settings"
+          >
+            {view.openSettingsLabel}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{view.fixtureHint}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function FirstRunSignInCard({
   token,
   profile,
@@ -7647,6 +7707,21 @@ function RouteContent({
 }) {
   if (loading && !snapshot) {
     return <RouteLoadingSkeleton routeId={activeRoute} />;
+  }
+
+  if (snapshot && shouldShowFirstRunSignInPrompt(activeRoute, snapshot)) {
+    const view = buildFirstRunEmptyStateView(
+      activeRoute,
+      snapshot.config.token,
+    );
+    return (
+      <div className="flex flex-col gap-4" data-testid="route-content-wrapper">
+        <FirstRunEmptyStatePrompt
+          view={view}
+          onOpenSettings={() => onRouteChange("settings")}
+        />
+      </div>
+    );
   }
 
   switch (activeRoute) {
