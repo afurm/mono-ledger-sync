@@ -221,6 +221,7 @@ test("rules UI keeps current rule previews and conflicts aligned", async () => {
 test("web client caches local snapshots for offline browsing", async () => {
   const apiSource = await readFile("src/web/api.ts", "utf8");
   const appSource = await readFile("src/web/App.tsx", "utf8");
+  const navigationSource = await readFile("src/web/navigation.ts", "utf8");
 
   assert.match(apiSource, /LOCAL_APP_SNAPSHOT_CACHE_PREFIX/);
   assert.match(apiSource, /LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY/);
@@ -313,6 +314,16 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Merchant trend report/);
   assert.match(appSource, /convertedReportTotalLabel/);
   assert.match(appSource, /Monthly spending report/);
+  assert.match(navigationSource, /id: "categories"/);
+  assert.match(navigationSource, /id: "budgets"/);
+  assert.match(navigationSource, /id: "recurring"/);
+  assert.match(navigationSource, /id: "reports"/);
+  assert.match(appSource, /function CategoriesRoute/);
+  assert.match(appSource, /function BudgetsRoute/);
+  assert.match(appSource, /function RecurringRoute/);
+  assert.match(appSource, /function ReportsRoute/);
+  assert.match(appSource, /function ExportsRoute/);
+  assert.match(appSource, /case "exports":\s*return <ExportsRoute/);
   assert.match(appSource, /Spending by category/);
   assert.match(appSource, /Missed recurring payments/);
   assert.match(appSource, /Subscription increase alerts/);
