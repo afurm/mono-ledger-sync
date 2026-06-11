@@ -493,7 +493,7 @@ test("keeps finance workspace typography compact", async () => {
   assert.deepEqual(largeTypographyLines, [
     '<p className="text-xl font-semibold tabular-nums">{value}</p>',
     '<CardTitle className="text-xl tabular-nums">{value}</CardTitle>',
-    '<span className="text-xl font-semibold tabular-nums text-foreground">',
+    "className={`text-xl font-semibold tabular-nums ${amountSemanticTextClassName(entry.amount)}`}",
   ]);
   assert.match(appSource, /<h1 className="truncate text-lg font-semibold">/);
   assert.doesNotMatch(appSource, /\btext-[2-9]xl\b/);
@@ -567,6 +567,34 @@ test("keeps screen colors on semantic tokens", async () => {
   assert.match(badgeSource, /success:/);
   assert.match(badgeSource, /cashback:/);
   assert.match(badgeSource, /transport:/);
+});
+
+test("keeps income and expense color semantics aligned", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const stylesSource = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(stylesSource, /--income:/);
+  assert.match(stylesSource, /--income-foreground:/);
+  assert.match(stylesSource, /--expense:/);
+  assert.match(stylesSource, /--expense-foreground:/);
+  assert.match(stylesSource, /--color-income: var\(--income\)/);
+  assert.match(stylesSource, /--color-expense: var\(--expense\)/);
+  assert.match(appSource, /function amountSemanticTextClassName/);
+  assert.match(appSource, /return "text-income-foreground"/);
+  assert.match(appSource, /return "text-expense-foreground"/);
+  assert.match(appSource, /amountSemanticTextClassName\(entry\.amount\)/);
+  assert.match(appSource, /amountSemanticTextClassName\(monthToDate\.net\)/);
+  assert.match(appSource, /bg-income/);
+  assert.match(appSource, /bg-expense/);
+  assert.match(
+    appSource,
+    /text-income-foreground[\s\S]*formatMinorAmount\(total\.income/,
+  );
+  assert.match(
+    appSource,
+    /text-expense-foreground[\s\S]*formatMinorAmount\(total\.expenses/,
+  );
+  assert.doesNotMatch(appSource, /row\.expenses[\s\S]{0,240}bg-warning/);
 });
 
 test("documents the minimum local product flow", async () => {
