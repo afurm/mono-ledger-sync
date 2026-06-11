@@ -141,8 +141,10 @@ import {
   type LocalAppSnapshot,
   type SyncRun,
   type WebhookEvent,
+  confirmRecurringDetection,
   deleteMonthlyCategoryBudget,
   createMonthlyCategoryBudget,
+  ignoreRecurringDetection,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   clearMonobankToken,
@@ -4220,6 +4222,138 @@ function SubscriptionIncreaseAlertsCard({
   );
 }
 
+function RecurringDetectionCandidatesCard({
+  snapshot,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot;
+  onRefresh: () => Promise<void>;
+}) {
+  const rows = snapshot.recurringDetectionCandidates.slice(0, 6);
+  const [decisionState, setDecisionState] = useState<{
+    candidateId: string;
+    action: "confirm" | "ignore";
+  } | null>(null);
+  const [message, setMessage] = useState<
+    | { state: "idle" }
+    | { state: "saved"; text: string }
+    | { state: "error"; text: string }
+  >({ state: "idle" });
+
+  async function onDecision(
+    candidate: LocalAppSnapshot["recurringDetectionCandidates"][number],
+    action: "confirm" | "ignore",
+  ) {
+    if (decisionState !== null) {
+      return;
+    }
+
+    setDecisionState({ candidateId: candidate.id, action });
+    setMessage({ state: "idle" });
+
+    try {
+      if (action === "confirm") {
+        await confirmRecurringDetection(candidate.id);
+        setMessage({ state: "saved", text: "Recurring schedule confirmed." });
+      } else {
+        await ignoreRecurringDetection(candidate.id);
+        setMessage({ state: "saved", text: "Recurring suggestion ignored." });
+      }
+
+      await onRefresh();
+    } catch (error) {
+      setMessage({
+        state: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Recurring suggestion could not be updated.",
+      });
+    } finally {
+      setDecisionState(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Recurring suggestions</CardTitle>
+        <CardDescription>
+          Detected recurring charges awaiting a decision.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No recurring suggestions found in the current ledger.
+          </p>
+        ) : (
+          rows.map((candidate) => {
+            const isConfirming =
+              decisionState?.candidateId === candidate.id &&
+              decisionState.action === "confirm";
+            const isIgnoring =
+              decisionState?.candidateId === candidate.id &&
+              decisionState.action === "ignore";
+
+            return (
+              <div
+                className="grid gap-3 rounded-md border border-border p-3"
+                key={candidate.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FileClockIcon className="size-4 shrink-0 text-primary" />
+                      <p className="truncate text-sm font-medium">
+                        {candidate.merchantName}
+                      </p>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {candidate.occurrences} occurrences ·{" "}
+                      {candidate.frequency} ·{" "}
+                      {Math.round(candidate.confidence * 100)}% confidence
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-sm font-semibold">
+                    {recurringPaymentAmountLabel(candidate)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    type="button"
+                    disabled={decisionState !== null}
+                    onClick={() => void onDecision(candidate, "confirm")}
+                  >
+                    <CheckCheckIcon />
+                    {isConfirming ? "Confirming" : "Confirm"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    disabled={decisionState !== null}
+                    onClick={() => void onDecision(candidate, "ignore")}
+                  >
+                    <XIcon />
+                    {isIgnoring ? "Ignoring" : "Ignore"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })
+        )}
+        {message.state === "error" ? (
+          <p className="text-sm text-destructive">{message.text}</p>
+        ) : message.state === "saved" ? (
+          <p className="text-sm text-muted-foreground">{message.text}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function MissedRecurringPaymentsCard({
   snapshot,
 }: {
@@ -4968,6 +5102,10 @@ function OverviewRoute({
             onRouteChange={onRouteChange}
           />
           <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />
+          <RecurringDetectionCandidatesCard
+            snapshot={snapshot}
+            onRefresh={onRefresh}
+          />
           <MissedRecurringPaymentsCard snapshot={snapshot} />
           <SubscriptionIncreaseAlertsCard snapshot={snapshot} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />

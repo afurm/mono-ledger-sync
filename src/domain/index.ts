@@ -682,3 +682,21 @@ export interface RecurringDetectionCandidate {
   averageGapDays?: number;
   latestLedgerEntryId: string;
 }
+
+export type RecurringDetectionDecisionAction = "confirmed" | "ignored";
+
+export interface RecurringDetectionDecision {
+  profile: string;
+  candidateId: string;
+  action: RecurringDetectionDecisionAction;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecurringDetectionDecisionResult {
+  profile: string;
+  candidateId: string;
+  action: RecurringDetectionDecisionAction;
+  updatedAt: string;
+  recurringItem?: RecurringItem;
+}

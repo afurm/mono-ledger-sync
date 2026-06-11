@@ -74,6 +74,7 @@ import type {
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
+  RecurringDetectionDecisionResult,
   SubscriptionIncreaseAlert,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
@@ -586,6 +587,20 @@ const recurringDetectionCandidatesResponseSchema = {
     type: "object",
     additionalProperties: true,
   },
+} as const;
+
+const recurringDetectionDecisionParamsSchema = {
+  type: "object",
+  required: ["id"],
+  properties: {
+    id: { type: "string", minLength: 1 },
+  },
+  additionalProperties: false,
+} as const;
+
+const recurringDetectionDecisionResponseSchema = {
+  type: "object",
+  additionalProperties: true,
 } as const;
 
 const recurringCalendarQuerySchema = {
@@ -2735,6 +2750,120 @@ function registerLocalApiRoutes(
       return services.queryService.detectRecurringTransactions(
         services.profile,
       );
+    },
+  );
+
+  app.post(
+    `${localApiRoutePrefix}/ledger/recurring-detections/:id/confirm`,
+    {
+      schema: {
+        params: recurringDetectionDecisionParamsSchema,
+        response: {
+          200: recurringDetectionDecisionResponseSchema,
+          400: localApiErrorResponseSchema,
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | RecurringDetectionDecisionResult
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const params = request.params as { id?: string };
+      const candidateId = params.id?.trim() ?? "";
+
+      try {
+        const services = await getServices();
+
+        return await services.writeService.confirmRecurringDetection(
+          candidateId,
+          services.profile,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Recurring detection candidate could not be confirmed.";
+
+        if (/was not found/.test(message)) {
+          reply.code(404);
+
+          return {
+            error: "recurring_detection_not_found",
+            message,
+          };
+        }
+
+        reply.code(400);
+
+        return {
+          error: "invalid_recurring_detection_decision",
+          message,
+        };
+      }
+    },
+  );
+
+  app.post(
+    `${localApiRoutePrefix}/ledger/recurring-detections/:id/ignore`,
+    {
+      schema: {
+        params: recurringDetectionDecisionParamsSchema,
+        response: {
+          200: recurringDetectionDecisionResponseSchema,
+          400: localApiErrorResponseSchema,
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | RecurringDetectionDecisionResult
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const params = request.params as { id?: string };
+      const candidateId = params.id?.trim() ?? "";
+
+      try {
+        const services = await getServices();
+
+        return await services.writeService.ignoreRecurringDetection(
+          candidateId,
+          services.profile,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Recurring detection candidate could not be ignored.";
+
+        if (/was not found/.test(message)) {
+          reply.code(404);
+
+          return {
+            error: "recurring_detection_not_found",
+            message,
+          };
+        }
+
+        reply.code(400);
+
+        return {
+          error: "invalid_recurring_detection_decision",
+          message,
+        };
+      }
     },
   );
 

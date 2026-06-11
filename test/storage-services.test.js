@@ -2123,20 +2123,23 @@ test("query service detects recurring transaction candidates", async () => {
         db,
         defaultProfile: profile,
       });
+      const writeService = createLedgerWriteService({
+        db,
+        defaultProfile: profile,
+      });
       const candidates = await queryService.detectRecurringTransactions();
       const byMerchant = new Map(
         candidates.map((candidate) => [candidate.merchantName, candidate]),
       );
+      const weeklyCandidate = byMerchant.get("Weekly Stream");
+      const monthlyCandidate = byMerchant.get("Monthly Internet");
 
-      assert.equal(byMerchant.get("Weekly Stream")?.frequency, "weekly");
-      assert.equal(byMerchant.get("Weekly Stream")?.occurrences, 3);
-      assert.equal(byMerchant.get("Weekly Stream")?.expectedAmountMin, 15900);
-      assert.equal(byMerchant.get("Monthly Internet")?.frequency, "monthly");
-      assert.equal(byMerchant.get("Monthly Internet")?.occurrences, 4);
-      assert.equal(
-        byMerchant.get("Monthly Internet")?.expectedAmountMax,
-        43000,
-      );
+      assert.equal(weeklyCandidate?.frequency, "weekly");
+      assert.equal(weeklyCandidate?.occurrences, 3);
+      assert.equal(weeklyCandidate?.expectedAmountMin, 15900);
+      assert.equal(monthlyCandidate?.frequency, "monthly");
+      assert.equal(monthlyCandidate?.occurrences, 4);
+      assert.equal(monthlyCandidate?.expectedAmountMax, 43000);
       assert.equal(byMerchant.get("Annual Insurance")?.frequency, "yearly");
       assert.equal(byMerchant.get("Annual Insurance")?.occurrences, 2);
       assert.equal(byMerchant.get("Irregular Storage")?.frequency, "irregular");
@@ -2147,6 +2150,54 @@ test("query service detects recurring transaction candidates", async () => {
       assert.deepEqual(
         await queryServices.recurringItems.detectRecurringTransactions(),
         candidates,
+      );
+
+      assert.ok(weeklyCandidate);
+      assert.ok(monthlyCandidate);
+
+      const confirmed = await writeService.confirmRecurringDetection(
+        weeklyCandidate.id,
+      );
+
+      assert.equal(confirmed.action, "confirmed");
+      assert.equal(confirmed.candidateId, weeklyCandidate.id);
+      assert.equal(confirmed.recurringItem?.id, weeklyCandidate.id);
+      assert.equal(confirmed.recurringItem?.isActive, true);
+      assert.equal(confirmed.recurringItem?.merchantName, "Weekly Stream");
+      assert.equal(
+        (await queryService.detectRecurringTransactions()).some(
+          (candidate) => candidate.id === weeklyCandidate.id,
+        ),
+        false,
+      );
+
+      const ignored = await writeService.ignoreRecurringDetection(
+        monthlyCandidate.id,
+      );
+
+      assert.equal(ignored.action, "ignored");
+      assert.equal(ignored.candidateId, monthlyCandidate.id);
+
+      const afterDecisions = await queryService.detectRecurringTransactions();
+
+      assert.equal(
+        afterDecisions.some((candidate) => candidate.id === weeklyCandidate.id),
+        false,
+      );
+      assert.equal(
+        afterDecisions.some(
+          (candidate) => candidate.id === monthlyCandidate.id,
+        ),
+        false,
+      );
+      assert.deepEqual(
+        (await db.listRecurringDetectionDecisions(profile))
+          .map((decision) => [decision.candidateId, decision.action])
+          .sort(),
+        [
+          [monthlyCandidate.id, "ignored"],
+          [weeklyCandidate.id, "confirmed"],
+        ].sort(),
       );
     } finally {
       await db.close();
@@ -2322,6 +2373,8 @@ test("ledger services factory returns both query and write surfaces", async () =
         "function",
       );
       assert.equal(typeof services.queries.syncState.listSyncRuns, "function");
+      assert.equal(typeof services.write.confirmRecurringDetection, "function");
+      assert.equal(typeof services.write.ignoreRecurringDetection, "function");
       assert.equal(
         typeof services.write.updateTransactionSplitPlan,
         "function",

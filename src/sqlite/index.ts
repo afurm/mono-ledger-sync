@@ -38,6 +38,8 @@ import type {
   LocalAppSettingsUpdate,
   Merchant,
   MerchantCleanupRule,
+  RecurringDetectionDecision,
+  RecurringDetectionDecisionAction,
   RecurringItem,
   StoredWebhookEvent,
   SyncCursor,
@@ -149,6 +151,19 @@ export interface SqliteLedgerDb extends LedgerDb {
     budgetPeriodId: string,
   ): Promise<boolean>;
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  upsertRecurringItem(
+    profile: string,
+    item: RecurringItem,
+  ): Promise<RecurringItem>;
+  listRecurringDetectionDecisions(
+    profile?: string,
+  ): Promise<readonly RecurringDetectionDecision[]>;
+  recordRecurringDetectionDecision(
+    profile: string,
+    candidateId: string,
+    action: RecurringDetectionDecisionAction,
+    decidedAt?: string,
+  ): Promise<RecurringDetectionDecision>;
   listTags(profile?: string): Promise<readonly Tag[]>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
@@ -401,6 +416,14 @@ interface SqliteRecurringItemRow {
   is_active: number;
   started_at: string | null;
   last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SqliteRecurringDetectionDecisionRow {
+  profile: string;
+  candidate_id: string;
+  action: RecurringDetectionDecisionAction;
   created_at: string;
   updated_at: string;
 }
@@ -1212,6 +1235,24 @@ const migrations: readonly SqliteMigration[] = [
         );
     `,
   },
+  {
+    id: "0019_recurring_detection_decisions",
+    description: "Track recurring detection confirm and ignore decisions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS recurring_detection_decisions (
+        profile TEXT NOT NULL,
+        candidate_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, candidate_id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_recurring_detection_decisions_profile_action
+        ON recurring_detection_decisions(profile, action, updated_at DESC);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1830,6 +1871,18 @@ function mapRecurringItemRow(row: SqliteRecurringItemRow): RecurringItem {
     isActive: row.is_active === 1,
     ...(row.started_at === null ? {} : { startedAt: row.started_at }),
     ...(row.last_seen_at === null ? {} : { lastSeenAt: row.last_seen_at }),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapRecurringDetectionDecisionRow(
+  row: SqliteRecurringDetectionDecisionRow,
+): RecurringDetectionDecision {
+  return {
+    profile: row.profile,
+    candidateId: row.candidate_id,
+    action: row.action,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -2966,6 +3019,209 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteRecurringItemRow[];
 
     return rows.map(mapRecurringItemRow);
+  }
+
+  async upsertRecurringItem(
+    profile: string,
+    item: RecurringItem,
+  ): Promise<RecurringItem> {
+    const normalizedProfile = profile.trim() || this.profile;
+    const itemId = item.id.trim();
+
+    if (!itemId) {
+      throw new Error("Recurring item ID is required.");
+    }
+
+    const timestamp = item.updatedAt || nowIso();
+    const insert = this.#database.prepare(
+      `
+        INSERT INTO recurring_items (
+          profile,
+          id,
+          account_id,
+          category_id,
+          merchant_name,
+          frequency,
+          expected_amount_min,
+          expected_amount_max,
+          is_active,
+          started_at,
+          last_seen_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @accountId,
+          @categoryId,
+          @merchantName,
+          @frequency,
+          @expectedAmountMin,
+          @expectedAmountMax,
+          @isActive,
+          @startedAt,
+          @lastSeenAt,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, id) DO UPDATE SET
+          account_id = excluded.account_id,
+          category_id = excluded.category_id,
+          merchant_name = excluded.merchant_name,
+          frequency = excluded.frequency,
+          expected_amount_min = excluded.expected_amount_min,
+          expected_amount_max = excluded.expected_amount_max,
+          is_active = excluded.is_active,
+          started_at = excluded.started_at,
+          last_seen_at = excluded.last_seen_at,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const select = this.#database.prepare(
+      `
+        SELECT
+          id,
+          profile,
+          account_id,
+          category_id,
+          merchant_name,
+          frequency,
+          expected_amount_min,
+          expected_amount_max,
+          is_active,
+          started_at,
+          last_seen_at,
+          created_at,
+          updated_at
+        FROM recurring_items
+        WHERE profile = ? AND id = ?
+      `,
+    );
+
+    return this.#database.transaction(() => {
+      this.ensureProfileName(normalizedProfile);
+      insert.run({
+        profile: normalizedProfile,
+        id: itemId,
+        accountId: item.accountId,
+        categoryId: item.categoryId ?? null,
+        merchantName: item.merchantName ?? null,
+        frequency: item.frequency,
+        expectedAmountMin: item.expectedAmountMin ?? null,
+        expectedAmountMax: item.expectedAmountMax ?? null,
+        isActive: item.isActive ? 1 : 0,
+        startedAt: item.startedAt ?? null,
+        lastSeenAt: item.lastSeenAt ?? null,
+        createdAt: item.createdAt || timestamp,
+        updatedAt: timestamp,
+      });
+
+      const row = select.get(normalizedProfile, itemId) as
+        | SqliteRecurringItemRow
+        | undefined;
+
+      if (row === undefined) {
+        throw new Error("Recurring item could not be saved.");
+      }
+
+      return mapRecurringItemRow(row);
+    })();
+  }
+
+  async listRecurringDetectionDecisions(
+    profile = this.profile,
+  ): Promise<readonly RecurringDetectionDecision[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            profile,
+            candidate_id,
+            action,
+            created_at,
+            updated_at
+          FROM recurring_detection_decisions
+          WHERE profile = ?
+          ORDER BY updated_at DESC, candidate_id
+        `,
+      )
+      .all(profile) as SqliteRecurringDetectionDecisionRow[];
+
+    return rows.map(mapRecurringDetectionDecisionRow);
+  }
+
+  async recordRecurringDetectionDecision(
+    profile: string,
+    candidateId: string,
+    action: RecurringDetectionDecisionAction,
+    decidedAt = nowIso(),
+  ): Promise<RecurringDetectionDecision> {
+    const normalizedProfile = profile.trim() || this.profile;
+    const normalizedCandidateId = candidateId.trim();
+
+    if (!normalizedCandidateId) {
+      throw new Error("Recurring detection candidate ID is required.");
+    }
+
+    if (action !== "confirmed" && action !== "ignored") {
+      throw new Error("Recurring detection decision action is invalid.");
+    }
+
+    const upsert = this.#database.prepare(
+      `
+        INSERT INTO recurring_detection_decisions (
+          profile,
+          candidate_id,
+          action,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @candidateId,
+          @action,
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, candidate_id) DO UPDATE SET
+          action = excluded.action,
+          updated_at = excluded.updated_at
+      `,
+    );
+    const select = this.#database.prepare(
+      `
+        SELECT
+          profile,
+          candidate_id,
+          action,
+          created_at,
+          updated_at
+        FROM recurring_detection_decisions
+        WHERE profile = ? AND candidate_id = ?
+      `,
+    );
+
+    return this.#database.transaction(() => {
+      this.ensureProfileName(normalizedProfile);
+      upsert.run({
+        profile: normalizedProfile,
+        candidateId: normalizedCandidateId,
+        action,
+        createdAt: decidedAt,
+        updatedAt: decidedAt,
+      });
+
+      const row = select.get(normalizedProfile, normalizedCandidateId) as
+        | SqliteRecurringDetectionDecisionRow
+        | undefined;
+
+      if (row === undefined) {
+        throw new Error("Recurring detection decision could not be saved.");
+      }
+
+      return mapRecurringDetectionDecisionRow(row);
+    })();
   }
 
   async listTags(profile = this.profile): Promise<readonly Tag[]> {
