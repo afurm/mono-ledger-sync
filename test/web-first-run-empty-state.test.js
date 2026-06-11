@@ -72,10 +72,7 @@ function snapshot(overrides) {
 }
 
 test("shows prompt on Overview when no token is saved and source is monobank", () => {
-  assert.equal(
-    shouldShowFirstRunSignInPrompt("overview", snapshot({})),
-    true,
-  );
+  assert.equal(shouldShowFirstRunSignInPrompt("overview", snapshot({})), true);
 });
 
 test("shows prompt on Transactions, Accounts, Rules, Sync, and Exports when no token", () => {
@@ -110,17 +107,17 @@ test("does NOT show prompt when a token is saved", () => {
     false,
   );
   assert.equal(
-    shouldShowFirstRunSignInPrompt("transactions", snapshot({ hasToken: true })),
+    shouldShowFirstRunSignInPrompt(
+      "transactions",
+      snapshot({ hasToken: true }),
+    ),
     false,
   );
 });
 
 test("does NOT show prompt when the source is fixture (developer opt-in)", () => {
   assert.equal(
-    shouldShowFirstRunSignInPrompt(
-      "overview",
-      snapshot({ source: "fixture" }),
-    ),
+    shouldShowFirstRunSignInPrompt("overview", snapshot({ source: "fixture" })),
     false,
   );
   assert.equal(
