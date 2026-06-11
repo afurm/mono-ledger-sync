@@ -65,6 +65,7 @@ import type {
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntrySortDirection,
@@ -789,6 +790,39 @@ const ledgerEntriesBulkEditBodySchema = {
   },
 } as const;
 
+const ledgerEntryCategoryRestoreBodySchema = {
+  type: "object",
+  required: ["entries"],
+  additionalProperties: false,
+  properties: {
+    entries: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      items: {
+        type: "object",
+        required: ["id"],
+        additionalProperties: false,
+        properties: {
+          id: { type: "string", minLength: 1, maxLength: 200 },
+          categoryId: { type: "string", minLength: 1, maxLength: 120 },
+          categoryName: { type: "string", minLength: 1, maxLength: 200 },
+          categorySource: {
+            type: "string",
+            enum: ["system_rule", "user_rule", "manual"],
+          },
+          categoryRuleId: { type: "string", minLength: 1, maxLength: 200 },
+          categoryRuleVersion: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+          },
+        },
+      },
+    },
+  },
+} as const;
+
 const ledgerEntrySplitPlanLineSchema = {
   type: "object",
   required: ["category", "amount"],
@@ -1387,6 +1421,60 @@ function readLedgerEntryBulkEditUpdate(body: unknown): {
   }
 
   return { ids, update };
+}
+
+function isLedgerEntryCategorySource(
+  value: unknown,
+): value is NonNullable<LedgerEntryCategoryRestoreEntry["categorySource"]> {
+  return value === "system_rule" || value === "user_rule" || value === "manual";
+}
+
+function readLedgerEntryCategoryRestoreEntries(
+  body: unknown,
+): readonly LedgerEntryCategoryRestoreEntry[] {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return [];
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (!Array.isArray(record.entries)) {
+    return [];
+  }
+
+  return record.entries
+    .filter((entry): entry is Record<string, unknown> => {
+      return !!entry && typeof entry === "object" && !Array.isArray(entry);
+    })
+    .flatMap((entry) => {
+      if (typeof entry.id !== "string") {
+        return [];
+      }
+
+      const restoreEntry: LedgerEntryCategoryRestoreEntry = { id: entry.id };
+
+      if (typeof entry.categoryId === "string") {
+        restoreEntry.categoryId = entry.categoryId;
+      }
+
+      if (typeof entry.categoryName === "string") {
+        restoreEntry.categoryName = entry.categoryName;
+      }
+
+      if (isLedgerEntryCategorySource(entry.categorySource)) {
+        restoreEntry.categorySource = entry.categorySource;
+      }
+
+      if (typeof entry.categoryRuleId === "string") {
+        restoreEntry.categoryRuleId = entry.categoryRuleId;
+      }
+
+      if (typeof entry.categoryRuleVersion === "string") {
+        restoreEntry.categoryRuleVersion = entry.categoryRuleVersion;
+      }
+
+      return [restoreEntry];
+    });
 }
 
 function readLedgerEntrySplitPlanUpdate(
@@ -3485,6 +3573,30 @@ function registerLocalApiRoutes(
       return services.writeService.updateTransactionsBulk(
         ids,
         update,
+        services.profile,
+      );
+    },
+  );
+
+  app.patch(
+    `${localApiRoutePrefix}/ledger/transactions/category-restore`,
+    {
+      schema: {
+        body: ledgerEntryCategoryRestoreBodySchema,
+        response: {
+          200: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+    },
+    async (request): Promise<readonly LedgerEntry[]> => {
+      const services = await getServices();
+      const entries = readLedgerEntryCategoryRestoreEntries(request.body);
+
+      return services.writeService.restoreTransactionCategories(
+        entries,
         services.profile,
       );
     },

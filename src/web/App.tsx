@@ -130,6 +130,7 @@ import {
   type CategoryRule,
   type LedgerAccount,
   type LedgerEntry,
+  type LedgerEntryCategoryRestoreEntry,
   type LedgerEntryPage,
   type LedgerJar,
   type LedgerTransactionFilters,
@@ -157,6 +158,7 @@ import {
   initializeWorkspace,
   recheckMonobankConnection,
   saveMonobankToken,
+  restoreLedgerTransactionCategories,
   runFixtureSync,
   setMonobankSource,
   updateLedgerTransactionAnnotation,
@@ -8656,6 +8658,55 @@ function RuleHistoryMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+type RuleHistoricalRollbackPlan = {
+  ruleId: string;
+  ruleLabel: string;
+  affectedCount: number;
+  entries: readonly LedgerEntryCategoryRestoreEntry[];
+};
+
+function categoryRestoreEntryFromLedgerEntry(
+  entry: LedgerEntry,
+): LedgerEntryCategoryRestoreEntry {
+  return {
+    id: entry.id,
+    ...(entry.categoryId ? { categoryId: entry.categoryId } : {}),
+    ...(entry.categoryName ? { categoryName: entry.categoryName } : {}),
+    ...(entry.categorySource ? { categorySource: entry.categorySource } : {}),
+    ...(entry.categoryRuleId ? { categoryRuleId: entry.categoryRuleId } : {}),
+    ...(entry.categoryRuleVersion
+      ? { categoryRuleVersion: entry.categoryRuleVersion }
+      : {}),
+  };
+}
+
+function transactionCountLabel(count: number): string {
+  return count === 1 ? "transaction" : "transactions";
+}
+
+function ruleApplyConfirmationMessage(
+  rule: CategoryRuleSummary,
+  affectedCount: number,
+): string {
+  return [
+    `Apply "${rule.label}" to ${affectedCount} loaded ${transactionCountLabel(
+      affectedCount,
+    )}?`,
+    `This rewrites local category assignments to "${rule.label}". You can roll it back from this panel until you change rules or reload the app.`,
+  ].join("\n\n");
+}
+
+function ruleRollbackConfirmationMessage(
+  plan: RuleHistoricalRollbackPlan,
+): string {
+  return [
+    `Roll back "${plan.ruleLabel}" for ${plan.affectedCount} loaded ${transactionCountLabel(
+      plan.affectedCount,
+    )}?`,
+    "This restores the category IDs, labels, sources, and rule metadata captured before the apply.",
+  ].join("\n\n");
+}
+
 function RuleHistoricalPreviewPanel({
   entries,
   onApplied,
@@ -8672,6 +8723,11 @@ function RuleHistoricalPreviewPanel({
   const [applyState, setApplyState] = useState<
     "idle" | "applying" | "applied" | "error"
   >("idle");
+  const [rollbackState, setRollbackState] = useState<
+    "idle" | "rolling-back" | "rolled-back" | "error"
+  >("idle");
+  const [rollbackPlan, setRollbackPlan] =
+    useState<RuleHistoricalRollbackPlan | null>(null);
   const matchedEntries = useMemo(
     () => findRuleHistoricalMatches(entries, rule, rules),
     [entries, rule, rules],
@@ -8680,6 +8736,7 @@ function RuleHistoricalPreviewPanel({
   const previewEntries = matchedEntries.slice(0, 3);
   const applyDisabled =
     applyState === "applying" ||
+    rollbackState === "rolling-back" ||
     mccOnlyPreviewUnavailable ||
     !rule.isEnabled ||
     matchedEntries.length === 0;
@@ -8691,14 +8748,31 @@ function RuleHistoricalPreviewPanel({
 
   useEffect(() => {
     setApplyState("idle");
-  }, [rule.id, matchedEntries.length]);
+    setRollbackState("idle");
+    setRollbackPlan(null);
+  }, [rule.id]);
 
   async function applyPreviewedChanges(): Promise<void> {
     if (applyDisabled) {
       return;
     }
 
+    if (
+      !window.confirm(ruleApplyConfirmationMessage(rule, matchedEntries.length))
+    ) {
+      return;
+    }
+
+    const nextRollbackPlan: RuleHistoricalRollbackPlan = {
+      ruleId: rule.id,
+      ruleLabel: rule.label,
+      affectedCount: matchedEntries.length,
+      entries: matchedEntries.map(categoryRestoreEntryFromLedgerEntry),
+    };
+
     setApplyState("applying");
+    setRollbackState("idle");
+    setRollbackPlan(null);
 
     try {
       await updateLedgerTransactionsBulk({
@@ -8706,9 +8780,32 @@ function RuleHistoricalPreviewPanel({
         categoryId: rule.categoryId,
       });
       await onApplied();
+      setRollbackPlan(nextRollbackPlan);
       setApplyState("applied");
     } catch {
       setApplyState("error");
+    }
+  }
+
+  async function rollbackPreviewedChanges(): Promise<void> {
+    if (rollbackPlan === null || rollbackState === "rolling-back") {
+      return;
+    }
+
+    if (!window.confirm(ruleRollbackConfirmationMessage(rollbackPlan))) {
+      return;
+    }
+
+    setRollbackState("rolling-back");
+
+    try {
+      await restoreLedgerTransactionCategories(rollbackPlan.entries);
+      await onApplied();
+      setRollbackPlan(null);
+      setApplyState("idle");
+      setRollbackState("rolled-back");
+    } catch {
+      setRollbackState("error");
     }
   }
 
@@ -8747,7 +8844,9 @@ function RuleHistoricalPreviewPanel({
             <CheckCircle2Icon />
             <AlertTitle>Previewed changes applied</AlertTitle>
             <AlertDescription>
-              The matched loaded rows were updated to {rule.label}.
+              The matched loaded rows were updated to {rule.label}. Use rollback
+              before changing rules or reloading the app if this preview was too
+              broad.
             </AlertDescription>
           </Alert>
         ) : applyState === "error" ? (
@@ -8756,6 +8855,25 @@ function RuleHistoricalPreviewPanel({
             <AlertTitle>Could not apply previewed changes</AlertTitle>
             <AlertDescription>
               Refresh the local data and try the preview again.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {rollbackState === "rolled-back" ? (
+          <Alert>
+            <CheckCircle2Icon />
+            <AlertTitle>Previewed changes rolled back</AlertTitle>
+            <AlertDescription>
+              The saved category assignments from before the apply were
+              restored.
+            </AlertDescription>
+          </Alert>
+        ) : rollbackState === "error" ? (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertTitle>Could not roll back previewed changes</AlertTitle>
+            <AlertDescription>
+              Refresh the local data and review the affected rows before trying
+              again.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -8832,6 +8950,22 @@ function RuleHistoricalPreviewPanel({
             ? "Applying preview"
             : "Apply previewed changes"}
         </Button>
+        {rollbackPlan !== null && (
+          <Button
+            disabled={rollbackState === "rolling-back"}
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void rollbackPreviewedChanges();
+            }}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            {rollbackState === "rolling-back"
+              ? "Rolling back"
+              : "Roll back apply"}
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );

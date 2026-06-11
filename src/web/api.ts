@@ -621,6 +621,15 @@ export interface LedgerEntryBulkEditUpdate {
   tags?: readonly string[];
 }
 
+export interface LedgerEntryCategoryRestoreEntry {
+  id: string;
+  categoryId?: string;
+  categoryName?: string;
+  categorySource?: "system_rule" | "user_rule" | "manual";
+  categoryRuleId?: string;
+  categoryRuleVersion?: string;
+}
+
 export interface MonthlyCategoryBudgetInput {
   categoryId: string;
   currencyCode?: number;
@@ -1423,6 +1432,21 @@ export async function updateLedgerTransactionsBulk(
         "content-type": "application/json",
       },
       body: JSON.stringify(update),
+    },
+  );
+}
+
+export async function restoreLedgerTransactionCategories(
+  entries: readonly LedgerEntryCategoryRestoreEntry[],
+): Promise<readonly LedgerEntry[]> {
+  return requestJson<readonly LedgerEntry[]>(
+    "/api/ledger/transactions/category-restore",
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ entries }),
     },
   );
 }

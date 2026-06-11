@@ -1652,6 +1652,36 @@ test("write service delegates bulk transaction edits", async () => {
           ["service", "bulk"],
         ]),
       );
+
+      const restored = await writeService.restoreTransactionCategories(
+        entries.map((entry) => ({
+          id: entry.id,
+          categoryId: entry.categoryId,
+          categoryName: entry.categoryName,
+          categorySource: entry.categorySource,
+          categoryRuleId: entry.categoryRuleId,
+          categoryRuleVersion: entry.categoryRuleVersion,
+        })),
+      );
+
+      assert.deepEqual(
+        restored.map((entry) => [
+          entry.id,
+          entry.categoryId,
+          entry.categoryName,
+          entry.categorySource,
+          entry.categoryRuleId,
+          entry.categoryRuleVersion,
+        ]),
+        entries.map((entry) => [
+          entry.id,
+          entry.categoryId,
+          entry.categoryName,
+          entry.categorySource,
+          entry.categoryRuleId,
+          entry.categoryRuleVersion,
+        ]),
+      );
     } finally {
       await db.close();
     }
@@ -2865,6 +2895,19 @@ test("write service runs transaction edits inside explicit boundaries", async ()
             ...update,
           }));
         },
+        async restoreLedgerEntryCategories(profile, entries) {
+          calls.push({ type: "restore", profile, entries });
+          return entries.map((entry) => ({
+            id: entry.id,
+            accountId: "account",
+            time: 1,
+            description: "entry",
+            amount: 1,
+            currencyCode: 980,
+            rawStatementItemId: "raw",
+            ...entry,
+          }));
+        },
         async updateLedgerEntrySplitPlan(profile, id, update) {
           calls.push({ type: "split", profile, id, update });
           return {
@@ -2901,6 +2944,19 @@ test("write service runs transaction edits inside explicit boundaries", async ()
     },
     " ",
   );
+  await writeService.restoreTransactionCategories(
+    [
+      {
+        id: "entry-1",
+        categoryId: "subscriptions",
+        categoryName: "Subscriptions",
+        categorySource: "system_rule",
+        categoryRuleId: "subscriptions-rule",
+        categoryRuleVersion: "2026-05-01T00:00:00.000Z",
+      },
+    ],
+    " ",
+  );
   await writeService.updateTransactionSplitPlan("entry-1", {
     lines: [{ category: "Groceries", amount: 100 }],
   });
@@ -2916,6 +2972,9 @@ test("write service runs transaction edits inside explicit boundaries", async ()
       "commit",
       "begin",
       "bulk",
+      "commit",
+      "begin",
+      "restore",
       "commit",
       "begin",
       "split",
@@ -2945,6 +3004,20 @@ test("write service runs transaction edits inside explicit boundaries", async ()
     },
   });
   assert.deepEqual(calls[10], {
+    type: "restore",
+    profile: "demo",
+    entries: [
+      {
+        id: "entry-1",
+        categoryId: "subscriptions",
+        categoryName: "Subscriptions",
+        categorySource: "system_rule",
+        categoryRuleId: "subscriptions-rule",
+        categoryRuleVersion: "2026-05-01T00:00:00.000Z",
+      },
+    ],
+  });
+  assert.deepEqual(calls[13], {
     type: "split",
     profile: "demo",
     id: "entry-1",
@@ -3038,6 +3111,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       assert.equal(typeof services.write.ignoreRecurringDetection, "function");
       assert.equal(
         typeof services.write.updateTransactionSplitPlan,
+        "function",
+      );
+      assert.equal(
+        typeof services.write.restoreTransactionCategories,
         "function",
       );
     } finally {
