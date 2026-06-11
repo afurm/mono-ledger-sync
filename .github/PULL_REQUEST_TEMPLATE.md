@@ -17,6 +17,7 @@ Closes #
 
 - [ ] No UI changes.
 - [ ] Checked the shadcn/ui registry and existing `src/components/ui` primitives before adding or changing local components.
+- [ ] Local UI components remain thin feature wrappers around shadcn primitives, data loading, and event handlers.
 
 ## Privacy checklist
 

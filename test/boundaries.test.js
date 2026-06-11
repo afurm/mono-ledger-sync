@@ -226,6 +226,19 @@ test("documents shadcn registry checks before new UI components", async () => {
   assert.match(pullRequestTemplate, /src\/components\/ui/);
 });
 
+test("documents thin local UI component wrappers", async () => {
+  const contributing = await readFile("CONTRIBUTING.md", "utf8");
+  const pullRequestTemplate = await readFile(
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "utf8",
+  );
+  const thinWrapperPattern =
+    /thin feature wrappers around shadcn primitives, data loading, and event handlers/;
+
+  assert.match(contributing, thinWrapperPattern);
+  assert.match(pullRequestTemplate, thinWrapperPattern);
+});
+
 test("documents the minimum local product flow", async () => {
   const workflow = await readFile(
     "examples/sample-workflows/minimum-product-flow.md",
