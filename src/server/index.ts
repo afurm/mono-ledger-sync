@@ -71,6 +71,7 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
+  RecurringCalendarEvent,
   RecurringDetectionCandidate,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
@@ -546,6 +547,23 @@ const upcomingRecurringPaymentsResponseSchema = {
 } as const;
 
 const recurringDetectionCandidatesResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const recurringCalendarQuerySchema = {
+  type: "object",
+  properties: {
+    from: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    to: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+  },
+  additionalProperties: false,
+} as const;
+
+const recurringCalendarResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -1145,6 +1163,31 @@ function readStringQuery(value: unknown): string | undefined {
   }
 
   return value;
+}
+
+function readUtcDateQuery(value: unknown, field: string): Date | undefined {
+  const text = readStringQuery(value);
+
+  if (text === undefined) {
+    return undefined;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+
+  if (!match) {
+    throw new Error(`${field} must use YYYY-MM-DD format.`);
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month, day));
+
+  if (parsed.toISOString().slice(0, 10) !== text) {
+    throw new Error(`${field} must be a valid calendar date.`);
+  }
+
+  return parsed;
 }
 
 function isLedgerEntrySortField(
@@ -2556,6 +2599,59 @@ function registerLocalApiRoutes(
       return services.queryService.detectRecurringTransactions(
         services.profile,
       );
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/recurring-calendar`,
+    {
+      schema: {
+        querystring: recurringCalendarQuerySchema,
+        response: {
+          200: recurringCalendarResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | readonly RecurringCalendarEvent[]
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const query = request.query as Record<string, string | string[]>;
+
+      try {
+        const from = readUtcDateQuery(query.from, "from");
+        const to = readUtcDateQuery(query.to, "to");
+        const services = await getServices();
+
+        return await services.queryService.listRecurringCalendar(
+          services.profile,
+          from,
+          to,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Recurring calendar range is invalid.";
+
+        if (!/^(from|to) must |^Recurring calendar range /.test(message)) {
+          throw error;
+        }
+
+        reply.code(400);
+
+        return {
+          error: "invalid_recurring_calendar_range",
+          message,
+        };
+      }
     },
   );
 

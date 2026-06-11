@@ -1190,6 +1190,236 @@ test("query service projects upcoming recurring payments", async () => {
   });
 });
 
+test("query service projects a bounded recurring calendar", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const database = new Database(databasePath);
+
+      try {
+        database.pragma("foreign_keys = ON");
+        database.exec(`
+          INSERT INTO accounts (
+            profile,
+            id,
+            type,
+            currency_code,
+            balance,
+            credit_limit,
+            masked_pan_json,
+            raw_json,
+            updated_at
+          ) VALUES (
+            'demo',
+            'account-uah',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{}',
+            '2026-05-17T08:00:00.000Z'
+          );
+
+          INSERT INTO recurring_items (
+            profile,
+            id,
+            account_id,
+            category_id,
+            merchant_name,
+            frequency,
+            expected_amount_min,
+            expected_amount_max,
+            is_active,
+            started_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          ) VALUES
+            (
+              'demo',
+              'weekly-gym',
+              'account-uah',
+              'subscriptions',
+              'Fixture Gym',
+              'weekly',
+              15000,
+              15000,
+              1,
+              '2026-04-01T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z',
+              '2026-04-01T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'monthly-internet',
+              'account-uah',
+              'subscriptions',
+              'Fixture Internet',
+              'monthly',
+              42000,
+              46000,
+              1,
+              '2026-01-20T00:00:00.000Z',
+              '2026-04-20T08:00:00.000Z',
+              '2026-01-20T00:00:00.000Z',
+              '2026-04-20T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'yearly-insurance',
+              'account-uah',
+              'subscriptions',
+              'Annual Insurance',
+              'yearly',
+              120000,
+              120000,
+              1,
+              '2025-06-15T00:00:00.000Z',
+              '2025-06-15T00:00:00.000Z',
+              '2025-06-15T00:00:00.000Z',
+              '2025-06-15T00:00:00.000Z'
+            ),
+            (
+              'demo',
+              'irregular-storage',
+              'account-uah',
+              'subscriptions',
+              'Irregular Storage',
+              'irregular',
+              9000,
+              12000,
+              1,
+              '2026-06-05T00:00:00.000Z',
+              NULL,
+              '2026-06-05T00:00:00.000Z',
+              '2026-06-05T00:00:00.000Z'
+            ),
+            (
+              'demo',
+              'inactive-plan',
+              'account-uah',
+              'subscriptions',
+              'Inactive Plan',
+              'monthly',
+              1000,
+              1000,
+              0,
+              '2026-01-01T00:00:00.000Z',
+              '2026-04-01T00:00:00.000Z',
+              '2026-01-01T00:00:00.000Z',
+              '2026-04-01T00:00:00.000Z'
+            );
+        `);
+      } finally {
+        database.close();
+      }
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const calendar = await queryService.listRecurringCalendar(
+        undefined,
+        new Date("2026-05-17T12:00:00.000Z"),
+        new Date("2026-07-20T12:00:00.000Z"),
+      );
+      const byRecurringItem = new Map();
+
+      for (const event of calendar) {
+        const rows = byRecurringItem.get(event.recurringItemId) ?? [];
+
+        rows.push(event);
+        byRecurringItem.set(event.recurringItemId, rows);
+      }
+
+      assert.deepEqual(
+        calendar
+          .slice(0, 4)
+          .map((event) => [
+            event.recurringItemId,
+            event.date,
+            event.month,
+            event.currencyCode,
+          ]),
+        [
+          ["weekly-gym", "2026-05-17", "2026-05", 980],
+          ["monthly-internet", "2026-05-20", "2026-05", 980],
+          ["weekly-gym", "2026-05-24", "2026-05", 980],
+          ["weekly-gym", "2026-05-31", "2026-05", 980],
+        ],
+      );
+      assert.deepEqual(
+        byRecurringItem
+          .get("monthly-internet")
+          ?.map((event) => [
+            event.date,
+            event.expectedAmountMin,
+            event.expectedAmountMax,
+          ]),
+        [
+          ["2026-05-20", 42000, 46000],
+          ["2026-06-20", 42000, 46000],
+          ["2026-07-20", 42000, 46000],
+        ],
+      );
+      assert.deepEqual(
+        byRecurringItem
+          .get("yearly-insurance")
+          ?.map((event) => [event.date, event.frequency]),
+        [["2026-06-15", "yearly"]],
+      );
+      assert.deepEqual(
+        byRecurringItem
+          .get("irregular-storage")
+          ?.map((event) => [event.date, event.frequency]),
+        [["2026-06-05", "irregular"]],
+      );
+      assert.equal(byRecurringItem.has("inactive-plan"), false);
+      assert.deepEqual(
+        await queryServices.recurringItems.listRecurringCalendar(
+          undefined,
+          new Date("2026-05-17T12:00:00.000Z"),
+          new Date("2026-07-20T12:00:00.000Z"),
+        ),
+        calendar,
+      );
+      await assert.rejects(
+        () =>
+          queryService.listRecurringCalendar(
+            undefined,
+            new Date("2026-07-20T12:00:00.000Z"),
+            new Date("2026-05-17T12:00:00.000Z"),
+          ),
+        /range start must be before end/,
+      );
+      await assert.rejects(
+        () =>
+          queryService.listRecurringCalendar(
+            undefined,
+            new Date("2026-01-01T12:00:00.000Z"),
+            new Date("2027-12-31T12:00:00.000Z"),
+          ),
+        /cannot exceed 370 days/,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("query service detects recurring transaction candidates", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";

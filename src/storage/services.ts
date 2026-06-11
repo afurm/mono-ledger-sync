@@ -17,6 +17,7 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
+  RecurringCalendarEvent,
   RecurringDetectionCandidate,
   RecurringItem,
   SavingsGoalProgress,
@@ -67,6 +68,11 @@ export interface LedgerRecurringItemQueryService {
   detectRecurringTransactions(
     profile?: string,
   ): Promise<readonly RecurringDetectionCandidate[]>;
+  listRecurringCalendar(
+    profile?: string,
+    from?: Date,
+    to?: Date,
+  ): Promise<readonly RecurringCalendarEvent[]>;
   listUpcomingRecurringPayments(
     profile?: string,
     asOf?: Date,
@@ -166,6 +172,8 @@ const DEFAULT_SYNC_LIST_LIMIT = 20;
 const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
 const RECURRING_DETECTION_PAGE_SIZE = 500;
 const RECURRING_DETECTION_ENTRY_LIMIT = 2_000;
+const RECURRING_CALENDAR_DEFAULT_DAYS = 90;
+const RECURRING_CALENDAR_MAX_DAYS = 370;
 const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
 const TRANSFER_CATEGORY_ID = "transfers";
 const TRANSFER_DESCRIPTION_TERMS = [
@@ -255,6 +263,14 @@ function addUtcMonths(value: Date, months: number): Date {
   );
 
   return new Date(Date.UTC(year, month, day));
+}
+
+function addUtcDays(value: Date, days: number): Date {
+  const next = new Date(value);
+
+  next.setUTCDate(next.getUTCDate() + days);
+
+  return next;
 }
 
 function addRecurringFrequency(
@@ -826,6 +842,148 @@ async function listUpcomingRecurringPayments(
     .slice(0, UPCOMING_RECURRING_PAYMENT_LIMIT);
 }
 
+function recurringCalendarEventId(
+  recurringItemId: string,
+  dueAt: Date,
+): string {
+  return `${recurringItemId}:${dueAt.toISOString().slice(0, 10)}`;
+}
+
+function buildRecurringCalendarEvent(
+  item: RecurringItem,
+  currencyCode: number,
+  dueAt: Date,
+  asOfDate: Date,
+): RecurringCalendarEvent {
+  const dueAtIso = dueAt.toISOString();
+  const date = dueAtIso.slice(0, 10);
+
+  return {
+    id: recurringCalendarEventId(item.id, dueAt),
+    recurringItemId: item.id,
+    profile: item.profile,
+    accountId: item.accountId,
+    ...(item.categoryId === undefined ? {} : { categoryId: item.categoryId }),
+    ...(item.merchantName === undefined
+      ? {}
+      : { merchantName: item.merchantName }),
+    frequency: item.frequency,
+    ...(item.expectedAmountMin === undefined
+      ? {}
+      : { expectedAmountMin: item.expectedAmountMin }),
+    ...(item.expectedAmountMax === undefined
+      ? {}
+      : { expectedAmountMax: item.expectedAmountMax }),
+    currencyCode,
+    date,
+    month: date.slice(0, 7),
+    dueAt: dueAtIso,
+    isPast: dueAt < asOfDate,
+  };
+}
+
+function recurringCalendarRange(
+  from?: Date,
+  to?: Date,
+): {
+  from: Date;
+  to: Date;
+} {
+  const start = startOfUtcDate(from ?? new Date());
+  const end = startOfUtcDate(
+    to ?? addUtcDays(start, RECURRING_CALENDAR_DEFAULT_DAYS),
+  );
+  const rangeDays = daysBetweenUtcDates(end, start);
+
+  if (rangeDays < 0) {
+    throw new Error("Recurring calendar range start must be before end.");
+  }
+
+  if (rangeDays > RECURRING_CALENDAR_MAX_DAYS) {
+    throw new Error(
+      `Recurring calendar range cannot exceed ${RECURRING_CALENDAR_MAX_DAYS} days.`,
+    );
+  }
+
+  return { from: start, to: end };
+}
+
+function recurringCalendarDatesForItem(
+  item: RecurringItem,
+  from: Date,
+  to: Date,
+): readonly Date[] {
+  const firstDueAt = resolveNextRecurringDate(item, from);
+
+  if (firstDueAt === undefined) {
+    return [];
+  }
+
+  if (item.frequency === "irregular") {
+    return firstDueAt >= from && firstDueAt <= to ? [firstDueAt] : [];
+  }
+
+  const dates: Date[] = [];
+  let cursor = firstDueAt;
+
+  while (cursor <= to) {
+    dates.push(cursor);
+
+    const next = addRecurringFrequency(cursor, item.frequency);
+
+    if (next.getTime() === cursor.getTime()) {
+      break;
+    }
+
+    cursor = next;
+  }
+
+  return dates;
+}
+
+async function listRecurringCalendar(
+  db: SqliteLedgerDb,
+  profile: string,
+  from?: Date,
+  to?: Date,
+): Promise<readonly RecurringCalendarEvent[]> {
+  const range = recurringCalendarRange(from, to);
+  const [items, accounts] = await Promise.all([
+    db.listRecurringItems(profile),
+    db.listAccounts(profile),
+  ]);
+  const accountCurrencyCodes = new Map(
+    accounts.map((account) => [account.id, account.currencyCode]),
+  );
+  const asOfDate = startOfUtcDate(new Date());
+
+  return items
+    .filter((item) => item.isActive)
+    .flatMap((item): RecurringCalendarEvent[] => {
+      const currencyCode = accountCurrencyCodes.get(item.accountId);
+
+      if (currencyCode === undefined) {
+        return [];
+      }
+
+      return recurringCalendarDatesForItem(item, range.from, range.to).map(
+        (dueAt) =>
+          buildRecurringCalendarEvent(item, currencyCode, dueAt, asOfDate),
+      );
+    })
+    .sort((left, right) => {
+      const dueDiff = Date.parse(left.dueAt) - Date.parse(right.dueAt);
+
+      if (dueDiff !== 0) {
+        return dueDiff;
+      }
+
+      return (left.merchantName ?? left.recurringItemId).localeCompare(
+        right.merchantName ?? right.recurringItemId,
+      );
+    });
+}
+
 async function listBudgetProgress(
   db: SqliteLedgerDb,
   profile: string,
@@ -996,6 +1154,14 @@ export function createLedgerQueryService({
         coerceProfile(profile, defaultProfile),
       );
     },
+    listRecurringCalendar(profile, from, to) {
+      return listRecurringCalendar(
+        db,
+        coerceProfile(profile, defaultProfile),
+        from,
+        to,
+      );
+    },
     listUpcomingRecurringPayments(profile, asOf) {
       return listUpcomingRecurringPayments(
         db,
@@ -1052,6 +1218,7 @@ export function createLedgerQueryServices(
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
       detectRecurringTransactions: query.detectRecurringTransactions,
+      listRecurringCalendar: query.listRecurringCalendar,
       listUpcomingRecurringPayments: query.listUpcomingRecurringPayments,
     },
     syncState: {

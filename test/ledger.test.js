@@ -4046,6 +4046,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/recurring-detections",
       });
+      const recurringCalendarResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/recurring-calendar?from=2026-04-01&to=2026-04-30",
+      });
+      const invalidRecurringCalendarResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/recurring-calendar?from=2026-05-01&to=2026-04-01",
+      });
       const jarsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/jars",
@@ -4269,6 +4277,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.deepEqual(upcomingRecurringPaymentsResponse.json(), []);
       assert.equal(recurringDetectionsResponse.statusCode, 200);
       assert.deepEqual(recurringDetectionsResponse.json(), []);
+      assert.equal(recurringCalendarResponse.statusCode, 200);
+      assert.deepEqual(recurringCalendarResponse.json(), []);
+      assert.equal(invalidRecurringCalendarResponse.statusCode, 400);
+      assert.equal(
+        invalidRecurringCalendarResponse.json().error,
+        "invalid_recurring_calendar_range",
+      );
       assert.equal(jarsResponse.statusCode, 200);
       assert.deepEqual(
         jarsResponse.json().map((jar) => jar.id),

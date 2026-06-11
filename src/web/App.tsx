@@ -12,6 +12,7 @@ import {
   ArrowUpDownIcon,
   ArrowUpIcon,
   BanIcon,
+  CalendarDaysIcon,
   CheckCheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -4221,6 +4222,91 @@ function UpcomingRecurringPaymentsCard({
   );
 }
 
+function recurringCalendarAmountLabel(
+  event: LocalAppSnapshot["recurringCalendar"][number],
+): string {
+  if (
+    event.expectedAmountMin !== undefined &&
+    event.expectedAmountMax !== undefined &&
+    event.expectedAmountMin !== event.expectedAmountMax
+  ) {
+    return `${formatMinorAmount(
+      event.expectedAmountMin,
+      event.currencyCode,
+    )} - ${formatMinorAmount(event.expectedAmountMax, event.currencyCode)}`;
+  }
+
+  const amount = event.expectedAmountMax ?? event.expectedAmountMin;
+
+  return amount === undefined
+    ? currencyLabel(event.currencyCode)
+    : formatMinorAmount(amount, event.currencyCode);
+}
+
+function RecurringCalendarCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  const rows = snapshot.recurringCalendar.slice(0, 8);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Recurring calendar</CardTitle>
+        <CardDescription>
+          Projected schedule for confirmed local recurring payments.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No recurring calendar events found for the current range.
+          </p>
+        ) : (
+          rows.map((event) => {
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              accountId: event.accountId,
+              ...(event.categoryId === undefined
+                ? {}
+                : { categoryId: event.categoryId }),
+              ...(event.merchantName === undefined
+                ? {}
+                : { merchantName: event.merchantName }),
+            });
+
+            return (
+              <a
+                className="flex items-start justify-between gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={event.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <CalendarDaysIcon className="size-4 shrink-0 text-primary" />
+                    <p className="truncate text-sm font-medium">
+                      {event.merchantName ?? event.recurringItemId}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatDate(Date.parse(event.dueAt) / 1000)} ·{" "}
+                    {event.frequency}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold">
+                    {recurringCalendarAmountLabel(event)}
+                  </p>
+                  <Badge variant={event.isPast ? "destructive" : "secondary"}>
+                    {event.month}
+                  </Badge>
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function budgetProgressBadgeVariant(
   status: LocalAppSnapshot["budgetProgress"][number]["status"],
 ) {
@@ -4733,6 +4819,7 @@ function OverviewRoute({
           />
           <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
+          <RecurringCalendarCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard
             runs={snapshot.syncRuns}
