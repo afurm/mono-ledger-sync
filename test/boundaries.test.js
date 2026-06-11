@@ -62,10 +62,13 @@ const shadcnImplementationPackageNames = new Set([
   "tailwind-merge",
 ]);
 const shadcnImplementationPackagePrefixes = ["@radix-ui/"];
+const maxWebStylesheetLines = 260;
 const rawPaletteUtilityPattern =
   /\b(?:bg|text|border|ring|from|to|via)-(?:red|blue|green|yellow|purple|orange|pink|slate|gray|zinc|neutral|stone|amber|emerald|teal|cyan|sky|indigo|violet|fuchsia|rose)-[0-9]{2,3}\b/;
 const arbitraryVisualUtilityPattern =
   /\b(?:rounded|text|tracking|leading|font)-\[[^\]]+\]/;
+const customControlSelectorPattern =
+  /\.(?:button|btn|card|table|tabs|sidebar|drawer|dialog|toast|skeleton|badge|input|select|textarea|checkbox|menu)(?=$|[\s.#:{>,\[])/;
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -84,6 +87,23 @@ async function collectSourceFiles(directory) {
       return webUiSourceExtensions.has(path.extname(entry.name))
         ? [entryPath]
         : [];
+    }),
+  );
+
+  return files.flat();
+}
+
+async function collectStyleFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        return collectStyleFiles(entryPath);
+      }
+
+      return path.extname(entry.name) === ".css" ? [entryPath] : [];
     }),
   );
 
@@ -330,11 +350,29 @@ test("keeps standard visual controls on shadcn primitives", async () => {
     assert.match(appSource, importPattern);
   }
   assert.doesNotMatch(appSource, /<button\b/);
+  assert.doesNotMatch(appSource, /<input\b/);
   assert.doesNotMatch(appSource, /<label\b/);
   assert.doesNotMatch(appSource, /<select\b/);
   assert.doesNotMatch(appSource, /<table\b/);
   assert.doesNotMatch(appSource, /<textarea\b/);
   assert.doesNotMatch(appSource, /type="checkbox"/);
+});
+
+test("keeps web styling inside the shadcn theme boundary", async () => {
+  const styleFiles = (await collectStyleFiles("src/web")).sort();
+  const stylesSource = await readFile("src/web/styles.css", "utf8");
+  const styleLineCount = stylesSource.trimEnd().split(/\r?\n/).length;
+
+  assert.deepEqual(styleFiles, ["src/web/styles.css"]);
+  assert.ok(
+    styleLineCount <= maxWebStylesheetLines,
+    `src/web/styles.css has ${styleLineCount} lines`,
+  );
+  assert.match(stylesSource, /@import "tailwindcss";/);
+  assert.match(stylesSource, /@import "shadcn\/tailwind\.css";/);
+  assert.match(stylesSource, /@theme inline/);
+  assert.match(stylesSource, /@layer base/);
+  assert.doesNotMatch(stylesSource, customControlSelectorPattern);
 });
 
 test("keeps screen colors on semantic tokens", async () => {
