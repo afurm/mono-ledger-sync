@@ -74,6 +74,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       });
       const categories = await queryService.listCategories();
       const categorySpending = await queryService.listCategorySpending();
+      const cashflowReport = await queryService.getCashflowReport();
       const monthlySpendingReport =
         await queryService.getMonthlySpendingReport();
       const budgets = await queryService.listBudgets();
@@ -96,6 +97,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const groupedCategories = await queryServices.categories.listCategories();
       const groupedCategorySpending =
         await queryServices.categories.listCategorySpending();
+      const groupedCashflowReport =
+        await queryServices.reports.getCashflowReport();
       const groupedMonthlySpendingReport =
         await queryServices.reports.getMonthlySpendingReport();
       const groupedBudgets = await queryServices.budgets.listBudgets();
@@ -162,6 +165,49 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["transport", 980, 1500],
         ],
       );
+      assert.equal(cashflowReport.months, 6);
+      assert.equal(cashflowReport.from, "2025-11-01");
+      assert.equal(cashflowReport.to, "2026-04-30");
+      assert.equal(cashflowReport.totalIncome, 8520000);
+      assert.equal(cashflowReport.totalExpenses, 408650);
+      assert.equal(cashflowReport.netCashflow, 8111350);
+      assert.equal(cashflowReport.transactionCount, 7);
+      assert.deepEqual(
+        cashflowReport.totals.map((row) => [
+          row.currencyCode,
+          row.income,
+          row.expenses,
+          row.net,
+          row.transactionCount,
+        ]),
+        [
+          [980, 8500000, 335750, 8164250, 4],
+          [840, 0, 52900, -52900, 1],
+          [978, 20000, 20000, 0, 2],
+        ],
+      );
+      assert.deepEqual(
+        cashflowReport.points.map((row) => [
+          row.month,
+          row.currencyCode,
+          row.income,
+          row.expenses,
+          row.net,
+          row.transactionCount,
+        ]),
+        [
+          ["2026-04", 840, 0, 52900, -52900, 1],
+          ["2026-04", 978, 20000, 20000, 0, 2],
+          ["2026-04", 980, 8500000, 335750, 8164250, 4],
+        ],
+      );
+      const singleMonthCashflowReport = await queryService.getCashflowReport(
+        undefined,
+        1,
+      );
+
+      assert.equal(singleMonthCashflowReport.from, "2026-04-01");
+      assert.equal(singleMonthCashflowReport.to, "2026-04-30");
       assert.equal(monthlySpendingReport.month, "2026-04");
       assert.equal(monthlySpendingReport.from, "2026-04-01");
       assert.equal(monthlySpendingReport.to, "2026-04-30");
@@ -252,6 +298,16 @@ test("query service defaults profile and wraps storage reads", async () => {
         categoryIds,
       );
       assert.deepEqual(groupedCategorySpending, categorySpending);
+      assert.deepEqual(
+        {
+          ...groupedCashflowReport,
+          generatedAt: "generated",
+        },
+        {
+          ...cashflowReport,
+          generatedAt: "generated",
+        },
+      );
       assert.deepEqual(
         {
           ...groupedMonthlySpendingReport,
@@ -2425,6 +2481,7 @@ test("ledger services factory returns both query and write surfaces", async () =
     try {
       assert.equal(typeof services.query.getLedgerSummary, "function");
       assert.equal(typeof services.query.getNetWorthTrend, "function");
+      assert.equal(typeof services.query.getCashflowReport, "function");
       assert.equal(typeof services.query.getMonthlySpendingReport, "function");
       assert.equal(
         typeof services.queries.transactions.listLedgerEntries,
@@ -2450,6 +2507,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.reports.getMonthlySpendingReport,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.reports.getCashflowReport,
         "function",
       );
       assert.equal(

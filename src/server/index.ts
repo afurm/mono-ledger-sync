@@ -57,6 +57,7 @@ import type {
   Category,
   CategoryRule,
   BudgetProgress,
+  CashflowReport,
   LedgerAccount,
   LedgerCategorySpending,
   LedgerEntry,
@@ -540,6 +541,18 @@ const ledgerCategorySpendingResponseSchema = {
     type: "object",
     additionalProperties: true,
   },
+} as const;
+
+const cashflowReportQuerySchema = {
+  type: "object",
+  properties: {
+    months: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+const cashflowReportResponseSchema = {
+  type: "object",
+  additionalProperties: true,
 } as const;
 
 const monthlySpendingReportQuerySchema = {
@@ -2667,6 +2680,50 @@ function registerLocalApiRoutes(
             error instanceof Error
               ? error.message
               : "Monthly spending report could not be generated.",
+        };
+      }
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/reports/cashflow`,
+    {
+      schema: {
+        querystring: cashflowReportQuerySchema,
+        response: {
+          200: cashflowReportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | CashflowReport
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const months = readNumberQuery(query.months);
+
+      try {
+        return await services.queryService.getCashflowReport(
+          services.profile,
+          months,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_cashflow_report_query",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Cashflow report could not be generated.",
         };
       }
     },

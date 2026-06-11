@@ -3,6 +3,9 @@ import type {
   Budget,
   BudgetProgress,
   BudgetPeriod,
+  CashflowReport,
+  CashflowReportCurrencyTotal,
+  CashflowReportPoint,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -71,6 +74,7 @@ export interface LedgerBudgetQueryService {
 }
 
 export interface LedgerReportQueryService {
+  getCashflowReport(profile?: string, months?: number): Promise<CashflowReport>;
   getMonthlySpendingReport(
     profile?: string,
     month?: string,
@@ -211,6 +215,9 @@ const RECURRING_CALENDAR_DEFAULT_DAYS = 90;
 const RECURRING_CALENDAR_MAX_DAYS = 370;
 const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
 const MONTHLY_SPENDING_TRANSACTION_PAGE_SIZE = 500;
+const CASHFLOW_REPORT_TRANSACTION_PAGE_SIZE = 500;
+const DEFAULT_CASHFLOW_REPORT_MONTHS = 6;
+const MAX_CASHFLOW_REPORT_MONTHS = 24;
 const TRANSFER_CATEGORY_ID = "transfers";
 const TRANSFER_DESCRIPTION_TERMS = [
   "transfer",
@@ -745,6 +752,10 @@ function localMonthKey(value: Date): string {
   return `${year}-${month}`;
 }
 
+function localMonthStart(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), 1, 0, 0, 0, 0);
+}
+
 function readReportMonth(month: string): {
   month: string;
   periodStart: string;
@@ -771,6 +782,24 @@ function readReportMonth(month: string): {
     periodStart: localDateKey(monthStart),
     periodEnd: localDateKey(monthEnd),
   };
+}
+
+function readCashflowReportMonths(months: number | undefined): number {
+  if (months === undefined) {
+    return DEFAULT_CASHFLOW_REPORT_MONTHS;
+  }
+
+  if (!Number.isFinite(months)) {
+    throw new Error("Cashflow report months must be a finite number.");
+  }
+
+  const normalizedMonths = Math.trunc(months);
+
+  if (normalizedMonths < 1 || normalizedMonths > MAX_CASHFLOW_REPORT_MONTHS) {
+    throw new Error("Cashflow report months must be between 1 and 24.");
+  }
+
+  return normalizedMonths;
 }
 
 function isTransferLikeEntry(entry: LedgerEntry): boolean {
@@ -851,6 +880,179 @@ function sharePercentage(amount: number, total: number): number {
   }
 
   return Math.round((amount / total) * 10_000) / 100;
+}
+
+async function resolveCashflowReportPeriod(
+  db: SqliteLedgerDb,
+  profile: string,
+  months: number,
+): Promise<{
+  from: string;
+  to: string;
+}> {
+  const latest = await db.listLedgerEntries({
+    profile,
+    limit: 1,
+    sortBy: "time",
+    sortDirection: "desc",
+  });
+  const anchor = latest.entries[0];
+  const anchorMonthStart = localMonthStart(
+    anchor ? new Date(anchor.time * 1000) : new Date(),
+  );
+  const fromDate = new Date(
+    anchorMonthStart.getFullYear(),
+    anchorMonthStart.getMonth() - months + 1,
+    1,
+    0,
+    0,
+    0,
+    0,
+  );
+  const toDate = new Date(
+    anchorMonthStart.getFullYear(),
+    anchorMonthStart.getMonth() + 1,
+    0,
+    23,
+    59,
+    59,
+    999,
+  );
+
+  return {
+    from: localDateKey(fromDate),
+    to: localDateKey(toDate),
+  };
+}
+
+function applyCashflowAmount(
+  target: {
+    income: number;
+    expenses: number;
+    net: number;
+    transactionCount: number;
+  },
+  amount: number,
+): void {
+  if (amount > 0) {
+    target.income += amount;
+  } else if (amount < 0) {
+    target.expenses += Math.abs(amount);
+  }
+
+  target.net += amount;
+  target.transactionCount += 1;
+}
+
+async function buildCashflowReport(
+  db: SqliteLedgerDb,
+  profile: string,
+  monthsInput: number | undefined,
+): Promise<CashflowReport> {
+  const months = readCashflowReportMonths(monthsInput);
+  const period = await resolveCashflowReportPeriod(db, profile, months);
+  const from = startOfLocalDateEpoch(period.from);
+  const to = endOfLocalDateEpoch(period.to);
+  const totals = new Map<number, CashflowReportCurrencyTotal>();
+  const points = new Map<string, CashflowReportPoint>();
+  let offset = 0;
+  let totalIncome = 0;
+  let totalExpenses = 0;
+  let netCashflow = 0;
+  let transactionCount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      from,
+      to,
+      limit: CASHFLOW_REPORT_TRANSACTION_PAGE_SIZE,
+      offset,
+      sortBy: "time",
+      sortDirection: "asc",
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    for (const entry of page.entries) {
+      const month = localMonthKey(new Date(entry.time * 1000));
+      const monthPeriod = readReportMonth(month);
+      const pointKey = `${month}:${entry.currencyCode}`;
+      const point = points.get(pointKey) ?? {
+        month,
+        from: monthPeriod.periodStart,
+        to: monthPeriod.periodEnd,
+        currencyCode: entry.currencyCode,
+        income: 0,
+        expenses: 0,
+        net: 0,
+        transactionCount: 0,
+      };
+      const currencyTotal = totals.get(entry.currencyCode) ?? {
+        currencyCode: entry.currencyCode,
+        income: 0,
+        expenses: 0,
+        net: 0,
+        transactionCount: 0,
+      };
+
+      if (entry.amount > 0) {
+        totalIncome += entry.amount;
+      } else if (entry.amount < 0) {
+        totalExpenses += Math.abs(entry.amount);
+      }
+
+      netCashflow += entry.amount;
+      transactionCount += 1;
+      applyCashflowAmount(point, entry.amount);
+      applyCashflowAmount(currencyTotal, entry.amount);
+      points.set(pointKey, point);
+      totals.set(entry.currencyCode, currencyTotal);
+    }
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  const sortedTotals = [...totals.values()].sort((left, right) => {
+    const leftActivity = left.income + left.expenses;
+    const rightActivity = right.income + right.expenses;
+
+    if (rightActivity !== leftActivity) {
+      return rightActivity - leftActivity;
+    }
+
+    return left.currencyCode - right.currencyCode;
+  });
+  const sortedPoints = [...points.values()].sort((left, right) => {
+    const monthDiff = left.month.localeCompare(right.month);
+
+    if (monthDiff !== 0) {
+      return monthDiff;
+    }
+
+    return left.currencyCode - right.currencyCode;
+  });
+
+  return {
+    profile,
+    from: period.from,
+    to: period.to,
+    months,
+    generatedAt: new Date().toISOString(),
+    totalIncome,
+    totalExpenses,
+    netCashflow,
+    transactionCount,
+    currencies: sortedTotals.map((row) => row.currencyCode),
+    totals: sortedTotals,
+    points: sortedPoints,
+  };
 }
 
 function monthlyReportCategory(entry: LedgerEntry): {
@@ -1873,6 +2075,13 @@ export function createLedgerQueryService({
     listBudgetProgress(profile) {
       return listBudgetProgress(db, coerceProfile(profile, defaultProfile));
     },
+    getCashflowReport(profile, months) {
+      return buildCashflowReport(
+        db,
+        coerceProfile(profile, defaultProfile),
+        months,
+      );
+    },
     getMonthlySpendingReport(profile, month) {
       return buildMonthlySpendingReport(
         db,
@@ -1965,6 +2174,7 @@ export function createLedgerQueryServices(
       listBudgetProgress: query.listBudgetProgress,
     },
     reports: {
+      getCashflowReport: query.getCashflowReport,
       getMonthlySpendingReport: query.getMonthlySpendingReport,
     },
     recurringItems: {
