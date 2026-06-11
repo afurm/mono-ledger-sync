@@ -53,6 +53,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run format
+      - name: npm publish dry-run (validates the manifest and tarball without publishing)
+        run: npm publish --dry-run
       - run: npm publish
 
       - name: Create GitHub release
