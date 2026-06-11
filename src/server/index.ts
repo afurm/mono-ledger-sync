@@ -79,6 +79,7 @@ import type {
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
   RecurringDetectionDecisionResult,
+  SavingsRateReport,
   SubscriptionIncreaseAlert,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
@@ -553,6 +554,18 @@ const cashflowReportQuerySchema = {
 } as const;
 
 const cashflowReportResponseSchema = {
+  type: "object",
+  additionalProperties: true,
+} as const;
+
+const savingsRateReportQuerySchema = {
+  type: "object",
+  properties: {
+    months: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+const savingsRateReportResponseSchema = {
   type: "object",
   additionalProperties: true,
 } as const;
@@ -2750,6 +2763,50 @@ function registerLocalApiRoutes(
             error instanceof Error
               ? error.message
               : "Cashflow report could not be generated.",
+        };
+      }
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/reports/savings-rate`,
+    {
+      schema: {
+        querystring: savingsRateReportQuerySchema,
+        response: {
+          200: savingsRateReportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | SavingsRateReport
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const months = readNumberQuery(query.months);
+
+      try {
+        return await services.queryService.getSavingsRateReport(
+          services.profile,
+          months,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_savings_rate_report_query",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Savings rate report could not be generated.",
         };
       }
     },

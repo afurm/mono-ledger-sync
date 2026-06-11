@@ -75,6 +75,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       const categories = await queryService.listCategories();
       const categorySpending = await queryService.listCategorySpending();
       const cashflowReport = await queryService.getCashflowReport();
+      const savingsRateReport = await queryService.getSavingsRateReport();
       const categoryTrendReport = await queryService.getCategoryTrendReport();
       const merchantTrendReport = await queryService.getMerchantTrendReport();
       const monthlySpendingReport =
@@ -101,6 +102,8 @@ test("query service defaults profile and wraps storage reads", async () => {
         await queryServices.categories.listCategorySpending();
       const groupedCashflowReport =
         await queryServices.reports.getCashflowReport();
+      const groupedSavingsRateReport =
+        await queryServices.reports.getSavingsRateReport();
       const groupedCategoryTrendReport =
         await queryServices.reports.getCategoryTrendReport();
       const groupedMerchantTrendReport =
@@ -205,6 +208,46 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", 840, 0, 52900, -52900, 1],
           ["2026-04", 978, 20000, 20000, 0, 2],
           ["2026-04", 980, 8500000, 335750, 8164250, 4],
+        ],
+      );
+      assert.equal(savingsRateReport.months, 6);
+      assert.equal(savingsRateReport.from, "2025-11-01");
+      assert.equal(savingsRateReport.to, "2026-04-30");
+      assert.equal(savingsRateReport.totalIncome, 8520000);
+      assert.equal(savingsRateReport.totalExpenses, 408650);
+      assert.equal(savingsRateReport.totalSavings, 8111350);
+      assert.equal(savingsRateReport.savingsRate, 95.2);
+      assert.equal(savingsRateReport.transactionCount, 7);
+      assert.deepEqual(
+        savingsRateReport.totals.map((row) => [
+          row.currencyCode,
+          row.income,
+          row.expenses,
+          row.savings,
+          row.savingsRate,
+          row.transactionCount,
+          row.averageMonthlySavings,
+        ]),
+        [
+          [980, 8500000, 335750, 8164250, 96.05, 4, 1360708],
+          [840, 0, 52900, -52900, 0, 1, -8817],
+          [978, 20000, 20000, 0, 0, 2, 0],
+        ],
+      );
+      assert.deepEqual(
+        savingsRateReport.points.map((row) => [
+          row.month,
+          row.currencyCode,
+          row.income,
+          row.expenses,
+          row.savings,
+          row.savingsRate,
+          row.transactionCount,
+        ]),
+        [
+          ["2026-04", 840, 0, 52900, -52900, 0, 1],
+          ["2026-04", 978, 20000, 20000, 0, 0, 2],
+          ["2026-04", 980, 8500000, 335750, 8164250, 96.05, 4],
         ],
       );
       const singleMonthCashflowReport = await queryService.getCashflowReport(
@@ -385,6 +428,16 @@ test("query service defaults profile and wraps storage reads", async () => {
         },
         {
           ...cashflowReport,
+          generatedAt: "generated",
+        },
+      );
+      assert.deepEqual(
+        {
+          ...groupedSavingsRateReport,
+          generatedAt: "generated",
+        },
+        {
+          ...savingsRateReport,
           generatedAt: "generated",
         },
       );
@@ -2582,6 +2635,7 @@ test("ledger services factory returns both query and write surfaces", async () =
       assert.equal(typeof services.query.getLedgerSummary, "function");
       assert.equal(typeof services.query.getNetWorthTrend, "function");
       assert.equal(typeof services.query.getCashflowReport, "function");
+      assert.equal(typeof services.query.getSavingsRateReport, "function");
       assert.equal(typeof services.query.getCategoryTrendReport, "function");
       assert.equal(typeof services.query.getMerchantTrendReport, "function");
       assert.equal(typeof services.query.getMonthlySpendingReport, "function");
@@ -2613,6 +2667,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.reports.getCashflowReport,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.reports.getSavingsRateReport,
         "function",
       );
       assert.equal(
