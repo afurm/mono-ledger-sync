@@ -870,6 +870,34 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Recurring calendar/);
 });
 
+test("surfaces month-to-date finance summary on overview", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /function MonthToDateFinanceSummaryCard/);
+  assert.match(
+    appSource,
+    /<MonthToDateFinanceSummaryCard[\s\S]*snapshot=\{snapshot\}[\s\S]*monthDetail=\{monthDetail\}[\s\S]*monthFilters=\{monthFilters\}/,
+  );
+  assert.match(appSource, /Month-to-date finance/);
+  assert.match(appSource, /Review month cashflow/);
+  assert.match(appSource, /Top categories/);
+  assert.match(appSource, /Budget watchlist/);
+  assert.match(appSource, /Next recurring payments/);
+  assert.match(appSource, /formatMinorAmount\(monthToDate\.income\)/);
+  assert.match(appSource, /formatMinorAmount\(monthToDate\.expenses\)/);
+  assert.match(appSource, /formatMinorAmount\(monthToDate\.net\)/);
+  assert.match(
+    appSource,
+    /snapshot\.monthlySpendingReport\.categories\.slice\(0, 3\)/,
+  );
+  assert.match(appSource, /snapshot\.budgetProgress\.slice\(0, 3\)/);
+  assert.match(appSource, /snapshot\.upcomingRecurringPayments\.slice\(0, 3\)/);
+  assert.match(appSource, /categoryDateFrom =\s*monthFilters\.dateFrom/);
+  assert.match(appSource, /dateFrom: categoryDateFrom/);
+  assert.match(appSource, /budgetProgressBadgeVariant\(row\.status\)/);
+  assert.match(appSource, /recurringPaymentDueLabel\(payment\)/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 
