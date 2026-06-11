@@ -181,6 +181,8 @@ local server if the UI reported session-only token handling.
 
 Release automation is documented in [docs/release.md](docs/release.md).
 Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).
+The privacy and security threat model is documented in
+[docs/threat-model.md](docs/threat-model.md).
 Common local workflows are documented in
 [examples/sample-workflows](examples/sample-workflows).
 Start with the
