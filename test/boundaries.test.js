@@ -69,6 +69,8 @@ const arbitraryVisualUtilityPattern =
   /\b(?:rounded|text|tracking|leading|font)-\[[^\]]+\]/;
 const customControlSelectorPattern =
   /\.(?:button|btn|card|table|tabs|sidebar|drawer|dialog|toast|skeleton|badge|input|select|textarea|checkbox|menu)(?=$|[\s.#:{>,\[])/;
+const genericDashboardCopyPattern =
+  /\b(?:lorem ipsum|acme|generic dashboard|dashboard template|sample dashboard|analytics dashboard|sales dashboard|marketing dashboard|customer churn|conversion rate|total revenue|active users)\b/i;
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -373,6 +375,42 @@ test("keeps web styling inside the shadcn theme boundary", async () => {
   assert.match(stylesSource, /@theme inline/);
   assert.match(stylesSource, /@layer base/);
   assert.doesNotMatch(stylesSource, customControlSelectorPattern);
+});
+
+test("keeps the web UI anchored to the Monobank local-ledger product", async () => {
+  const sourceFiles = [
+    "src/web/App.tsx",
+    "src/web/navigation.ts",
+    "src/web/empty-state.ts",
+    "src/web/signin-card.ts",
+  ];
+  const productUiSource = (
+    await Promise.all(
+      sourceFiles.map((sourceFile) => readFile(sourceFile, "utf8")),
+    )
+  ).join("\n");
+  const productCopyAnchors = [
+    /Sign in with Monobank/,
+    /Monobank token/,
+    /local Fastify API/,
+    /profile-scoped SQLite\s+ledger/,
+    /Webhook events are sync hints/,
+    /Local files generated from the current SQLite ledger/,
+    /CSV, JSON, JSONL, and SQLite snapshots/,
+    /Ledger transactions/,
+    /Rules & Mappings/,
+    /Sync & Webhooks/,
+    /Local reports/,
+  ];
+
+  for (const copyAnchor of productCopyAnchors) {
+    assert.ok(
+      copyAnchor.test(productUiSource),
+      `Missing product UI copy anchor: ${copyAnchor}`,
+    );
+  }
+
+  assert.doesNotMatch(productUiSource, genericDashboardCopyPattern);
 });
 
 test("keeps screen colors on semantic tokens", async () => {
