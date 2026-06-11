@@ -1,0 +1,92 @@
+name: Publish tarball smoke
+
+# Packs the project, extracts the tarball into a clean temp dir, installs
+# the tarball as a local dependency, and runs a tiny smoke script that
+# imports the public API surface. This proves the published artifact is
+# self-contained: no missing files, no broken requires, the dist entry
+# loads, and a no-op call returns the expected shape.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tarball-smoke:
+    name: packed-tarball smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Pack the project tarball
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pack"
+          npm pack --pack-destination "$RUNNER_TEMP/pack"
+          ls -la "$RUNNER_TEMP/pack"
+
+      - name: Extract tarball into a clean consumer directory
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/consumer"
+          tar -xzf "$RUNNER_TEMP/pack"/mono-ledger-sync-*.tgz \
+            -C "$RUNNER_TEMP/consumer" --strip-components=1
+          ls "$RUNNER_TEMP/consumer"
+
+      - name: Install the packed tarball into a fresh consumer project
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/consumer-app"
+          cd "$RUNNER_TEMP/consumer-app"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund \
+            "$RUNNER_TEMP/pack/mono-ledger-sync-$(node -p "require('${{ github.workspace }}/package.json').version").tgz"
+          ls node_modules/mono-ledger-sync/dist | head
+
+      - name: Run the packed-tarball smoke script
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/consumer-app"
+          node --input-type=module -e "
+            import * as pkg from 'mono-ledger-sync';
+            const required = [
+              'createSqliteLedgerDb',
+              'createSessionMonobankTokenStore',
+              'createMonobankHttpAdapter',
+              'createLocalApiServer',
+            ];
+            for (const name of required) {
+              if (typeof pkg[name] !== 'function') {
+                throw new Error('expected ' + name + ' to be exported as a function');
+              }
+            }
+            const { createSqliteLedgerDb } = pkg;
+            const { mkdtempSync } = await import('node:fs');
+            const { tmpdir } = await import('node:os');
+            const path = await import('node:path');
+            const dbPath = path.join(mkdtempSync(path.join(tmpdir(), 'mls-smoke-')), 'smoke.sqlite');
+            const db = createSqliteLedgerDb({ filePath: dbPath, profile: 'smoke' });
+            await db.migrate();
+            const info = await db.getDatabaseInfo('smoke');
+            if (info.integrityCheck !== 'ok') {
+              throw new Error('expected integrityCheck ok, got ' + info.integrityCheck);
+            }
+            await db.close();
+            console.log('packed-tarball smoke passed');
+          "
