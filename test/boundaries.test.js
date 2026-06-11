@@ -44,6 +44,17 @@ const disallowedComponentPackagePrefixes = [
   "@nextui-org/",
   "@heroui/",
 ];
+const disallowedIconPackageNames = new Set([
+  "@heroicons/react",
+  "@phosphor-icons/react",
+  "@tabler/icons-react",
+  "iconoir-react",
+  "phosphor-react",
+  "react-feather",
+  "react-icons",
+  "tabler-icons-react",
+]);
+const disallowedIconPackagePrefixes = ["@fortawesome/"];
 const shadcnImplementationPackageNames = new Set([
   "class-variance-authority",
   "clsx",
@@ -109,6 +120,15 @@ function isShadcnImplementationPackage(packageName) {
   return (
     shadcnImplementationPackageNames.has(packageName) ||
     shadcnImplementationPackagePrefixes.some((prefix) =>
+      packageName.startsWith(prefix),
+    )
+  );
+}
+
+function isDisallowedIconPackage(packageName) {
+  return (
+    disallowedIconPackageNames.has(packageName) ||
+    disallowedIconPackagePrefixes.some((prefix) =>
       packageName.startsWith(prefix),
     )
   );
@@ -192,6 +212,52 @@ test("keeps shadcn as the only web component system", async () => {
   }
 
   assert.deepEqual(importViolations, []);
+});
+
+test("keeps web icons on the configured shadcn icon library", async () => {
+  const packageJson = await readJson("package.json");
+  const componentsJson = await readJson("components.json");
+  const dependencyNames = Object.keys({
+    ...packageJson.dependencies,
+    ...packageJson.devDependencies,
+  }).sort();
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const navigationSource = await readFile("src/web/navigation.ts", "utf8");
+  const sourceFiles = (
+    await Promise.all(webUiSourceRoots.map(collectSourceFiles))
+  )
+    .flat()
+    .sort();
+  const iconPackageViolations = [];
+  const svgViolations = [];
+
+  assert.equal(componentsJson.iconLibrary, "lucide");
+  assert.ok(dependencyNames.includes("lucide-react"));
+  assert.deepEqual(dependencyNames.filter(isDisallowedIconPackage), []);
+  assert.match(appSource, /from "lucide-react"/);
+  assert.match(navigationSource, /from "lucide-react"/);
+
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(sourceFile, "utf8");
+
+    if (/<svg\b/i.test(source)) {
+      svgViolations.push(`${sourceFile}: inline svg`);
+    }
+
+    for (const specifier of extractImportSpecifiers(source)) {
+      const packageName = importPackageName(specifier);
+
+      if (
+        (packageName !== undefined && isDisallowedIconPackage(packageName)) ||
+        /\.svg(?:\?|$)/.test(specifier)
+      ) {
+        iconPackageViolations.push(`${sourceFile}: ${specifier}`);
+      }
+    }
+  }
+
+  assert.deepEqual(iconPackageViolations, []);
+  assert.deepEqual(svgViolations, []);
 });
 
 test("keeps web screens composed through shadcn primitives", async () => {
