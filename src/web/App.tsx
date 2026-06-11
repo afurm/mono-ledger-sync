@@ -147,6 +147,7 @@ import {
   ignoreRecurringDetection,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
+  loadMonthlySpendingReport,
   clearMonobankToken,
   initializeWorkspace,
   recheckMonobankConnection,
@@ -4119,6 +4120,204 @@ function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
+function MonthlySpendingReportCard({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot;
+}) {
+  const [selectedMonth, setSelectedMonth] = useState(
+    snapshot.monthlySpendingReport.month,
+  );
+  const [report, setReport] = useState<
+    LocalAppSnapshot["monthlySpendingReport"]
+  >(snapshot.monthlySpendingReport);
+  const [status, setStatus] = useState<
+    | { state: "idle" }
+    | { state: "loading" }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
+  const rows = report.categories.slice(0, 6);
+  const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
+  const singleCurrencyTotal =
+    report.currencyTotals.length === 1 ? report.currencyTotals[0] : undefined;
+  const totalLabel =
+    singleCurrencyTotal === undefined
+      ? report.currencyTotals.length === 0
+        ? "0"
+        : `${report.currencyTotals.length} currencies`
+      : formatMinorAmount(
+          singleCurrencyTotal.amount,
+          singleCurrencyTotal.currencyCode,
+        );
+  const averageLabel =
+    singleCurrencyTotal === undefined
+      ? report.transactionCount === 0
+        ? "0"
+        : "Mixed"
+      : formatMinorAmount(
+          singleCurrencyTotal.averageTransactionAmount,
+          singleCurrencyTotal.currencyCode,
+        );
+
+  useEffect(() => {
+    setSelectedMonth(snapshot.monthlySpendingReport.month);
+    setReport(snapshot.monthlySpendingReport);
+    setStatus({ state: "idle" });
+  }, [snapshot.monthlySpendingReport]);
+
+  async function refreshReport() {
+    setStatus({ state: "loading" });
+
+    try {
+      setReport(await loadMonthlySpendingReport({ month: selectedMonth }));
+      setStatus({ state: "idle" });
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Monthly spending report could not be loaded.",
+      });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Monthly spending report</CardTitle>
+        <CardDescription>
+          {report.from} through {report.to}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">{report.month}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void refreshReport();
+          }}
+        >
+          <Input
+            aria-label="Report month"
+            className="h-9 w-[150px]"
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => setSelectedMonth(event.target.value)}
+          />
+          <Button disabled={status.state === "loading"} size="sm" type="submit">
+            <RefreshCwIcon />
+            {status.state === "loading" ? "Loading" : "Load"}
+          </Button>
+        </form>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Spent</p>
+            <p className="mt-1 truncate text-sm font-semibold">{totalLabel}</p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Transactions</p>
+            <p className="mt-1 text-sm font-semibold">
+              {report.transactionCount}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Average</p>
+            <p className="mt-1 truncate text-sm font-semibold">
+              {averageLabel}
+            </p>
+          </div>
+        </div>
+
+        {report.currencyTotals.length > 1 ? (
+          <div className="grid gap-2">
+            {report.currencyTotals.map((total) => (
+              <div
+                className="flex items-center justify-between gap-3 rounded-md border border-border p-3"
+                key={total.currencyCode}
+              >
+                <div>
+                  <p className="text-sm font-medium">
+                    {currencyLabel(total.currencyCode)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {total.transactionCount} transactions
+                  </p>
+                </div>
+                <p className="text-sm font-semibold">
+                  {formatMinorAmount(total.amount, total.currencyCode)}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No expense transactions found for this month.
+          </p>
+        ) : (
+          <div className="grid gap-3">
+            {rows.map((row) => {
+              const width =
+                maxAmount > 0 ? Math.max(4, (row.amount / maxAmount) * 100) : 0;
+              const href = buildTransactionFiltersHash({
+                ...defaultTransactionFilters(),
+                dateFrom: report.from,
+                dateTo: report.to,
+                categoryId: row.categoryId,
+                amountMax: "-0.01",
+              });
+
+              return (
+                <a
+                  className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                  href={href}
+                  key={`${row.categoryId}:${row.currencyCode}`}
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {row.categoryName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.transactionCount} transactions ·{" "}
+                        {row.sharePercentage.toFixed(1).replace(/\.0$/, "")}%
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold">
+                        {formatMinorAmount(row.amount, row.currencyCode)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {currencyLabel(row.currencyCode)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        )}
+
+        {status.state === "error" ? (
+          <p className="text-sm text-destructive">{status.message}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function recurringPaymentAmountLabel(payment: {
   expectedAmountMin?: number;
   expectedAmountMax?: number;
@@ -5110,6 +5309,7 @@ function OverviewRoute({
           <SubscriptionIncreaseAlertsCard snapshot={snapshot} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <RecurringCalendarCard snapshot={snapshot} />
+          <MonthlySpendingReportCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard
             runs={snapshot.syncRuns}

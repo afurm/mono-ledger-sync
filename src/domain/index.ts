@@ -308,6 +308,45 @@ export interface LedgerCategorySpending {
   transactionCount: number;
 }
 
+export interface MonthlySpendingCurrencyTotal {
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  averageTransactionAmount: number;
+}
+
+export interface MonthlySpendingCategory {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  sharePercentage: number;
+}
+
+export interface MonthlySpendingMerchant {
+  merchantName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  sharePercentage: number;
+}
+
+export interface MonthlySpendingReport {
+  profile: string;
+  month: string;
+  from: string;
+  to: string;
+  generatedAt: string;
+  totalExpenses: number;
+  transactionCount: number;
+  averageTransactionAmount: number;
+  currencies: readonly number[];
+  currencyTotals: readonly MonthlySpendingCurrencyTotal[];
+  categories: readonly MonthlySpendingCategory[];
+  merchants: readonly MonthlySpendingMerchant[];
+}
+
 export interface BudgetProgress {
   id: string;
   budgetId: string;

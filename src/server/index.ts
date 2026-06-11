@@ -71,6 +71,7 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   MissedRecurringPayment,
+  MonthlySpendingReport,
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
@@ -539,6 +540,18 @@ const ledgerCategorySpendingResponseSchema = {
     type: "object",
     additionalProperties: true,
   },
+} as const;
+
+const monthlySpendingReportQuerySchema = {
+  type: "object",
+  properties: {
+    month: { type: "string" },
+  },
+} as const;
+
+const monthlySpendingReportResponseSchema = {
+  type: "object",
+  additionalProperties: true,
 } as const;
 
 const upcomingRecurringPaymentsResponseSchema = {
@@ -2612,6 +2625,50 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listCategorySpending(services.profile);
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/reports/monthly-spending`,
+    {
+      schema: {
+        querystring: monthlySpendingReportQuerySchema,
+        response: {
+          200: monthlySpendingReportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | MonthlySpendingReport
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const month = readStringQuery(query.month);
+
+      try {
+        return await services.queryService.getMonthlySpendingReport(
+          services.profile,
+          month,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_monthly_spending_report_query",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Monthly spending report could not be generated.",
+        };
+      }
     },
   );
 

@@ -83,6 +83,45 @@ export interface LedgerCategorySpending {
   transactionCount: number;
 }
 
+export interface MonthlySpendingCurrencyTotal {
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  averageTransactionAmount: number;
+}
+
+export interface MonthlySpendingCategory {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  sharePercentage: number;
+}
+
+export interface MonthlySpendingMerchant {
+  merchantName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  sharePercentage: number;
+}
+
+export interface MonthlySpendingReport {
+  profile: string;
+  month: string;
+  from: string;
+  to: string;
+  generatedAt: string;
+  totalExpenses: number;
+  transactionCount: number;
+  averageTransactionAmount: number;
+  currencies: readonly number[];
+  currencyTotals: readonly MonthlySpendingCurrencyTotal[];
+  categories: readonly MonthlySpendingCategory[];
+  merchants: readonly MonthlySpendingMerchant[];
+}
+
 export interface BudgetProgress {
   id: string;
   budgetId: string;
@@ -478,6 +517,7 @@ export interface LocalAppSnapshot {
   categoryRules: readonly CategoryRule[];
   merchantCleanupRules: readonly MerchantCleanupRule[];
   categorySpending: readonly LedgerCategorySpending[];
+  monthlySpendingReport: MonthlySpendingReport;
   budgetProgress: readonly BudgetProgress[];
   upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
   missedRecurringPayments: readonly MissedRecurringPayment[];
@@ -509,6 +549,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "jars"
   | "savingsGoalProgress"
   | "categorySpending"
+  | "monthlySpendingReport"
   | "budgetProgress"
   | "upcomingRecurringPayments"
   | "missedRecurringPayments"
@@ -522,6 +563,7 @@ type PersistedLocalAppSnapshot = Omit<
   jars?: readonly LedgerJar[];
   savingsGoalProgress?: readonly SavingsGoalProgress[];
   categorySpending?: readonly LedgerCategorySpending[];
+  monthlySpendingReport?: MonthlySpendingReport;
   budgetProgress?: readonly BudgetProgress[];
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
   missedRecurringPayments?: readonly MissedRecurringPayment[];
@@ -597,6 +639,26 @@ function cacheableSnapshot(snapshot: LocalAppSnapshot): LocalAppSnapshot {
   return cacheable;
 }
 
+function emptyMonthlySpendingReport(
+  profile: string,
+  monthToDate: LedgerCashflowSummary,
+): MonthlySpendingReport {
+  return {
+    profile,
+    month: monthToDate.month,
+    from: monthToDate.from,
+    to: monthToDate.to,
+    generatedAt: new Date().toISOString(),
+    totalExpenses: 0,
+    transactionCount: 0,
+    averageTransactionAmount: 0,
+    currencies: [],
+    currencyTotals: [],
+    categories: [],
+    merchants: [],
+  };
+}
+
 function normalizeCachedLocalAppSnapshot(
   cached: CachedLocalAppSnapshot,
 ): CachedLocalAppSnapshot {
@@ -626,6 +688,9 @@ function normalizeCachedLocalAppSnapshot(
       jars: snapshot.jars ?? [],
       savingsGoalProgress: snapshot.savingsGoalProgress ?? [],
       categorySpending: snapshot.categorySpending ?? [],
+      monthlySpendingReport:
+        snapshot.monthlySpendingReport ??
+        emptyMonthlySpendingReport(snapshot.summary.profile, monthToDate),
       budgetProgress: snapshot.budgetProgress ?? [],
       upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
       missedRecurringPayments: snapshot.missedRecurringPayments ?? [],
@@ -1100,6 +1165,22 @@ export async function loadRecurringDetectionCandidates(): Promise<
   );
 }
 
+export async function loadMonthlySpendingReport(options?: {
+  month?: string;
+}): Promise<MonthlySpendingReport> {
+  const params = new URLSearchParams();
+
+  if (options?.month) {
+    params.set("month", options.month);
+  }
+
+  const query = params.toString();
+
+  return requestJson<MonthlySpendingReport>(
+    `/api/ledger/reports/monthly-spending${query ? `?${query}` : ""}`,
+  );
+}
+
 export async function confirmRecurringDetection(
   candidateId: string,
 ): Promise<RecurringDetectionDecisionResult> {
@@ -1198,6 +1279,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       categoryRules,
       merchantCleanupRules,
       categorySpending,
+      monthlySpendingReport,
       budgetProgress,
       upcomingRecurringPayments,
       missedRecurringPayments,
@@ -1224,6 +1306,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       requestJson<readonly LedgerCategorySpending[]>(
         "/api/ledger/category-spending",
       ),
+      loadMonthlySpendingReport(),
       requestJson<readonly BudgetProgress[]>("/api/ledger/budget-progress"),
       requestJson<readonly UpcomingRecurringPayment[]>(
         "/api/ledger/upcoming-recurring-payments",
@@ -1256,6 +1339,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       categoryRules,
       merchantCleanupRules,
       categorySpending,
+      monthlySpendingReport,
       budgetProgress,
       upcomingRecurringPayments,
       missedRecurringPayments,

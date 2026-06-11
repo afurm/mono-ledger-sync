@@ -17,6 +17,10 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   MissedRecurringPayment,
+  MonthlySpendingCategory,
+  MonthlySpendingCurrencyTotal,
+  MonthlySpendingMerchant,
+  MonthlySpendingReport,
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
@@ -66,6 +70,13 @@ export interface LedgerBudgetQueryService {
   listBudgetProgress(profile?: string): Promise<readonly BudgetProgress[]>;
 }
 
+export interface LedgerReportQueryService {
+  getMonthlySpendingReport(
+    profile?: string,
+    month?: string,
+  ): Promise<MonthlySpendingReport>;
+}
+
 export interface LedgerRecurringItemQueryService {
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
   detectRecurringTransactions(
@@ -103,6 +114,7 @@ export interface LedgerQueryServices {
   balances: LedgerBalanceQueryService;
   categories: LedgerCategoryQueryService;
   budgets: LedgerBudgetQueryService;
+  reports: LedgerReportQueryService;
   recurringItems: LedgerRecurringItemQueryService;
   syncState: LedgerSyncStateQueryService;
 }
@@ -113,6 +125,7 @@ export interface LedgerQueryService
     LedgerBalanceQueryService,
     LedgerCategoryQueryService,
     LedgerBudgetQueryService,
+    LedgerReportQueryService,
     LedgerRecurringItemQueryService,
     LedgerSyncStateQueryService {}
 
@@ -197,6 +210,7 @@ const RECURRING_DETECTION_ENTRY_LIMIT = 2_000;
 const RECURRING_CALENDAR_DEFAULT_DAYS = 90;
 const RECURRING_CALENDAR_MAX_DAYS = 370;
 const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
+const MONTHLY_SPENDING_TRANSACTION_PAGE_SIZE = 500;
 const TRANSFER_CATEGORY_ID = "transfers";
 const TRANSFER_DESCRIPTION_TERMS = [
   "transfer",
@@ -724,6 +738,41 @@ function localDateKey(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function localMonthKey(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+
+  return `${year}-${month}`;
+}
+
+function readReportMonth(month: string): {
+  month: string;
+  periodStart: string;
+  periodEnd: string;
+} {
+  const match = /^(\d{4})-(\d{2})$/.exec(month.trim());
+
+  if (!match) {
+    throw new Error("Report month must use YYYY-MM format.");
+  }
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+
+  if (monthIndex < 0 || monthIndex > 11) {
+    throw new Error("Report month must use a valid month.");
+  }
+
+  const monthStart = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+  return {
+    month: month.trim(),
+    periodStart: localDateKey(monthStart),
+    periodEnd: localDateKey(monthEnd),
+  };
+}
+
 function isTransferLikeEntry(entry: LedgerEntry): boolean {
   if (entry.categoryId === TRANSFER_CATEGORY_ID) {
     return true;
@@ -790,6 +839,213 @@ function startOfLocalDateEpoch(dateKey: string): number {
   const epoch = Date.parse(`${dateKey}T00:00:00.000`);
 
   return Math.floor(epoch / 1000);
+}
+
+function averageMinorAmount(amount: number, transactionCount: number): number {
+  return transactionCount > 0 ? Math.round(amount / transactionCount) : 0;
+}
+
+function sharePercentage(amount: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+
+  return Math.round((amount / total) * 10_000) / 100;
+}
+
+function monthlyReportCategory(entry: LedgerEntry): {
+  categoryId: string;
+  categoryName: string;
+} {
+  const categoryId = entry.categoryId?.trim() || "uncategorized";
+  const categoryName =
+    entry.categoryName?.trim() ||
+    (categoryId === "uncategorized" ? "Uncategorized" : categoryId);
+
+  return { categoryId, categoryName };
+}
+
+function monthlyReportMerchantName(entry: LedgerEntry): string {
+  return (
+    entry.merchantName?.trim() || entry.description.trim() || "Unknown merchant"
+  );
+}
+
+async function resolveMonthlySpendingPeriod(
+  db: SqliteLedgerDb,
+  profile: string,
+  month: string | undefined,
+): Promise<{
+  month: string;
+  periodStart: string;
+  periodEnd: string;
+}> {
+  if (month !== undefined && month.trim() !== "") {
+    return readReportMonth(month);
+  }
+
+  const latest = await db.listLedgerEntries({
+    profile,
+    limit: 1,
+    sortBy: "time",
+    sortDirection: "desc",
+  });
+  const anchor = latest.entries[0];
+
+  return readReportMonth(
+    localMonthKey(anchor ? new Date(anchor.time * 1000) : new Date()),
+  );
+}
+
+async function buildMonthlySpendingReport(
+  db: SqliteLedgerDb,
+  profile: string,
+  month: string | undefined,
+): Promise<MonthlySpendingReport> {
+  const period = await resolveMonthlySpendingPeriod(db, profile, month);
+  const from = startOfLocalDateEpoch(period.periodStart);
+  const to = endOfLocalDateEpoch(period.periodEnd);
+  const currencyTotals = new Map<number, MonthlySpendingCurrencyTotal>();
+  const categoryTotals = new Map<string, MonthlySpendingCategory>();
+  const merchantTotals = new Map<string, MonthlySpendingMerchant>();
+  let offset = 0;
+  let totalExpenses = 0;
+  let transactionCount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      from,
+      to,
+      amountMax: -1,
+      limit: MONTHLY_SPENDING_TRANSACTION_PAGE_SIZE,
+      offset,
+      sortBy: "time",
+      sortDirection: "desc",
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    for (const entry of page.entries) {
+      const amount = Math.abs(entry.amount);
+      const currencyTotal = currencyTotals.get(entry.currencyCode) ?? {
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+        averageTransactionAmount: 0,
+      };
+      const category = monthlyReportCategory(entry);
+      const categoryKey = `${category.categoryId}:${entry.currencyCode}`;
+      const categoryTotal = categoryTotals.get(categoryKey) ?? {
+        categoryId: category.categoryId,
+        categoryName: category.categoryName,
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+        sharePercentage: 0,
+      };
+      const merchantName = monthlyReportMerchantName(entry);
+      const merchantKey = `${merchantName.toLocaleLowerCase()}:${entry.currencyCode}`;
+      const merchantTotal = merchantTotals.get(merchantKey) ?? {
+        merchantName,
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+        sharePercentage: 0,
+      };
+
+      totalExpenses += amount;
+      transactionCount += 1;
+      currencyTotal.amount += amount;
+      currencyTotal.transactionCount += 1;
+      categoryTotal.amount += amount;
+      categoryTotal.transactionCount += 1;
+      merchantTotal.amount += amount;
+      merchantTotal.transactionCount += 1;
+
+      currencyTotals.set(entry.currencyCode, currencyTotal);
+      categoryTotals.set(categoryKey, categoryTotal);
+      merchantTotals.set(merchantKey, merchantTotal);
+    }
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  const currencyTotalRows = [...currencyTotals.values()]
+    .map((row): MonthlySpendingCurrencyTotal => {
+      return {
+        ...row,
+        averageTransactionAmount: averageMinorAmount(
+          row.amount,
+          row.transactionCount,
+        ),
+      };
+    })
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.currencyCode - right.currencyCode;
+    });
+  const categories = [...categoryTotals.values()]
+    .map((row): MonthlySpendingCategory => {
+      return {
+        ...row,
+        sharePercentage: sharePercentage(
+          row.amount,
+          currencyTotals.get(row.currencyCode)?.amount ?? 0,
+        ),
+      };
+    })
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.categoryName.localeCompare(right.categoryName);
+    });
+  const merchants = [...merchantTotals.values()]
+    .map((row): MonthlySpendingMerchant => {
+      return {
+        ...row,
+        sharePercentage: sharePercentage(
+          row.amount,
+          currencyTotals.get(row.currencyCode)?.amount ?? 0,
+        ),
+      };
+    })
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.merchantName.localeCompare(right.merchantName);
+    });
+
+  return {
+    profile,
+    month: period.month,
+    from: period.periodStart,
+    to: period.periodEnd,
+    generatedAt: new Date().toISOString(),
+    totalExpenses,
+    transactionCount,
+    averageTransactionAmount: averageMinorAmount(
+      totalExpenses,
+      transactionCount,
+    ),
+    currencies: currencyTotalRows.map((row) => row.currencyCode),
+    currencyTotals: currencyTotalRows,
+    categories,
+    merchants,
+  };
 }
 
 async function calculateBudgetActualAmount(
@@ -1617,6 +1873,13 @@ export function createLedgerQueryService({
     listBudgetProgress(profile) {
       return listBudgetProgress(db, coerceProfile(profile, defaultProfile));
     },
+    getMonthlySpendingReport(profile, month) {
+      return buildMonthlySpendingReport(
+        db,
+        coerceProfile(profile, defaultProfile),
+        month,
+      );
+    },
     listRecurringItems(profile) {
       return db.listRecurringItems(coerceProfile(profile, defaultProfile));
     },
@@ -1700,6 +1963,9 @@ export function createLedgerQueryServices(
       listBudgets: query.listBudgets,
       listBudgetPeriods: query.listBudgetPeriods,
       listBudgetProgress: query.listBudgetProgress,
+    },
+    reports: {
+      getMonthlySpendingReport: query.getMonthlySpendingReport,
     },
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
