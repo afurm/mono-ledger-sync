@@ -784,6 +784,22 @@ test("rules UI keeps current rule previews and conflicts aligned", async () => {
   assert.doesNotMatch(appSource, /historical apply controls stay disabled/);
 });
 
+test("transaction drawer explains category assignment version history", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /interface CategoryVersionHistoryItem/);
+  assert.match(appSource, /function categorySourceVersionLabel/);
+  assert.match(appSource, /function transactionCategoryVersionHistory/);
+  assert.match(appSource, /function CategoryVersionHistoryList/);
+  assert.match(appSource, /Category version history/);
+  assert.match(appSource, /<CategoryVersionHistoryList entry=\{entry\}/);
+  assert.match(appSource, /Stored as a manual local override/);
+  assert.match(appSource, /Rule metadata was cleared/);
+  assert.match(appSource, /Applied from rule version/);
+  assert.match(appSource, /No manual override or matching category rule/);
+  assert.match(appSource, /entry\.categoryRuleVersion/);
+});
+
 test("web client caches local snapshots for offline browsing", async () => {
   const apiSource = await readFile("src/web/api.ts", "utf8");
   const appSource = await readFile("src/web/App.tsx", "utf8");

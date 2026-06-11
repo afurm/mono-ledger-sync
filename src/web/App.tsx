@@ -3227,6 +3227,127 @@ function transactionCategoryHistory(entry: LedgerEntry): string {
   return "Initial ledger assignment from the current sync rules";
 }
 
+interface CategoryVersionHistoryItem {
+  label: string;
+  value: string;
+  detail: string;
+  badge: string;
+  recordedAt?: string | undefined;
+}
+
+function categorySourceVersionLabel(
+  source: LedgerEntry["categorySource"],
+): string {
+  switch (source) {
+    case "manual":
+      return "Manual";
+    case "user_rule":
+      return "User rule";
+    case "system_rule":
+      return "System rule";
+    default:
+      return "Initial";
+  }
+}
+
+function transactionCategoryVersionHistory(
+  entry: LedgerEntry,
+): CategoryVersionHistoryItem[] {
+  const category = transactionCategoryLabel(entry);
+  const sourceLabel = categorySourceVersionLabel(entry.categorySource);
+  const items: CategoryVersionHistoryItem[] = [
+    {
+      label: "Current category",
+      value: category,
+      detail:
+        entry.categorySource === "manual"
+          ? "Stored as a manual local override."
+          : entry.categoryRuleId
+            ? "Stored with rule metadata from local categorization."
+            : "Stored without rule metadata from the initial ledger write.",
+      badge: sourceLabel,
+      recordedAt: entry.updatedAt ?? entry.createdAt,
+    },
+  ];
+
+  if (entry.categorySource === "manual") {
+    items.push({
+      label: "Manual override",
+      value: category,
+      detail: "Rule metadata was cleared when the local category was edited.",
+      badge: "Manual",
+      recordedAt: entry.updatedAt,
+    });
+
+    return items;
+  }
+
+  if (entry.categoryRuleId) {
+    items.push({
+      label: `${sourceLabel} source`,
+      value: entry.categoryRuleId,
+      detail: entry.categoryRuleVersion
+        ? `Applied from rule version ${entry.categoryRuleVersion}.`
+        : "Applied from a rule before version metadata was recorded.",
+      badge: sourceLabel,
+      recordedAt: entry.categoryRuleVersion,
+    });
+
+    return items;
+  }
+
+  if (!entry.categoryId || entry.categoryId === "uncategorized") {
+    items.push({
+      label: "Fallback state",
+      value: "Uncategorized",
+      detail: "No manual override or matching category rule is recorded.",
+      badge: "Fallback",
+      recordedAt: entry.createdAt,
+    });
+
+    return items;
+  }
+
+  items.push({
+    label: "Initial sync assignment",
+    value: category,
+    detail: "Category was stored before rule provenance was available.",
+    badge: "Initial",
+    recordedAt: entry.createdAt,
+  });
+
+  return items;
+}
+
+function CategoryVersionHistoryList({ entry }: { entry: LedgerEntry }) {
+  return (
+    <div className="grid gap-2">
+      {transactionCategoryVersionHistory(entry).map((item) => (
+        <div
+          className="grid gap-2 rounded-md border border-border p-3"
+          key={`${item.label}:${item.value}`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{item.label}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {item.value}
+              </p>
+            </div>
+            <Badge variant="secondary">{item.badge}</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">{item.detail}</p>
+          {item.recordedAt ? (
+            <p className="text-xs text-muted-foreground">
+              Recorded {formatDateTime(item.recordedAt)}
+            </p>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function syncSourceLabel(
   source: LocalAppSnapshot["config"]["source"] | undefined,
 ) {
@@ -3605,6 +3726,15 @@ function TransactionDetailDrawer({
                   value={transactionCategoryHistory(entry)}
                 />
               </dl>
+            </section>
+
+            <Separator />
+
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium text-foreground">
+                Category version history
+              </h3>
+              <CategoryVersionHistoryList entry={entry} />
             </section>
 
             <Separator />
