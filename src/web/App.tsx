@@ -1624,7 +1624,7 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
                   );
                 })}
               </div>
-              <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+              <div className="mt-2 flex justify-between text-xs text-muted-foreground">
                 <span>{firstBucketLabel}</span>
                 <span>{middleBucketLabel}</span>
                 <span>{lastBucketLabel}</span>
@@ -6288,7 +6288,7 @@ function NetWorthTrendCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   className="w-full rounded-t-md bg-primary"
                   style={{ height: `${height}%` }}
                 />
-                <span className="truncate text-[10px] text-muted-foreground">
+                <span className="truncate text-xs text-muted-foreground">
                   {point.date}
                 </span>
               </div>
