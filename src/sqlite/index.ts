@@ -26,6 +26,7 @@ import type {
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntryQuery,
@@ -1564,6 +1565,36 @@ function normalizeLedgerEntryBulkEdit(update: LedgerEntryBulkEditUpdate): {
   };
 }
 
+function normalizeLedgerEntryCategoryRestoreEntries(
+  entries: readonly LedgerEntryCategoryRestoreEntry[],
+): LedgerEntryCategoryRestoreEntry[] {
+  const normalizedEntries = new Map<string, LedgerEntryCategoryRestoreEntry>();
+
+  for (const entry of entries) {
+    const id = entry.id.trim();
+
+    if (!id) {
+      continue;
+    }
+
+    const categoryId = entry.categoryId?.trim();
+    const categoryName = entry.categoryName?.trim();
+    const categoryRuleId = entry.categoryRuleId?.trim();
+    const categoryRuleVersion = entry.categoryRuleVersion?.trim();
+
+    normalizedEntries.set(id, {
+      id,
+      ...(categoryId ? { categoryId } : {}),
+      ...(categoryName ? { categoryName } : {}),
+      ...(entry.categorySource ? { categorySource: entry.categorySource } : {}),
+      ...(categoryRuleId ? { categoryRuleId } : {}),
+      ...(categoryRuleVersion ? { categoryRuleVersion } : {}),
+    });
+  }
+
+  return [...normalizedEntries.values()];
+}
+
 function normalizeMerchantName(name: string): string {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -2234,6 +2265,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         this.updateLedgerEntryAnnotation(profile, id, update),
       updateLedgerEntriesBulkEdit: (profile, ids, update) =>
         this.updateLedgerEntriesBulkEdit(profile, ids, update),
+      restoreLedgerEntryCategories: (profile, entries) =>
+        this.restoreLedgerEntryCategories(profile, entries),
       updateLedgerEntrySplitPlan: (profile, id, update) =>
         this.updateLedgerEntrySplitPlan(profile, id, update),
     };
@@ -3435,8 +3468,6 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       setClauses.push("tags_json = @tagsJson");
     }
 
-    const updatedRows: SqliteLedgerEntryRow[] = [];
-
     if (normalizedIds.length === 0) {
       return [];
     }
@@ -3489,52 +3520,182 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       `,
     );
 
-    for (const id of normalizedIds) {
-      updateEntry.run({
-        profile,
-        id,
-        categoryId: normalizedUpdate.categoryId ?? null,
-        categoryName: categoryName ?? null,
-        categorySource:
-          normalizedUpdate.categoryId === undefined ? null : "manual",
-        merchantName: normalizedUpdate.merchantName ?? null,
-        tagsJson: normalizedUpdate.tagsJson ?? null,
-        updatedAt: timestamp,
-      });
+    const applyBulkEdit = () => {
+      const updatedRows: SqliteLedgerEntryRow[] = [];
 
-      if (
-        normalizedUpdate.categoryId !== undefined ||
-        normalizedUpdate.merchantName !== undefined
-      ) {
-        upsertManualOverride.run({
+      for (const id of normalizedIds) {
+        const updateResult = updateEntry.run({
           profile,
           id,
-          hasCategoryOverride:
-            normalizedUpdate.categoryId === undefined ? 0 : 1,
-          hasMerchantOverride:
-            normalizedUpdate.merchantName === undefined ? 0 : 1,
+          categoryId: normalizedUpdate.categoryId ?? null,
+          categoryName: categoryName ?? null,
+          categorySource:
+            normalizedUpdate.categoryId === undefined ? null : "manual",
+          merchantName: normalizedUpdate.merchantName ?? null,
+          tagsJson: normalizedUpdate.tagsJson ?? null,
           updatedAt: timestamp,
         });
-      }
 
-      const row = selectEntry.get(profile, id) as
-        | SqliteLedgerEntryRow
-        | undefined;
-
-      if (row) {
-        if (normalizedUpdate.tagsJson !== undefined) {
-          this.upsertTagsFromLedgerEntry(profile, row, timestamp);
+        if (updateResult.changes === 0) {
+          continue;
         }
 
-        if (normalizedUpdate.merchantName !== undefined) {
-          this.upsertMerchantFromLedgerEntryRow(profile, row, timestamp);
+        if (
+          normalizedUpdate.categoryId !== undefined ||
+          normalizedUpdate.merchantName !== undefined
+        ) {
+          upsertManualOverride.run({
+            profile,
+            id,
+            hasCategoryOverride:
+              normalizedUpdate.categoryId === undefined ? 0 : 1,
+            hasMerchantOverride:
+              normalizedUpdate.merchantName === undefined ? 0 : 1,
+            updatedAt: timestamp,
+          });
         }
 
-        updatedRows.push(row);
+        const row = selectEntry.get(profile, id) as
+          | SqliteLedgerEntryRow
+          | undefined;
+
+        if (row) {
+          if (normalizedUpdate.tagsJson !== undefined) {
+            this.upsertTagsFromLedgerEntry(profile, row, timestamp);
+          }
+
+          if (normalizedUpdate.merchantName !== undefined) {
+            this.upsertMerchantFromLedgerEntryRow(profile, row, timestamp);
+          }
+
+          updatedRows.push(row);
+        }
       }
+
+      return updatedRows.map(mapLedgerEntryRow);
+    };
+
+    return this.#database.inTransaction
+      ? applyBulkEdit()
+      : this.#database.transaction(applyBulkEdit)();
+  }
+
+  async restoreLedgerEntryCategories(
+    profile: string,
+    entries: readonly LedgerEntryCategoryRestoreEntry[],
+  ): Promise<readonly LedgerEntry[]> {
+    const normalizedEntries =
+      normalizeLedgerEntryCategoryRestoreEntries(entries);
+
+    if (normalizedEntries.length === 0) {
+      return [];
     }
 
-    return updatedRows.map(mapLedgerEntryRow);
+    const timestamp = nowIso();
+    const selectEntry = this.#database.prepare(
+      `
+        SELECT
+          id, account_id, time, description, amount, operation_amount,
+          currency_code, category_id, category_name, category_source,
+          category_rule_id, category_rule_version, merchant_name,
+          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
+          created_at, updated_at
+        FROM ledger_entries
+        WHERE profile = ? AND id = ?
+      `,
+    );
+    const updateEntry = this.#database.prepare(
+      `
+        UPDATE ledger_entries
+        SET
+          category_id = @categoryId,
+          category_name = @categoryName,
+          category_source = @categorySource,
+          category_rule_id = @categoryRuleId,
+          category_rule_version = @categoryRuleVersion,
+          updated_at = @updatedAt
+        WHERE profile = @profile AND id = @id
+      `,
+    );
+    const updateManualOverride = this.#database.prepare(
+      `
+        UPDATE ledger_entry_manual_overrides
+        SET
+          has_category_override = @hasCategoryOverride,
+          updated_at = @updatedAt
+        WHERE profile = @profile AND ledger_entry_id = @id
+      `,
+    );
+    const insertManualOverride = this.#database.prepare(
+      `
+        INSERT OR IGNORE INTO ledger_entry_manual_overrides (
+          profile,
+          ledger_entry_id,
+          has_category_override,
+          has_merchant_override,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @hasCategoryOverride,
+          0,
+          @updatedAt
+        )
+      `,
+    );
+    const restore = () => {
+      const updatedRows: SqliteLedgerEntryRow[] = [];
+
+      for (const entry of normalizedEntries) {
+        const hasCategoryOverride = entry.categorySource === "manual" ? 1 : 0;
+
+        const updateResult = updateEntry.run({
+          profile,
+          id: entry.id,
+          categoryId: entry.categoryId ?? null,
+          categoryName: entry.categoryName ?? null,
+          categorySource: entry.categorySource ?? null,
+          categoryRuleId: entry.categoryRuleId ?? null,
+          categoryRuleVersion: entry.categoryRuleVersion ?? null,
+          updatedAt: timestamp,
+        });
+
+        if (updateResult.changes === 0) {
+          continue;
+        }
+
+        const manualOverrideResult = updateManualOverride.run({
+          profile,
+          id: entry.id,
+          hasCategoryOverride,
+          updatedAt: timestamp,
+        });
+
+        if (manualOverrideResult.changes === 0 && hasCategoryOverride === 1) {
+          insertManualOverride.run({
+            profile,
+            id: entry.id,
+            hasCategoryOverride,
+            updatedAt: timestamp,
+          });
+        }
+
+        const row = selectEntry.get(profile, entry.id) as
+          | SqliteLedgerEntryRow
+          | undefined;
+
+        if (row) {
+          updatedRows.push(row);
+        }
+      }
+
+      return updatedRows.map(mapLedgerEntryRow);
+    };
+
+    return this.#database.inTransaction
+      ? restore()
+      : this.#database.transaction(restore)();
   }
 
   async updateLedgerEntrySplitPlan(

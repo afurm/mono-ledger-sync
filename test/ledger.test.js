@@ -985,6 +985,121 @@ test("stores system category rule metadata on synced ledger entries", async () =
   });
 });
 
+test("restores ledger categories with original provenance after bulk edit", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const accountId = "fixture-account-uah-main";
+      const statementItem = {
+        id: "restore-system-grocery-rule-match",
+        time: 1_775_001_881,
+        description: "Fixture Grocery LLC",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -2450,
+        operationAmount: -2450,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 97_550,
+        hold: false,
+      };
+      const entry = createLedgerEntryFromStatementItem(
+        accountId,
+        statementItem,
+      );
+
+      await db.upsertStatementItems(accountId, [statementItem], [entry]);
+
+      const original = (await db.listLedgerEntries({ profile, limit: 10 }))
+        .entries[0];
+
+      assert.ok(original);
+
+      await db.updateLedgerEntriesBulkEdit(profile, [original.id], {
+        categoryId: "travel",
+      });
+
+      const manualPage = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(manualPage.entries[0]?.categoryId, "travel");
+      assert.equal(manualPage.entries[0]?.categorySource, "manual");
+
+      await db.restoreLedgerEntryCategories(profile, [
+        {
+          id: original.id,
+          categoryId: original.categoryId,
+          categoryName: original.categoryName,
+          categorySource: original.categorySource,
+          categoryRuleId: original.categoryRuleId,
+          categoryRuleVersion: original.categoryRuleVersion,
+        },
+      ]);
+
+      const restoredPage = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(restoredPage.entries[0]?.categoryId, original.categoryId);
+      assert.equal(
+        restoredPage.entries[0]?.categoryName,
+        original.categoryName,
+      );
+      assert.equal(
+        restoredPage.entries[0]?.categorySource,
+        original.categorySource,
+      );
+      assert.equal(
+        restoredPage.entries[0]?.categoryRuleId,
+        original.categoryRuleId,
+      );
+      assert.equal(
+        restoredPage.entries[0]?.categoryRuleVersion,
+        original.categoryRuleVersion,
+      );
+
+      await db.importLocalConfiguration(profile, {
+        categoryRules: [
+          {
+            id: "restored-grocery-utilities-override",
+            categoryId: "utilities",
+            name: "Restored grocery utilities override",
+            priority: 10,
+            matchType: "condition",
+            descriptionContains: "grocery",
+            amountDirection: "expense",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const secondRun = await db.upsertStatementItems(
+        accountId,
+        [statementItem],
+        [entry],
+      );
+      const reappliedPage = await db.listLedgerEntries({ profile, limit: 10 });
+
+      assert.equal(secondRun.inserted, 0);
+      assert.equal(secondRun.updated, 1);
+      assert.equal(secondRun.skipped, 0);
+      assert.equal(reappliedPage.entries[0]?.categoryId, "utilities");
+      assert.equal(reappliedPage.entries[0]?.categorySource, "user_rule");
+      assert.equal(
+        reappliedPage.entries[0]?.categoryRuleId,
+        "restored-grocery-utilities-override",
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("matches multi-word category rule terms across punctuation", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -4180,6 +4295,22 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           tags: ["bulk", "bulk", "queued"],
         },
       });
+      const categoryRestoreResponse = await server.inject({
+        method: "PATCH",
+        url: "/api/ledger/transactions/category-restore",
+        body: {
+          entries: [
+            {
+              id: firstTransaction.id,
+              categoryId: firstTransaction.categoryId,
+              categoryName: firstTransaction.categoryName,
+              categorySource: firstTransaction.categorySource,
+              categoryRuleId: firstTransaction.categoryRuleId,
+              categoryRuleVersion: firstTransaction.categoryRuleVersion,
+            },
+          ],
+        },
+      });
       const annotationResponse = await server.inject({
         method: "PATCH",
         url: `/api/ledger/transactions/${firstTransaction.id}/annotation`,
@@ -4649,6 +4780,29 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             "Subscriptions",
             "Bulk Merchant",
             ["bulk", "queued"],
+          ],
+        ],
+      );
+      assert.equal(categoryRestoreResponse.statusCode, 200);
+      assert.deepEqual(
+        categoryRestoreResponse
+          .json()
+          .map((entry) => [
+            entry.id,
+            entry.categoryId,
+            entry.categoryName,
+            entry.categorySource,
+            entry.categoryRuleId,
+            entry.categoryRuleVersion,
+          ]),
+        [
+          [
+            firstTransaction.id,
+            firstTransaction.categoryId,
+            firstTransaction.categoryName,
+            firstTransaction.categorySource,
+            firstTransaction.categoryRuleId,
+            firstTransaction.categoryRuleVersion,
           ],
         ],
       );

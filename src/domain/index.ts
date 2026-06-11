@@ -719,6 +719,15 @@ export interface LedgerEntryBulkEditUpdate {
   tags?: readonly string[];
 }
 
+export interface LedgerEntryCategoryRestoreEntry {
+  id: string;
+  categoryId?: string;
+  categoryName?: string;
+  categorySource?: LedgerEntryCategorySource;
+  categoryRuleId?: string;
+  categoryRuleVersion?: string;
+}
+
 export interface LedgerEntrySplitPlanUpdate {
   lines?: readonly {
     category: string;

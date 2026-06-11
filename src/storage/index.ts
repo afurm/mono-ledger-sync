@@ -24,6 +24,7 @@ import type {
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
   LedgerEntryPage,
   Category,
   CategoryRule,
@@ -76,6 +77,7 @@ export type {
   LedgerEntryCategorySource,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   CashflowReport,
@@ -183,6 +185,10 @@ export interface LedgerDbTransaction {
     profile: string,
     ids: readonly string[],
     update: LedgerEntryBulkEditUpdate,
+  ): Promise<readonly LedgerEntry[]>;
+  restoreLedgerEntryCategories(
+    profile: string,
+    entries: readonly LedgerEntryCategoryRestoreEntry[],
   ): Promise<readonly LedgerEntry[]>;
   updateLedgerEntrySplitPlan(
     profile: string,

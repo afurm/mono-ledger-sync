@@ -24,6 +24,7 @@ import type {
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
   LedgerEntryPage,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
@@ -193,6 +194,10 @@ export interface LedgerWriteService {
   updateTransactionsBulk(
     ids: readonly string[],
     update: LedgerEntryBulkEditUpdate,
+    profile?: string,
+  ): Promise<readonly LedgerEntry[]>;
+  restoreTransactionCategories(
+    entries: readonly LedgerEntryCategoryRestoreEntry[],
     profile?: string,
   ): Promise<readonly LedgerEntry[]>;
   updateTransactionNote(
@@ -3525,6 +3530,11 @@ export function createLedgerWriteService({
     updateTransactionsBulk(ids, update, profile) {
       return withProfileTransaction(profile, (tx, resolvedProfile) =>
         tx.updateLedgerEntriesBulkEdit(resolvedProfile, ids, update),
+      );
+    },
+    restoreTransactionCategories(entries, profile) {
+      return withProfileTransaction(profile, (tx, resolvedProfile) =>
+        tx.restoreLedgerEntryCategories(resolvedProfile, entries),
       );
     },
     updateTransactionNote(id, note, profile) {
