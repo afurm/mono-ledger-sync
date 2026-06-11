@@ -77,6 +77,25 @@ const genericDashboardCopyPattern =
   /\b(?:lorem ipsum|acme|generic dashboard|dashboard template|sample dashboard|analytics dashboard|sales dashboard|marketing dashboard|customer churn|conversion rate|total revenue|active users)\b/i;
 const placeholderRouteCopyPattern =
   /\b(?:route wired into the app shell|next focused product slice|coming soon|under construction|placeholder route)\b/i;
+const appKeyboardShortcutPatterns = [
+  {
+    label: "keyboard event listener",
+    pattern:
+      /\b(?:window|document)\.addEventListener\(\s*["']key(?:down|up|press)["']/,
+  },
+  {
+    label: "React keyboard handler",
+    pattern: /\bonKey(?:Down|Up|Press)\b/,
+  },
+  {
+    label: "shortcut accessibility attribute",
+    pattern: /\b(?:aria-keyshortcuts|accessKey)\b/,
+  },
+  {
+    label: "keyboard modifier shortcut",
+    pattern: /\b(?:KeyboardEvent|metaKey|ctrlKey|altKey|shiftKey)\b/,
+  },
+];
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -395,6 +414,29 @@ test("keeps web styling inside the shadcn theme boundary", async () => {
   assert.match(stylesSource, /@theme inline/);
   assert.match(stylesSource, /@layer base/);
   assert.doesNotMatch(stylesSource, customControlSelectorPattern);
+});
+
+test("defers app-level keyboard shortcuts until pointer flows are intentional", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const sidebarSource = await readFile("src/components/ui/sidebar.tsx", "utf8");
+  const sourceFiles = (await collectSourceFiles("src/web")).sort();
+  const shortcutViolations = [];
+
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(sourceFile, "utf8");
+
+    for (const { label, pattern } of appKeyboardShortcutPatterns) {
+      if (pattern.test(source)) {
+        shortcutViolations.push(`${sourceFile}: ${label}`);
+      }
+    }
+  }
+
+  assert.deepEqual(shortcutViolations, []);
+  assert.match(appSource, /onClick=\{/);
+  assert.match(appSource, /<MobileNav\b/);
+  assert.match(sidebarSource, /SIDEBAR_KEYBOARD_SHORTCUT/);
+  assert.match(sidebarSource, /window\.addEventListener\("keydown"/);
 });
 
 test("keeps the web UI anchored to the Monobank local-ledger product", async () => {
