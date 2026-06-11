@@ -4565,6 +4565,193 @@ test("local API sync with monobank source uses env token and base URL", async ()
   }
 });
 
+test("local API sync with monobank source uses saved token store and shared sync pipeline", async () => {
+  const monobankToken = "stored-live-monobank-token";
+  const fixtureSet = await loadMonobankFixtureSet();
+  const statementByAccount = fixtureSet.statements;
+  const allStatementTimes = Object.values(statementByAccount).flatMap((items) =>
+    items.map((item) => item.time),
+  );
+  const fixtureMinStatementTime =
+    allStatementTimes.length > 0 ? Math.min(...allStatementTimes) : 0;
+  const fixtureItemsCount = Object.values(statementByAccount).reduce(
+    (total, statementItems) => total + statementItems.length,
+    0,
+  );
+  const requestLog = [];
+  const seenTokens = new Set();
+
+  const mockHandler = createMonobankMockHttpHandler({
+    clientInfo: fixtureSet.clientInfo,
+    currencyRates: fixtureSet.currencyRates,
+    statementByAccount,
+    onRequest: ({ endpoint, headers }) => {
+      requestLog.push(endpoint);
+
+      const tokenHeader = headers["x-token"];
+      if (typeof tokenHeader === "string" && tokenHeader.length > 0) {
+        seenTokens.add(tokenHeader);
+      }
+    },
+  });
+
+  const previousToken = process.env.MONOBANK_TOKEN;
+  process.env.MONOBANK_TOKEN = "";
+
+  try {
+    const previousNow = Date.now;
+    let syntheticNow = 1_800_000_000_000;
+
+    Date.now = () => {
+      const value = syntheticNow;
+      syntheticNow += 60_001;
+      return value;
+    };
+
+    try {
+      await withMockMonobankServer(mockHandler, async (mockBaseUrl) => {
+        await withTempLedger(async ({ tempRoot }) => {
+          const monobankTokenStore = createSessionMonobankTokenStore();
+          await monobankTokenStore.setToken("demo", monobankToken);
+
+          const db = createSqliteLedgerDb({
+            filePath: path.join(tempRoot, "demo.sqlite"),
+            profile: "demo",
+          });
+
+          try {
+            await db.migrate();
+            await db.transaction(async (tx) => {
+              const cursorTimestamp = new Date().toISOString();
+              for (const account of fixtureSet.clientInfo.accounts) {
+                await tx.setSyncCursor({
+                  profile: "demo",
+                  accountId: account.id,
+                  source: "monobank",
+                  statementFrom: 0,
+                  statementTo: Math.max(0, fixtureMinStatementTime - 1),
+                  updatedAt: cursorTimestamp,
+                });
+              }
+            });
+          } finally {
+            await db.close();
+          }
+
+          const server = createLocalApiServer({
+            profile: "demo",
+            source: "monobank",
+            dataDir: tempRoot,
+            monobankBaseUrl: mockBaseUrl,
+            monobankTokenStore,
+          });
+
+          try {
+            const configResponse = await server.inject({
+              method: "GET",
+              url: "/api/app/config",
+            });
+            const syncResponse = await server.inject({
+              method: "POST",
+              url: "/api/sync/run",
+            });
+            const transactionsResponse = await server.inject({
+              method: "GET",
+              url: "/api/ledger/transactions?limit=5",
+            });
+            const accountsResponse = await server.inject({
+              method: "GET",
+              url: "/api/ledger/accounts",
+            });
+
+            assert.equal(configResponse.statusCode, 200);
+            assert.deepEqual(configResponse.json().token, {
+              profile: "demo",
+              hasToken: true,
+              storage: "session",
+              persistence: "session",
+              fallbackReason: "secure_storage_unavailable",
+            });
+            assert.equal(syncResponse.statusCode, 200);
+            assert.equal(syncResponse.json().run.status, "success");
+            assert.equal(syncResponse.json().run.source, "monobank");
+            assert.equal(
+              syncResponse.json().stats.itemsSeen,
+              fixtureItemsCount,
+            );
+            assert.equal(
+              requestLog.includes("GET /personal/client-info"),
+              true,
+            );
+            assert.equal(requestLog.includes("GET /bank/currency"), true);
+            assert.equal(
+              requestLog.some((endpoint) =>
+                endpoint.startsWith("GET /personal/statement/"),
+              ),
+              true,
+            );
+            assert.equal(seenTokens.has(monobankToken), true);
+
+            assert.equal(accountsResponse.statusCode, 200);
+            assert.equal(
+              accountsResponse.json().length,
+              fixtureSet.clientInfo.accounts.length,
+            );
+            assert.equal(transactionsResponse.statusCode, 200);
+            assert.equal(transactionsResponse.json().total, fixtureItemsCount);
+            assert.equal(
+              transactionsResponse
+                .json()
+                .entries[0].accountId.startsWith("fixture-account-"),
+              true,
+            );
+          } finally {
+            await server.close();
+          }
+
+          const syncedDb = createSqliteLedgerDb({
+            filePath: path.join(tempRoot, "demo.sqlite"),
+            profile: "demo",
+          });
+
+          try {
+            await syncedDb.migrate();
+            const summary = await syncedDb.getDatabaseInfo("demo");
+            const entries = await syncedDb.listLedgerEntries({
+              profile: "demo",
+              limit: 5,
+            });
+
+            assert.equal(
+              summary.accounts,
+              fixtureSet.clientInfo.accounts.length,
+            );
+            assert.equal(summary.ledgerEntries, fixtureItemsCount);
+            assert.equal(summary.syncRuns, 1);
+            assert.equal(entries.total, fixtureItemsCount);
+            assert.equal(
+              entries.entries.every((entry) =>
+                entry.rawStatementItemId.startsWith("fixture-stmt-"),
+              ),
+              true,
+            );
+          } finally {
+            await syncedDb.close();
+          }
+        });
+      });
+    } finally {
+      Date.now = previousNow;
+    }
+  } finally {
+    if (previousToken === undefined) {
+      Reflect.deleteProperty(process.env, "MONOBANK_TOKEN");
+    } else {
+      process.env.MONOBANK_TOKEN = previousToken;
+    }
+  }
+});
+
 test("local API token endpoint saves and deletes monobank token state", async () => {
   await withTempLedger(async ({ tempRoot }) => {
     const monobankTokenStore = createSessionMonobankTokenStore();
