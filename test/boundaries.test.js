@@ -44,6 +44,13 @@ const disallowedComponentPackagePrefixes = [
   "@nextui-org/",
   "@heroui/",
 ];
+const shadcnImplementationPackageNames = new Set([
+  "class-variance-authority",
+  "clsx",
+  "radix-ui",
+  "tailwind-merge",
+]);
+const shadcnImplementationPackagePrefixes = ["@radix-ui/"];
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -89,6 +96,15 @@ function isDisallowedComponentPackage(packageName) {
   return (
     disallowedComponentPackageNames.has(packageName) ||
     disallowedComponentPackagePrefixes.some((prefix) =>
+      packageName.startsWith(prefix),
+    )
+  );
+}
+
+function isShadcnImplementationPackage(packageName) {
+  return (
+    shadcnImplementationPackageNames.has(packageName) ||
+    shadcnImplementationPackagePrefixes.some((prefix) =>
       packageName.startsWith(prefix),
     )
   );
@@ -172,6 +188,28 @@ test("keeps shadcn as the only web component system", async () => {
   }
 
   assert.deepEqual(importViolations, []);
+});
+
+test("keeps web screens composed through shadcn primitives", async () => {
+  const sourceFiles = (await collectSourceFiles("src/web")).sort();
+  const primitiveImportViolations = [];
+
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(sourceFile, "utf8");
+
+    for (const specifier of extractImportSpecifiers(source)) {
+      const packageName = importPackageName(specifier);
+
+      if (
+        packageName !== undefined &&
+        isShadcnImplementationPackage(packageName)
+      ) {
+        primitiveImportViolations.push(`${sourceFile}: ${specifier}`);
+      }
+    }
+  }
+
+  assert.deepEqual(primitiveImportViolations, []);
 });
 
 test("documents the minimum local product flow", async () => {
