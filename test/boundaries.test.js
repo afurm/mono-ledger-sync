@@ -239,6 +239,18 @@ test("documents thin local UI component wrappers", async () => {
   assert.match(pullRequestTemplate, thinWrapperPattern);
 });
 
+test("keeps standard visual controls on shadcn primitives", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /from "@\/components\/ui\/checkbox"/);
+  assert.match(appSource, /from "@\/components\/ui\/textarea"/);
+  assert.doesNotMatch(appSource, /<button\b/);
+  assert.doesNotMatch(appSource, /<select\b/);
+  assert.doesNotMatch(appSource, /<table\b/);
+  assert.doesNotMatch(appSource, /<textarea\b/);
+  assert.doesNotMatch(appSource, /type="checkbox"/);
+});
+
 test("documents the minimum local product flow", async () => {
   const workflow = await readFile(
     "examples/sample-workflows/minimum-product-flow.md",
