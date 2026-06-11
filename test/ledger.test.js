@@ -4060,6 +4060,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/reports/category-trends?months=25",
       });
+      const merchantTrendReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/merchant-trends",
+      });
+      const invalidMerchantTrendReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/merchant-trends?months=25",
+      });
       const emptyMonthlySpendingReportResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/reports/monthly-spending?month=2026-05",
@@ -4355,6 +4363,31 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(
         invalidCategoryTrendReportResponse.json().error,
         "invalid_category_trend_report_query",
+      );
+      assert.equal(merchantTrendReportResponse.statusCode, 200);
+      assert.equal(merchantTrendReportResponse.json().months, 6);
+      assert.equal(merchantTrendReportResponse.json().totalExpenses, 408650);
+      assert.deepEqual(
+        merchantTrendReportResponse
+          .json()
+          .merchants.map((row) => [
+            row.merchantName,
+            row.currencyCode,
+            row.amount,
+            row.averageMonthlyAmount,
+          ]),
+        [
+          ["Emergency fund top-up", 980, 250000, 41667],
+          ["Fixture Grocery", 980, 84250, 14042],
+          ["Cloud Subscription", 840, 52900, 8817],
+          ["Travel booking", 978, 20000, 3333],
+          ["Kyiv Metro", 980, 1500, 250],
+        ],
+      );
+      assert.equal(invalidMerchantTrendReportResponse.statusCode, 400);
+      assert.equal(
+        invalidMerchantTrendReportResponse.json().error,
+        "invalid_merchant_trend_report_query",
       );
       assert.deepEqual(
         monthlySpendingReportResponse

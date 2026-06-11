@@ -414,6 +414,37 @@ export interface CategoryTrendReport {
   points: readonly CategoryTrendReportPoint[];
 }
 
+export interface MerchantTrendReportPoint {
+  month: string;
+  from: string;
+  to: string;
+  merchantName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
+export interface MerchantTrendReportMerchant {
+  merchantName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  averageMonthlyAmount: number;
+}
+
+export interface MerchantTrendReport {
+  profile: string;
+  from: string;
+  to: string;
+  months: number;
+  generatedAt: string;
+  totalExpenses: number;
+  transactionCount: number;
+  currencies: readonly number[];
+  merchants: readonly MerchantTrendReportMerchant[];
+  points: readonly MerchantTrendReportPoint[];
+}
+
 export interface BudgetProgress {
   id: string;
   budgetId: string;

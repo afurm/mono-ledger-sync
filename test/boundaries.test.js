@@ -80,6 +80,9 @@ test("documents the shared domain model contract", async () => {
     "CategoryTrendReportPoint",
     "CategoryTrendReportCategory",
     "CategoryTrendReport",
+    "MerchantTrendReportPoint",
+    "MerchantTrendReportMerchant",
+    "MerchantTrendReport",
     "MonthlySpendingCurrencyTotal",
     "MonthlySpendingCategory",
     "MonthlySpendingMerchant",
@@ -253,6 +256,10 @@ test("web client caches local snapshots for offline browsing", async () => {
   );
   assert.match(
     apiSource,
+    /merchantTrendReport:\s*snapshot\.merchantTrendReport \?\?/,
+  );
+  assert.match(
+    apiSource,
     /recurringDetectionCandidates: snapshot\.recurringDetectionCandidates \?\? \[\]/,
   );
   assert.match(
@@ -264,6 +271,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(apiSource, /loadMonthlySpendingReport/);
   assert.match(apiSource, /loadCashflowReport/);
   assert.match(apiSource, /loadCategoryTrendReport/);
+  assert.match(apiSource, /loadMerchantTrendReport/);
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
@@ -280,6 +288,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Net worth trend/);
   assert.match(appSource, /Cashflow report/);
   assert.match(appSource, /Category trend report/);
+  assert.match(appSource, /Merchant trend report/);
   assert.match(appSource, /Monthly spending report/);
   assert.match(appSource, /Spending by category/);
   assert.match(appSource, /Missed recurring payments/);
