@@ -51,6 +51,8 @@ const shadcnImplementationPackageNames = new Set([
   "tailwind-merge",
 ]);
 const shadcnImplementationPackagePrefixes = ["@radix-ui/"];
+const rawPaletteUtilityPattern =
+  /\b(?:bg|text|border|ring|from|to|via)-(?:red|blue|green|yellow|purple|orange|pink|slate|gray|zinc|neutral|stone|amber|emerald|teal|cyan|sky|indigo|violet|fuchsia|rose)-[0-9]{2,3}\b/;
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -249,6 +251,23 @@ test("keeps standard visual controls on shadcn primitives", async () => {
   assert.doesNotMatch(appSource, /<table\b/);
   assert.doesNotMatch(appSource, /<textarea\b/);
   assert.doesNotMatch(appSource, /type="checkbox"/);
+});
+
+test("keeps screen status colors on semantic tokens", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const stylesSource = await readFile("src/web/styles.css", "utf8");
+  const alertSource = await readFile("src/components/ui/alert.tsx", "utf8");
+  const badgeSource = await readFile("src/components/ui/badge.tsx", "utf8");
+
+  assert.doesNotMatch(appSource, rawPaletteUtilityPattern);
+  assert.match(stylesSource, /--color-success:/);
+  assert.match(stylesSource, /--color-warning:/);
+  assert.match(stylesSource, /--color-info:/);
+  assert.match(alertSource, /warning:/);
+  assert.match(alertSource, /info:/);
+  assert.match(badgeSource, /success:/);
+  assert.match(badgeSource, /cashback:/);
+  assert.match(badgeSource, /transport:/);
 });
 
 test("documents the minimum local product flow", async () => {

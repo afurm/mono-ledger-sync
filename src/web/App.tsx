@@ -1,4 +1,5 @@
 import {
+  type ComponentProps,
   type FormEvent,
   useCallback,
   useEffect,
@@ -1596,7 +1597,7 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
                             <SyncHealthSegment
                               value={bucket.skipped}
                               max={chartMax}
-                              className="bg-slate-400"
+                              className="bg-status-neutral"
                             />
                             <SyncHealthSegment
                               value={bucket.failed}
@@ -1606,12 +1607,12 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
                             <SyncHealthSegment
                               value={bucket.partial}
                               max={chartMax}
-                              className="bg-amber-500"
+                              className="bg-warning"
                             />
                             <SyncHealthSegment
                               value={bucket.success}
                               max={chartMax}
-                              className="bg-emerald-600"
+                              className="bg-success"
                             />
                           </>
                         )}
@@ -1631,11 +1632,11 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
             </div>
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1">
-                <span className="size-2 rounded-sm bg-emerald-600" />
+                <span className="size-2 rounded-sm bg-success" />
                 Successful
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="size-2 rounded-sm bg-amber-500" />
+                <span className="size-2 rounded-sm bg-warning" />
                 Partial
               </span>
               <span className="inline-flex items-center gap-1">
@@ -1643,7 +1644,7 @@ function SyncHealthChart({ runs }: { runs: readonly SyncRun[] }) {
                 Failed
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="size-2 rounded-sm bg-slate-400" />
+                <span className="size-2 rounded-sm bg-status-neutral" />
                 Skipped
               </span>
             </div>
@@ -2168,10 +2169,10 @@ function WebhookSettingsPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100">
+        <Alert variant="warning">
           <AlertCircleIcon />
           <AlertTitle>Personal webhook payloads are hints</AlertTitle>
-          <AlertDescription className="text-amber-900/85 dark:text-amber-100/85">
+          <AlertDescription>
             Until Monobank documents a verifiable personal webhook signature,
             treat every payload as advisory and reconcile it through statement
             pulls before relying on ledger changes.
@@ -2231,12 +2232,10 @@ function StaleDataBanner({
   }
 
   return (
-    <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-100">
+    <Alert variant="warning">
       <AlertCircleIcon />
       <AlertTitle>{warning.title}</AlertTitle>
-      <AlertDescription className="text-amber-900/85 dark:text-amber-100/85">
-        {warning.description}
-      </AlertDescription>
+      <AlertDescription>{warning.description}</AlertDescription>
       <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
         <Button size="sm" type="button" disabled={syncing} onClick={onRunSync}>
           <RefreshCwIcon data-icon="inline-start" />
@@ -2271,10 +2270,10 @@ function OfflineBrowsingBanner({
   }
 
   return (
-    <Alert className="border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-900/70 dark:bg-sky-950/25 dark:text-sky-100">
+    <Alert variant="info">
       <WifiOffIcon />
       <AlertTitle>Browsing last local snapshot</AlertTitle>
-      <AlertDescription className="text-sky-900/85 dark:text-sky-100/85">
+      <AlertDescription>
         The local API did not respond: {error}. Existing ledger data for{" "}
         {snapshot.config.profile} is still visible from the last successful load
         {snapshot.offline
@@ -3015,7 +3014,9 @@ function transactionCategoryLabel(entry: LedgerEntry): string {
   return entry.categoryName ?? entry.categoryId ?? "Uncategorized";
 }
 
-function transactionCategoryBadgeClassName(entry: LedgerEntry): string {
+function transactionCategoryBadgeVariant(
+  entry: LedgerEntry,
+): ComponentProps<typeof Badge>["variant"] {
   const categoryKey =
     `${entry.categoryId ?? ""} ${entry.categoryName ?? ""}`.toLowerCase();
 
@@ -3024,11 +3025,11 @@ function transactionCategoryBadgeClassName(entry: LedgerEntry): string {
     categoryKey.includes("declined") ||
     categoryKey.includes("rejected")
   ) {
-    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300";
+    return "destructive";
   }
 
   if (categoryKey.includes("cashback") || categoryKey.includes("cash back")) {
-    return "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900/60 dark:bg-teal-950/30 dark:text-teal-300";
+    return "cashback";
   }
 
   if (
@@ -3036,7 +3037,7 @@ function transactionCategoryBadgeClassName(entry: LedgerEntry): string {
     categoryKey.includes("gas") ||
     categoryKey.includes("charging")
   ) {
-    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300";
+    return "warning";
   }
 
   if (
@@ -3044,7 +3045,7 @@ function transactionCategoryBadgeClassName(entry: LedgerEntry): string {
     categoryKey.includes("metro") ||
     categoryKey.includes("taxi")
   ) {
-    return "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-300";
+    return "transport";
   }
 
   if (
@@ -3054,14 +3055,14 @@ function transactionCategoryBadgeClassName(entry: LedgerEntry): string {
     categoryKey.includes("travel") ||
     categoryKey.includes("info")
   ) {
-    return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300";
+    return "info";
   }
 
   if (entry.amount > 0 || categoryKey.includes("income")) {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300";
+    return "success";
   }
 
-  return "border-border bg-background text-muted-foreground";
+  return "neutral";
 }
 
 function TransactionCategoryBadge({
@@ -3073,8 +3074,8 @@ function TransactionCategoryBadge({
 }) {
   return (
     <Badge
-      className={`${transactionCategoryBadgeClassName(entry)} ${className}`}
-      variant="outline"
+      className={className}
+      variant={transactionCategoryBadgeVariant(entry)}
     >
       {transactionCategoryLabel(entry)}
     </Badge>
@@ -4613,7 +4614,7 @@ function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   <div className="grid gap-1">
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-emerald-500"
+                        className="h-full rounded-full bg-success"
                         style={{ width: `${incomeWidth}%` }}
                       />
                     </div>
@@ -4849,13 +4850,13 @@ function SavingsRateReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   <div className="grid gap-1">
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-emerald-500"
+                        className="h-full rounded-full bg-success"
                         style={{ width: `${incomeWidth}%` }}
                       />
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-amber-500"
+                        className="h-full rounded-full bg-warning"
                         style={{ width: `${expenseWidth}%` }}
                       />
                     </div>
@@ -8136,7 +8137,7 @@ function JarCard({ jar }: { jar: LedgerJar }) {
         />
         <div className="h-2 overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full bg-emerald-500"
+            className="h-full rounded-full bg-success"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -8477,9 +8478,9 @@ function RuleTestCheckRow({ check }: { check: RuleTestCheck }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-sm font-medium">
           {check.matched ? (
-            <CheckCircle2Icon className="size-4 text-green-600" />
+            <CheckCircle2Icon className="size-4 text-success" />
           ) : (
-            <AlertCircleIcon className="size-4 text-amber-600" />
+            <AlertCircleIcon className="size-4 text-warning" />
           )}
           <span>{check.label}</span>
         </div>
@@ -8487,14 +8488,7 @@ function RuleTestCheckRow({ check }: { check: RuleTestCheck }) {
           {check.detail}
         </p>
       </div>
-      <Badge
-        className={
-          check.matched
-            ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-300"
-            : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
-        }
-        variant="outline"
-      >
+      <Badge variant={check.matched ? "success" : "warning"}>
         {check.matched ? "Match" : "Review"}
       </Badge>
     </div>
