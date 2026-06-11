@@ -5624,8 +5624,7 @@ function FirstRunSignInCard({
     } catch (error) {
       setRecheckState({
         status: "error",
-        message:
-          error instanceof Error ? error.message : "Re-check failed.",
+        message: error instanceof Error ? error.message : "Re-check failed.",
       });
     } finally {
       setIsRechecking(false);
@@ -5713,10 +5712,7 @@ function FirstRunSignInCard({
               </Alert>
             )}
             {recheckState.status === "error" && (
-              <Alert
-                variant="destructive"
-                data-testid="recheck-error"
-              >
+              <Alert variant="destructive" data-testid="recheck-error">
                 <AlertCircleIcon />
                 <AlertTitle>Re-check failed</AlertTitle>
                 <AlertDescription>{recheckState.message}</AlertDescription>

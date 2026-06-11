@@ -20,18 +20,15 @@ test("recheckMonobankConnection has arity 0 (no required args)", () => {
   assert.equal(recheckMonobankConnection.length, 0);
 });
 
-test(
-  "recheckMonobankConnection rejects with a helpful error when the local API is unreachable",
-  async () => {
-    // The test runner is offline from the local API by default.
-    // The client should reject (not return) when the network call
-    // fails; the UI turns that into a destructive alert.
-    await assert.rejects(
-      () => recheckMonobankConnection(),
-      (error) => {
-        assert.ok(error instanceof Error);
-        return true;
-      },
-    );
-  },
-);
+test("recheckMonobankConnection rejects with a helpful error when the local API is unreachable", async () => {
+  // The test runner is offline from the local API by default.
+  // The client should reject (not return) when the network call
+  // fails; the UI turns that into a destructive alert.
+  await assert.rejects(
+    () => recheckMonobankConnection(),
+    (error) => {
+      assert.ok(error instanceof Error);
+      return true;
+    },
+  );
+});

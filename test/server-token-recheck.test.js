@@ -126,9 +126,7 @@ test("POST /api/app/token/recheck surfaces upstream 401 errorDescription", async
           const requestUrl = new URL(request.url, "http://127.0.0.1");
           if (requestUrl.pathname === "/personal/client-info") {
             response.writeHead(401, { "content-type": "application/json" });
-            response.end(
-              JSON.stringify({ errorDescription: "Invalid token" }),
-            );
+            response.end(JSON.stringify({ errorDescription: "Invalid token" }));
             return;
           }
           response.writeHead(404, { "content-type": "application/json" });

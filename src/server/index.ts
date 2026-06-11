@@ -3384,9 +3384,7 @@ export function createLocalApiServer(
     };
   }
 
-  async function recheckMonobankToken(
-    profile: string,
-  ): Promise<
+  async function recheckMonobankToken(profile: string): Promise<
     LocalApiMonobankTokenStatus & {
       clientInfo?: LocalApiMonobankClientInfoSummary;
       error?: string;
@@ -3394,8 +3392,7 @@ export function createLocalApiServer(
       upstreamStatus?: number;
     }
   > {
-    const token =
-      monobankToken ?? (await monobankTokenStore.getToken(profile));
+    const token = monobankToken ?? (await monobankTokenStore.getToken(profile));
 
     if (token === undefined) {
       return {
@@ -3436,9 +3433,7 @@ export function createLocalApiServer(
         },
         {
           secrets: [token],
-          ...(options.logSink !== undefined
-            ? { logger: options.logSink }
-            : {}),
+          ...(options.logSink !== undefined ? { logger: options.logSink } : {}),
         },
       );
 
@@ -3477,9 +3472,7 @@ export function createLocalApiServer(
         },
         {
           secrets: [token],
-          ...(options.logSink !== undefined
-            ? { logger: options.logSink }
-            : {}),
+          ...(options.logSink !== undefined ? { logger: options.logSink } : {}),
         },
       );
 
