@@ -29,6 +29,7 @@
     "src/storage/**/*.ts",
     "src/sync/**/*.ts",
     "src/web/api.ts",
+    "src/web/empty-state.ts",
     "src/web/review.ts",
     "src/web/signin-card.ts",
     "src/web/sync-summary.ts",
