@@ -6461,6 +6461,85 @@ function OverviewRoute({
   );
 }
 
+function CategoriesRoute({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+}) {
+  if (!snapshot) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <CategorySpendingCard snapshot={snapshot} />
+      <CategoryTrendReportCard snapshot={snapshot} />
+    </div>
+  );
+}
+
+function BudgetsRoute({
+  snapshot,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  onRefresh: () => Promise<void>;
+}) {
+  if (!snapshot) {
+    return null;
+  }
+
+  return <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />;
+}
+
+function RecurringRoute({
+  snapshot,
+  onRefresh,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  onRefresh: () => Promise<void>;
+}) {
+  if (!snapshot) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      <RecurringDetectionCandidatesCard
+        snapshot={snapshot}
+        onRefresh={onRefresh}
+      />
+      <MissedRecurringPaymentsCard snapshot={snapshot} />
+      <SubscriptionIncreaseAlertsCard snapshot={snapshot} />
+      <UpcomingRecurringPaymentsCard snapshot={snapshot} />
+      <div className="xl:col-span-2">
+        <RecurringCalendarCard snapshot={snapshot} />
+      </div>
+    </div>
+  );
+}
+
+function ReportsRoute({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+}) {
+  if (!snapshot) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      <MonthlySpendingReportCard snapshot={snapshot} />
+      <CashflowReportCard snapshot={snapshot} />
+      <SavingsRateReportCard snapshot={snapshot} />
+      <BalanceProjectionReportCard snapshot={snapshot} />
+      <CategoryTrendReportCard snapshot={snapshot} />
+      <MerchantTrendReportCard snapshot={snapshot} />
+    </div>
+  );
+}
+
 function TransactionsRoute({
   snapshot,
 }: {
@@ -9455,6 +9534,117 @@ function RulesRoute({
   );
 }
 
+function ExportShortcutsCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Export shortcuts</CardTitle>
+        <CardDescription>
+          Local files generated from the current SQLite ledger.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <a href="/api/exports/ledger?format=csv">
+            <DownloadIcon data-icon="inline-start" />
+            CSV
+          </a>
+        </Button>
+        <Button asChild variant="outline">
+          <a href="/api/exports/ledger?format=json">
+            <DownloadIcon data-icon="inline-start" />
+            JSON
+          </a>
+        </Button>
+        <Button asChild variant="outline">
+          <a href="/api/exports/ledger?format=jsonl">
+            <DownloadIcon data-icon="inline-start" />
+            JSONL
+          </a>
+        </Button>
+        <Button asChild variant="outline">
+          <a href="/api/exports/ledger?format=sqlite">
+            <DatabaseIcon data-icon="inline-start" />
+            SQLite
+          </a>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExportsRoute() {
+  const presets = [
+    {
+      id: "monthly-personal-finance",
+      label: "Monthly personal finance",
+      detail: "Categorized monthly ledger review.",
+    },
+    {
+      id: "accountant-handoff",
+      label: "Accountant handoff",
+      detail: "Structured export for external bookkeeping review.",
+    },
+    {
+      id: "bookkeeping",
+      label: "Bookkeeping",
+      detail: "Transaction rows shaped for local bookkeeping tools.",
+    },
+    {
+      id: "budget-analysis",
+      label: "Budget analysis",
+      detail: "Category and period fields for budget comparison.",
+    },
+    {
+      id: "raw-transaction-archive",
+      label: "Raw transaction archive",
+      detail: "Full local ledger archive without token values.",
+    },
+  ];
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+      <ExportShortcutsCard />
+      <Card>
+        <CardHeader>
+          <CardTitle>Export presets</CardTitle>
+          <CardDescription>
+            Preset downloads are generated locally from the current ledger
+            database.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          {presets.map((preset) => (
+            <div
+              className="flex flex-col justify-between gap-3 rounded-md border border-border p-3"
+              key={preset.id}
+            >
+              <div>
+                <p className="font-medium">{preset.label}</p>
+                <p className="text-sm text-muted-foreground">{preset.detail}</p>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <a href={`/api/exports/ledger?preset=${preset.id}`}>
+                  <DownloadIcon data-icon="inline-start" />
+                  Download
+                </a>
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <Alert className="xl:col-span-2">
+        <ShieldCheckIcon />
+        <AlertTitle>Local export boundary</AlertTitle>
+        <AlertDescription>
+          Exports are created by the local Fastify API from SQLite data on this
+          machine. Token values and secret headers are never included.
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+}
+
 function PlaceholderRoute({ routeId }: { routeId: RouteId }) {
   const metadata = routeMetadata(routeId);
 
@@ -9523,6 +9713,14 @@ function RouteContent({
       );
     case "transactions":
       return <TransactionsRoute snapshot={snapshot} />;
+    case "categories":
+      return <CategoriesRoute snapshot={snapshot} />;
+    case "budgets":
+      return <BudgetsRoute snapshot={snapshot} onRefresh={onRefresh} />;
+    case "recurring":
+      return <RecurringRoute snapshot={snapshot} onRefresh={onRefresh} />;
+    case "reports":
+      return <ReportsRoute snapshot={snapshot} />;
     case "sync":
       return <SyncRoute snapshot={snapshot} onRouteChange={onRouteChange} />;
     case "settings":
@@ -9538,6 +9736,7 @@ function RouteContent({
     case "rules":
       return <RulesRoute snapshot={snapshot} onRefresh={onRefresh} />;
     case "exports":
+      return <ExportsRoute />;
     case "logs":
       return <LogsRoute snapshot={snapshot} />;
     case "help":
@@ -9725,34 +9924,7 @@ export default function App() {
               snapshot={snapshot}
             />
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Export shortcuts</CardTitle>
-                <CardDescription>
-                  Local files generated from the current SQLite ledger.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Button asChild variant="outline">
-                  <a href="/api/exports/ledger?format=csv">
-                    <DownloadIcon data-icon="inline-start" />
-                    CSV
-                  </a>
-                </Button>
-                <Button asChild variant="outline">
-                  <a href="/api/exports/ledger?format=json">
-                    <DownloadIcon data-icon="inline-start" />
-                    JSON
-                  </a>
-                </Button>
-                <Button asChild variant="outline">
-                  <a href="/api/exports/ledger?format=jsonl">
-                    <DownloadIcon data-icon="inline-start" />
-                    JSONL
-                  </a>
-                </Button>
-              </CardContent>
-            </Card>
+            {activeRoute === "exports" ? null : <ExportShortcutsCard />}
           </main>
         </SidebarInset>
       </SidebarProvider>

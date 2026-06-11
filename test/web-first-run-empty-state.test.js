@@ -75,9 +75,13 @@ test("shows prompt on Overview when no token is saved and source is monobank", (
   assert.equal(shouldShowFirstRunSignInPrompt("overview", snapshot({})), true);
 });
 
-test("shows prompt on Transactions, Accounts, Rules, Sync, and Exports when no token", () => {
+test("shows prompt on finance workspace routes when no token", () => {
   for (const route of [
     "transactions",
+    "categories",
+    "budgets",
+    "recurring",
+    "reports",
     "accounts",
     "rules",
     "sync",

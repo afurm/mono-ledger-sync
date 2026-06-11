@@ -3,12 +3,16 @@ import {
   ArrowDownUpIcon,
   BadgeHelpIcon,
   BookOpenIcon,
+  CalendarClockIcon,
+  ChartNoAxesCombinedIcon,
   DatabaseIcon,
   DownloadIcon,
   FileClockIcon,
   GaugeIcon,
   ListChecksIcon,
+  PiggyBankIcon,
   SettingsIcon,
+  TagsIcon,
   WalletCardsIcon,
 } from "lucide-react";
 
@@ -28,6 +32,38 @@ export const routes = [
     description:
       "Search, filter, review, and inspect normalized local transaction rows.",
     icon: ArrowDownUpIcon,
+  },
+  {
+    id: "categories",
+    label: "Categories",
+    title: "Category spending",
+    description:
+      "Category totals, trend movement, and drill-downs into expense rows.",
+    icon: TagsIcon,
+  },
+  {
+    id: "budgets",
+    label: "Budgets",
+    title: "Budget progress",
+    description:
+      "Monthly category budgets, rollover choices, and overspend state.",
+    icon: PiggyBankIcon,
+  },
+  {
+    id: "recurring",
+    label: "Recurring",
+    title: "Recurring payments",
+    description:
+      "Detected subscriptions, missed payments, upcoming charges, and calendar.",
+    icon: CalendarClockIcon,
+  },
+  {
+    id: "reports",
+    label: "Reports",
+    title: "Local reports",
+    description:
+      "Spending, cashflow, savings, projection, category, and merchant reports.",
+    icon: ChartNoAxesCombinedIcon,
   },
   {
     id: "rules",

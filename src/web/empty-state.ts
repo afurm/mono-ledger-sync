@@ -6,13 +6,17 @@ import type { RouteId } from "./navigation.js";
  * when the user has no token saved. The Settings route hosts the
  * actual sign-in card and is exempt; the Help and Logs routes can
  * still render useful info even before sign-in, so they are also
- * exempt. Everything else (Overview, Transactions, Accounts, Sync,
- * Rules, Exports) shows the prompt so the user is not fed fixture
- * demo data.
+ * exempt. Everything else (Overview, Transactions, Categories,
+ * Budgets, Recurring, Reports, Accounts, Sync, Rules, Exports)
+ * shows the prompt so the user is not fed fixture demo data.
  */
 const SIGNIN_GATED_ROUTES = new Set<RouteId>([
   "overview",
   "transactions",
+  "categories",
+  "budgets",
+  "recurring",
+  "reports",
   "accounts",
   "sync",
   "rules",
