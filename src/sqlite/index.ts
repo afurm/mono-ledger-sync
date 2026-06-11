@@ -114,6 +114,7 @@ export interface SqliteLedgerDb extends LedgerDb {
   upsertCurrencyRates(
     rates: readonly MonobankCurrencyRate[],
   ): Promise<LedgerWriteStats>;
+  listCurrencyRates(profile?: string): Promise<readonly MonobankCurrencyRate[]>;
   upsertStatementItems(
     accountId: string,
     items: readonly MonobankStatementItem[],
@@ -2548,6 +2549,45 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     write();
 
     return stats;
+  }
+
+  async listCurrencyRates(
+    profile = this.profile,
+  ): Promise<readonly MonobankCurrencyRate[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            currency_code_a AS currencyCodeA,
+            currency_code_b AS currencyCodeB,
+            date,
+            rate_buy AS rateBuy,
+            rate_sell AS rateSell,
+            rate_cross AS rateCross
+          FROM currency_rates
+          WHERE profile = ?
+          ORDER BY date DESC, currency_code_a ASC, currency_code_b ASC
+        `,
+      )
+      .all(profile) as Array<{
+      currencyCodeA: number;
+      currencyCodeB: number;
+      date: number;
+      rateBuy: number | null;
+      rateSell: number | null;
+      rateCross: number | null;
+    }>;
+
+    return rows.map((row): MonobankCurrencyRate => {
+      return {
+        currencyCodeA: row.currencyCodeA,
+        currencyCodeB: row.currencyCodeB,
+        date: row.date,
+        ...(row.rateBuy === null ? {} : { rateBuy: row.rateBuy }),
+        ...(row.rateSell === null ? {} : { rateSell: row.rateSell }),
+        ...(row.rateCross === null ? {} : { rateCross: row.rateCross }),
+      };
+    });
   }
 
   async upsertStatementItems(

@@ -3,6 +3,7 @@ import type {
   Budget,
   BudgetProgress,
   BudgetPeriod,
+  ConvertedReportTotals,
   CashflowReport,
   CashflowReportCurrencyTotal,
   CashflowReportPoint,
@@ -42,6 +43,7 @@ import type {
   RecurringDetectionCandidate,
   RecurringDetectionDecisionResult,
   RecurringItem,
+  ReportCurrencyConversionRate,
   SavingsGoalProgress,
   StoredWebhookEvent,
   SubscriptionIncreaseAlert,
@@ -250,6 +252,7 @@ const DEFAULT_CASHFLOW_REPORT_MONTHS = 6;
 const MAX_CASHFLOW_REPORT_MONTHS = 24;
 const DEFAULT_BALANCE_PROJECTION_DAYS = 30;
 const MAX_BALANCE_PROJECTION_DAYS = 180;
+const REPORT_BASE_CURRENCY_CODE = 980;
 const TRANSFER_CATEGORY_ID = "transfers";
 const TRANSFER_DESCRIPTION_TERMS = [
   "transfer",
@@ -994,6 +997,157 @@ function savingsRatePercentage(income: number, savings: number): number {
   return Math.round((savings / income) * 10_000) / 100;
 }
 
+const CONVERTIBLE_REPORT_TOTAL_FIELDS = [
+  "totalIncome",
+  "totalExpenses",
+  "netCashflow",
+  "totalSavings",
+  "totalCurrentBalance",
+  "totalProjectedOutflows",
+  "totalProjectedBalance",
+] as const;
+
+type ConvertibleReportTotalField =
+  (typeof CONVERTIBLE_REPORT_TOTAL_FIELDS)[number];
+
+type ConvertibleReportTotalInput = {
+  currencyCode: number;
+} & Partial<Record<ConvertibleReportTotalField, number>>;
+
+function conversionRateValue(
+  rate: Pick<ReportCurrencyConversionRate, "rate">,
+): number | undefined {
+  return Number.isFinite(rate.rate) && rate.rate > 0 ? rate.rate : undefined;
+}
+
+function cachedRateValue(rate: {
+  rateSell?: number;
+  rateCross?: number;
+  rateBuy?: number;
+}): number | undefined {
+  const value = rate.rateSell ?? rate.rateCross ?? rate.rateBuy;
+
+  return value === undefined || !Number.isFinite(value) || value <= 0
+    ? undefined
+    : value;
+}
+
+function latestCurrencyConversionRates(
+  rates: readonly {
+    currencyCodeA: number;
+    currencyCodeB: number;
+    date: number;
+    rateBuy?: number;
+    rateSell?: number;
+    rateCross?: number;
+  }[],
+): Map<number, ReportCurrencyConversionRate> {
+  const latest = new Map<number, ReportCurrencyConversionRate>();
+
+  for (const rate of rates) {
+    if (rate.currencyCodeA === REPORT_BASE_CURRENCY_CODE) {
+      continue;
+    }
+
+    if (rate.currencyCodeB !== REPORT_BASE_CURRENCY_CODE) {
+      continue;
+    }
+
+    const value = cachedRateValue(rate);
+
+    if (value === undefined) {
+      continue;
+    }
+
+    const existing = latest.get(rate.currencyCodeA);
+
+    if (existing !== undefined && existing.date >= rate.date) {
+      continue;
+    }
+
+    latest.set(rate.currencyCodeA, {
+      currencyCode: rate.currencyCodeA,
+      baseCurrencyCode: REPORT_BASE_CURRENCY_CODE,
+      rate: value,
+      date: rate.date,
+    });
+  }
+
+  return latest;
+}
+
+async function buildConvertedReportTotals(
+  db: SqliteLedgerDb,
+  profile: string,
+  totals: readonly ConvertibleReportTotalInput[],
+): Promise<ConvertedReportTotals | undefined> {
+  if (
+    totals.every((total) => total.currencyCode === REPORT_BASE_CURRENCY_CODE)
+  ) {
+    return undefined;
+  }
+
+  const cachedRates = await db.listCurrencyRates(profile);
+  const ratesByCurrency = latestCurrencyConversionRates(cachedRates);
+  const missingCurrencyCodes = new Set<number>();
+  const usedRates = new Map<number, ReportCurrencyConversionRate>();
+  const converted: Partial<Record<ConvertibleReportTotalField, number>> = {};
+
+  for (const total of totals) {
+    const conversionRate =
+      total.currencyCode === REPORT_BASE_CURRENCY_CODE
+        ? {
+            currencyCode: REPORT_BASE_CURRENCY_CODE,
+            baseCurrencyCode: REPORT_BASE_CURRENCY_CODE,
+            rate: 1,
+            date: 0,
+          }
+        : ratesByCurrency.get(total.currencyCode);
+
+    if (conversionRate === undefined) {
+      missingCurrencyCodes.add(total.currencyCode);
+      continue;
+    }
+
+    const rateValue = conversionRateValue(conversionRate);
+
+    if (rateValue === undefined) {
+      missingCurrencyCodes.add(total.currencyCode);
+      continue;
+    }
+
+    if (total.currencyCode !== REPORT_BASE_CURRENCY_CODE) {
+      usedRates.set(total.currencyCode, conversionRate);
+    }
+
+    for (const field of CONVERTIBLE_REPORT_TOTAL_FIELDS) {
+      const value = total[field];
+
+      if (value === undefined) {
+        continue;
+      }
+
+      converted[field] =
+        (converted[field] ?? 0) + Math.round(value * rateValue);
+    }
+  }
+
+  if (Object.keys(converted).length === 0) {
+    return undefined;
+  }
+
+  return {
+    baseCurrencyCode: REPORT_BASE_CURRENCY_CODE,
+    ...converted,
+    missingCurrencyCodes: [...missingCurrencyCodes].sort((left, right) => {
+      return left - right;
+    }),
+    rates: [...usedRates.values()].sort((left, right) => {
+      return left.currencyCode - right.currencyCode;
+    }),
+  };
+}
+
 async function resolveTrailingMonthReportPeriod(
   db: SqliteLedgerDb,
   profile: string,
@@ -1150,6 +1304,18 @@ async function buildCashflowReport(
 
     return left.currencyCode - right.currencyCode;
   });
+  const convertedTotals = await buildConvertedReportTotals(
+    db,
+    profile,
+    sortedTotals.map((row) => {
+      return {
+        currencyCode: row.currencyCode,
+        totalIncome: row.income,
+        totalExpenses: row.expenses,
+        netCashflow: row.net,
+      };
+    }),
+  );
 
   return {
     profile,
@@ -1164,6 +1330,7 @@ async function buildCashflowReport(
     currencies: sortedTotals.map((row) => row.currencyCode),
     totals: sortedTotals,
     points: sortedPoints,
+    ...(convertedTotals === undefined ? {} : { convertedTotals }),
   };
 }
 
@@ -1298,6 +1465,18 @@ async function buildSavingsRateReport(
 
       return left.currencyCode - right.currencyCode;
     });
+  const convertedTotals = await buildConvertedReportTotals(
+    db,
+    profile,
+    sortedTotals.map((row) => {
+      return {
+        currencyCode: row.currencyCode,
+        totalIncome: row.income,
+        totalExpenses: row.expenses,
+        totalSavings: row.savings,
+      };
+    }),
+  );
 
   return {
     profile,
@@ -1313,6 +1492,7 @@ async function buildSavingsRateReport(
     currencies: sortedTotals.map((row) => row.currencyCode),
     totals: sortedTotals,
     points: sortedPoints,
+    ...(convertedTotals === undefined ? {} : { convertedTotals }),
   };
 }
 
@@ -1502,6 +1682,18 @@ async function buildBalanceProjectionReport(
     (sum, row) => sum + row.projectedOutflows,
     0,
   );
+  const convertedTotals = await buildConvertedReportTotals(
+    db,
+    profile,
+    sortedTotals.map((row) => {
+      return {
+        currencyCode: row.currencyCode,
+        totalCurrentBalance: row.currentBalance,
+        totalProjectedOutflows: row.projectedOutflows,
+        totalProjectedBalance: row.projectedBalance,
+      };
+    }),
+  );
 
   return {
     profile,
@@ -1516,6 +1708,7 @@ async function buildBalanceProjectionReport(
     totals: sortedTotals,
     points: sortedPoints,
     events: sortedEvents,
+    ...(convertedTotals === undefined ? {} : { convertedTotals }),
   };
 }
 
@@ -1620,6 +1813,26 @@ async function buildCategoryTrendReport(
 
     return left.categoryName.localeCompare(right.categoryName);
   });
+  const categoryCurrencyTotals = new Map<number, number>();
+
+  for (const category of sortedCategories) {
+    categoryCurrencyTotals.set(
+      category.currencyCode,
+      (categoryCurrencyTotals.get(category.currencyCode) ?? 0) +
+        category.amount,
+    );
+  }
+
+  const convertedTotals = await buildConvertedReportTotals(
+    db,
+    profile,
+    [...categoryCurrencyTotals.entries()].map(([currencyCode, amount]) => {
+      return {
+        currencyCode,
+        totalExpenses: amount,
+      };
+    }),
+  );
 
   return {
     profile,
@@ -1632,6 +1845,7 @@ async function buildCategoryTrendReport(
     currencies: [...new Set(sortedCategories.map((row) => row.currencyCode))],
     categories: sortedCategories,
     points: sortedPoints,
+    ...(convertedTotals === undefined ? {} : { convertedTotals }),
   };
 }
 
@@ -1735,6 +1949,26 @@ async function buildMerchantTrendReport(
 
     return left.merchantName.localeCompare(right.merchantName);
   });
+  const merchantCurrencyTotals = new Map<number, number>();
+
+  for (const merchant of sortedMerchants) {
+    merchantCurrencyTotals.set(
+      merchant.currencyCode,
+      (merchantCurrencyTotals.get(merchant.currencyCode) ?? 0) +
+        merchant.amount,
+    );
+  }
+
+  const convertedTotals = await buildConvertedReportTotals(
+    db,
+    profile,
+    [...merchantCurrencyTotals.entries()].map(([currencyCode, amount]) => {
+      return {
+        currencyCode,
+        totalExpenses: amount,
+      };
+    }),
+  );
 
   return {
     profile,
@@ -1747,6 +1981,7 @@ async function buildMerchantTrendReport(
     currencies: [...new Set(sortedMerchants.map((row) => row.currencyCode))],
     merchants: sortedMerchants,
     points: sortedPoints,
+    ...(convertedTotals === undefined ? {} : { convertedTotals }),
   };
 }
 
@@ -1925,6 +2160,16 @@ async function buildMonthlySpendingReport(
 
       return left.merchantName.localeCompare(right.merchantName);
     });
+  const convertedTotals = await buildConvertedReportTotals(
+    db,
+    profile,
+    currencyTotalRows.map((row) => {
+      return {
+        currencyCode: row.currencyCode,
+        totalExpenses: row.amount,
+      };
+    }),
+  );
 
   return {
     profile,
@@ -1942,6 +2187,7 @@ async function buildMonthlySpendingReport(
     currencyTotals: currencyTotalRows,
     categories,
     merchants,
+    ...(convertedTotals === undefined ? {} : { convertedTotals }),
   };
 }
 

@@ -3,6 +3,7 @@ import type {
   BudgetProgress,
   Budget,
   BudgetPeriod,
+  ConvertedReportTotals,
   CashflowReport,
   CashflowReportCurrencyTotal,
   CashflowReportPoint,
@@ -32,6 +33,7 @@ import type {
   LedgerWriteStats,
   LedgerCategorySpending,
   LedgerJar,
+  ReportCurrencyConversionRate,
   SavingsGoalProgress,
   LocalAppSettings,
   LocalAppSettingsUpdate,
@@ -65,6 +67,7 @@ import type {
 export type {
   AccountBalance,
   BudgetProgress,
+  ConvertedReportTotals,
   LedgerAccount,
   LedgerCategorySpending,
   LedgerJar,
@@ -78,6 +81,7 @@ export type {
   CashflowReport,
   CashflowReportCurrencyTotal,
   CashflowReportPoint,
+  ReportCurrencyConversionRate,
   SavingsRateReport,
   SavingsRateReportCurrencyTotal,
   SavingsRateReportPoint,
@@ -127,9 +131,17 @@ export type {
 
 import type {
   MonobankAccount,
+  MonobankCurrencyRate,
   MonobankJar,
   MonobankStatementItem,
 } from "../monobank/index.js";
+
+export type {
+  MonobankAccount,
+  MonobankCurrencyRate,
+  MonobankJar,
+  MonobankStatementItem,
+};
 
 export type LedgerEntrySortField = (typeof ledgerEntrySortFields)[number];
 export type LedgerEntrySortDirection =
@@ -188,6 +200,7 @@ export interface LedgerDb {
     accountId: string,
   ): Promise<SyncCursor | undefined>;
   getLocalAppSettings(profile: string): Promise<LocalAppSettings | undefined>;
+  listCurrencyRates(profile?: string): Promise<readonly MonobankCurrencyRate[]>;
   updateLocalAppSettings(
     profile: string,
     update: LocalAppSettingsUpdate,

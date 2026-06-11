@@ -82,6 +82,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       const merchantTrendReport = await queryService.getMerchantTrendReport();
       const monthlySpendingReport =
         await queryService.getMonthlySpendingReport();
+      const cachedRates = await db.listCurrencyRates(profile);
       const budgets = await queryService.listBudgets();
       const budgetPeriods = await queryService.listBudgetPeriods();
       const budgetProgress = await queryService.listBudgetProgress();
@@ -178,6 +179,42 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["transport", 980, 1500],
         ],
       );
+      assert.deepEqual(
+        cachedRates.map((rate) => [
+          rate.currencyCodeA,
+          rate.currencyCodeB,
+          rate.date,
+          rate.rateBuy,
+          rate.rateSell,
+          rate.rateCross,
+        ]),
+        [
+          [840, 980, 1775001600, 39.25, 39.85, undefined],
+          [978, 840, 1775001600, undefined, undefined, 1.08],
+          [978, 980, 1775001600, 42.2, 43.05, undefined],
+        ],
+      );
+      const expectedConvertedReportRates = [
+        {
+          currencyCode: 840,
+          baseCurrencyCode: 980,
+          rate: 39.85,
+          date: 1775001600,
+        },
+        {
+          currencyCode: 978,
+          baseCurrencyCode: 980,
+          rate: 43.05,
+          date: 1775001600,
+        },
+      ];
+      const expectedConvertedExpenseTotals = {
+        baseCurrencyCode: 980,
+        totalExpenses: 3304815,
+        missingCurrencyCodes: [],
+        rates: expectedConvertedReportRates,
+      };
+
       assert.equal(cashflowReport.months, 6);
       assert.equal(cashflowReport.from, "2025-11-01");
       assert.equal(cashflowReport.to, "2026-04-30");
@@ -214,6 +251,11 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", 980, 8500000, 335750, 8164250, 4],
         ],
       );
+      assert.deepEqual(cashflowReport.convertedTotals, {
+        ...expectedConvertedExpenseTotals,
+        totalIncome: 9361000,
+        netCashflow: 6056185,
+      });
       assert.equal(savingsRateReport.months, 6);
       assert.equal(savingsRateReport.from, "2025-11-01");
       assert.equal(savingsRateReport.to, "2026-04-30");
@@ -254,6 +296,11 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", 980, 8500000, 335750, 8164250, 96.05, 4],
         ],
       );
+      assert.deepEqual(savingsRateReport.convertedTotals, {
+        ...expectedConvertedExpenseTotals,
+        totalIncome: 9361000,
+        totalSavings: 6056185,
+      });
       const expectedBalanceTotals = [
         ...balances
           .reduce((totals, balance) => {
@@ -308,6 +355,21 @@ test("query service defaults profile and wraps storage reads", async () => {
           0,
         ]),
       );
+      assert.deepEqual(balanceProjectionReport.convertedTotals, {
+        baseCurrencyCode: 980,
+        totalCurrentBalance: 7726850,
+        totalProjectedOutflows: 0,
+        totalProjectedBalance: 7726850,
+        missingCurrencyCodes: [],
+        rates: [
+          {
+            currencyCode: 978,
+            baseCurrencyCode: 980,
+            rate: 43.05,
+            date: 1775001600,
+          },
+        ],
+      });
       const singleMonthCashflowReport = await queryService.getCashflowReport(
         undefined,
         1,
@@ -352,6 +414,10 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", "transport", 980, 1500, 1],
         ],
       );
+      assert.deepEqual(
+        categoryTrendReport.convertedTotals,
+        expectedConvertedExpenseTotals,
+      );
       assert.equal(merchantTrendReport.months, 6);
       assert.equal(merchantTrendReport.from, "2025-11-01");
       assert.equal(merchantTrendReport.to, "2026-04-30");
@@ -388,6 +454,10 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", "Travel booking", 978, 20000, 1],
           ["2026-04", "Kyiv Metro", 980, 1500, 1],
         ],
+      );
+      assert.deepEqual(
+        merchantTrendReport.convertedTotals,
+        expectedConvertedExpenseTotals,
       );
       assert.equal(monthlySpendingReport.month, "2026-04");
       assert.equal(monthlySpendingReport.from, "2026-04-01");
@@ -438,6 +508,10 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["Travel booking", 978, 20000, 1],
           ["Kyiv Metro", 980, 1500, 1],
         ],
+      );
+      assert.deepEqual(
+        monthlySpendingReport.convertedTotals,
+        expectedConvertedExpenseTotals,
       );
       const emptyMonthlySpendingReport =
         await queryService.getMonthlySpendingReport(undefined, "2026-05");
