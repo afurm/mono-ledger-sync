@@ -20,6 +20,12 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 `MONOBANK_TOKEN` is a CI-only escape hatch. It exists so the opt-in live smoke test (`npm run test:live-monobank`, gated by `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1`) can call the real bank without going through the in-app paste-token flow. It is not part of the user-facing product flow and should not be set in a normal local dev shell.
 
+## Release notes
+
+- [v0.2.0 — Live by default](docs/release/0.2.0.md): first-run greeting leads with Sign in with Monobank, every route shows a sign-in prompt instead of fixture demo data when no token is saved, Re-check Monobank connection button, live bank/currency smoke test, and a new privacy test suite.
+- v0.1.1: GitHub Release `v0.1.1`; `mono-ledger-sync@0.1.1` on npm. Public discoverability metadata follow-up.
+- v0.1.0: Initial public package release. `mono-ledger-sync@0.1.0`; initial commit `5b1b6c2`.
+
 ## Goals
 
 - Sync personal Monobank transactions into a durable local ledger.
