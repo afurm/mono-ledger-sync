@@ -194,6 +194,51 @@ export interface SavingsRateReport {
   points: readonly SavingsRateReportPoint[];
 }
 
+export interface BalanceProjectionPoint {
+  date: string;
+  currencyCode: number;
+  startingBalance: number;
+  projectedOutflows: number;
+  projectedBalance: number;
+  eventCount: number;
+}
+
+export interface BalanceProjectionCurrencyTotal {
+  currencyCode: number;
+  currentBalance: number;
+  projectedOutflows: number;
+  projectedBalance: number;
+  eventCount: number;
+}
+
+export interface BalanceProjectionEvent {
+  id: string;
+  recurringItemId: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringCalendarEvent["frequency"];
+  currencyCode: number;
+  date: string;
+  dueAt: string;
+  projectedAmount: number;
+}
+
+export interface BalanceProjectionReport {
+  profile: string;
+  from: string;
+  to: string;
+  days: number;
+  generatedAt: string;
+  totalCurrentBalance: number;
+  totalProjectedOutflows: number;
+  totalProjectedBalance: number;
+  currencies: readonly number[];
+  totals: readonly BalanceProjectionCurrencyTotal[];
+  points: readonly BalanceProjectionPoint[];
+  events: readonly BalanceProjectionEvent[];
+}
+
 export interface CategoryTrendReportPoint {
   month: string;
   from: string;
@@ -655,6 +700,7 @@ export interface LocalAppSnapshot {
   categorySpending: readonly LedgerCategorySpending[];
   cashflowReport: CashflowReport;
   savingsRateReport: SavingsRateReport;
+  balanceProjectionReport: BalanceProjectionReport;
   categoryTrendReport: CategoryTrendReport;
   merchantTrendReport: MerchantTrendReport;
   monthlySpendingReport: MonthlySpendingReport;
@@ -691,6 +737,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "categorySpending"
   | "cashflowReport"
   | "savingsRateReport"
+  | "balanceProjectionReport"
   | "categoryTrendReport"
   | "merchantTrendReport"
   | "monthlySpendingReport"
@@ -709,6 +756,7 @@ type PersistedLocalAppSnapshot = Omit<
   categorySpending?: readonly LedgerCategorySpending[];
   cashflowReport?: CashflowReport;
   savingsRateReport?: SavingsRateReport;
+  balanceProjectionReport?: BalanceProjectionReport;
   categoryTrendReport?: CategoryTrendReport;
   merchantTrendReport?: MerchantTrendReport;
   monthlySpendingReport?: MonthlySpendingReport;
@@ -828,6 +876,26 @@ function emptySavingsRateReport(
   };
 }
 
+function emptyBalanceProjectionReport(
+  profile: string,
+  monthToDate: LedgerCashflowSummary,
+): BalanceProjectionReport {
+  return {
+    profile,
+    from: monthToDate.to,
+    to: monthToDate.to,
+    days: 1,
+    generatedAt: new Date().toISOString(),
+    totalCurrentBalance: 0,
+    totalProjectedOutflows: 0,
+    totalProjectedBalance: 0,
+    currencies: [],
+    totals: [],
+    points: [],
+    events: [],
+  };
+}
+
 function emptyCategoryTrendReport(
   profile: string,
   monthToDate: LedgerCashflowSummary,
@@ -919,6 +987,9 @@ function normalizeCachedLocalAppSnapshot(
       savingsRateReport:
         snapshot.savingsRateReport ??
         emptySavingsRateReport(snapshot.summary.profile, monthToDate),
+      balanceProjectionReport:
+        snapshot.balanceProjectionReport ??
+        emptyBalanceProjectionReport(snapshot.summary.profile, monthToDate),
       categoryTrendReport:
         snapshot.categoryTrendReport ??
         emptyCategoryTrendReport(snapshot.summary.profile, monthToDate),
@@ -1450,6 +1521,22 @@ export async function loadSavingsRateReport(options?: {
   );
 }
 
+export async function loadBalanceProjectionReport(options?: {
+  days?: number;
+}): Promise<BalanceProjectionReport> {
+  const params = new URLSearchParams();
+
+  if (options?.days !== undefined) {
+    params.set("days", String(options.days));
+  }
+
+  const query = params.toString();
+
+  return requestJson<BalanceProjectionReport>(
+    `/api/ledger/reports/balance-projection${query ? `?${query}` : ""}`,
+  );
+}
+
 export async function loadCategoryTrendReport(options?: {
   months?: number;
 }): Promise<CategoryTrendReport> {
@@ -1582,6 +1669,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       categorySpending,
       cashflowReport,
       savingsRateReport,
+      balanceProjectionReport,
       categoryTrendReport,
       merchantTrendReport,
       monthlySpendingReport,
@@ -1613,6 +1701,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       ),
       loadCashflowReport(),
       loadSavingsRateReport(),
+      loadBalanceProjectionReport(),
       loadCategoryTrendReport(),
       loadMerchantTrendReport(),
       loadMonthlySpendingReport(),
@@ -1650,6 +1739,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       categorySpending,
       cashflowReport,
       savingsRateReport,
+      balanceProjectionReport,
       categoryTrendReport,
       merchantTrendReport,
       monthlySpendingReport,

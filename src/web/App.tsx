@@ -145,6 +145,7 @@ import {
   deleteMonthlyCategoryBudget,
   createMonthlyCategoryBudget,
   ignoreRecurringDetection,
+  loadBalanceProjectionReport,
   loadCategoryTrendReport,
   loadCashflowReport,
   loadLocalAppSnapshot,
@@ -4788,6 +4789,252 @@ function SavingsRateReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
+function BalanceProjectionReportCard({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot;
+}) {
+  const [days, setDays] = useState(
+    String(snapshot.balanceProjectionReport.days),
+  );
+  const [report, setReport] = useState<
+    LocalAppSnapshot["balanceProjectionReport"]
+  >(snapshot.balanceProjectionReport);
+  const [status, setStatus] = useState<
+    | { state: "idle" }
+    | { state: "loading" }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
+  const rows = report.points.slice(0, 8);
+  const eventRows = report.events.slice(0, 5);
+  const maxOutflow = Math.max(...rows.map((row) => row.projectedOutflows), 0);
+  const singleCurrencyTotal =
+    report.totals.length === 1 ? report.totals[0] : undefined;
+  const projectedLabel =
+    singleCurrencyTotal === undefined
+      ? report.totals.length === 0
+        ? "0"
+        : "Mixed"
+      : formatMinorAmount(
+          singleCurrencyTotal.projectedBalance,
+          singleCurrencyTotal.currencyCode,
+        );
+  const outflowsLabel =
+    singleCurrencyTotal === undefined
+      ? report.totals.length === 0
+        ? "0"
+        : `${report.totals.length} currencies`
+      : formatMinorAmount(
+          singleCurrencyTotal.projectedOutflows,
+          singleCurrencyTotal.currencyCode,
+        );
+
+  useEffect(() => {
+    setDays(String(snapshot.balanceProjectionReport.days));
+    setReport(snapshot.balanceProjectionReport);
+    setStatus({ state: "idle" });
+  }, [snapshot.balanceProjectionReport]);
+
+  async function refreshReport() {
+    const parsedDays = Number(days);
+
+    setStatus({ state: "loading" });
+
+    try {
+      setReport(await loadBalanceProjectionReport({ days: parsedDays }));
+      setStatus({ state: "idle" });
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Balance projection report could not be loaded.",
+      });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Balance projection</CardTitle>
+        <CardDescription>
+          {report.from} through {report.to}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">{report.days} days</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void refreshReport();
+          }}
+        >
+          <Input
+            aria-label="Balance projection days"
+            className="h-9 w-[110px]"
+            max={180}
+            min={1}
+            type="number"
+            value={days}
+            onChange={(event) => setDays(event.target.value)}
+          />
+          <Button disabled={status.state === "loading"} size="sm" type="submit">
+            <RefreshCwIcon />
+            {status.state === "loading" ? "Loading" : "Load"}
+          </Button>
+        </form>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Projected</p>
+            <p className="mt-1 truncate text-sm font-semibold">
+              {projectedLabel}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Outflows</p>
+            <p className="mt-1 truncate text-sm font-semibold">
+              {outflowsLabel}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Events</p>
+            <p className="mt-1 text-sm font-semibold">{report.events.length}</p>
+          </div>
+        </div>
+
+        {report.totals.length > 1 ? (
+          <div className="grid gap-2">
+            {report.totals.map((total) => (
+              <div
+                className="grid gap-2 rounded-md border border-border p-3"
+                key={total.currencyCode}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {currencyLabel(total.currencyCode)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {total.eventCount} projected events
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold">
+                    {formatMinorAmount(
+                      total.projectedBalance,
+                      total.currencyCode,
+                    )}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {formatMinorAmount(
+                      total.currentBalance,
+                      total.currencyCode,
+                    )}{" "}
+                    current
+                  </span>
+                  <span className="text-right">
+                    -
+                    {formatMinorAmount(
+                      total.projectedOutflows,
+                      total.currencyCode,
+                    )}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No balances available for projection.
+          </p>
+        ) : (
+          <div className="grid gap-3">
+            {rows.map((row) => {
+              const width =
+                maxOutflow > 0
+                  ? Math.max(4, (row.projectedOutflows / maxOutflow) * 100)
+                  : 0;
+
+              return (
+                <div
+                  className="grid gap-2 rounded-md border border-border p-3"
+                  key={`${row.date}:${row.currencyCode}`}
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {row.date} · {currencyLabel(row.currencyCode)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.eventCount} events ·{" "}
+                        {formatMinorAmount(
+                          row.projectedOutflows,
+                          row.currencyCode,
+                        )}{" "}
+                        out
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold">
+                        {formatMinorAmount(
+                          row.projectedBalance,
+                          row.currencyCode,
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">projected</p>
+                    </div>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {eventRows.length > 0 ? (
+          <div className="grid gap-2">
+            {eventRows.map((event) => (
+              <div
+                className="flex items-center justify-between gap-3 rounded-md border border-border p-3"
+                key={event.id}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {event.merchantName ?? event.recurringItemId}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {event.date} · {event.frequency}
+                  </p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold">
+                  {formatMinorAmount(event.projectedAmount, event.currencyCode)}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {status.state === "error" ? (
+          <p className="text-sm text-destructive">{status.message}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CategoryTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   const [months, setMonths] = useState(
     String(snapshot.categoryTrendReport.months),
@@ -6131,6 +6378,7 @@ function OverviewRoute({
           <RecurringCalendarCard snapshot={snapshot} />
           <CashflowReportCard snapshot={snapshot} />
           <SavingsRateReportCard snapshot={snapshot} />
+          <BalanceProjectionReportCard snapshot={snapshot} />
           <CategoryTrendReportCard snapshot={snapshot} />
           <MerchantTrendReportCard snapshot={snapshot} />
           <MonthlySpendingReportCard snapshot={snapshot} />

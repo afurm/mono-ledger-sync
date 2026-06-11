@@ -56,6 +56,7 @@ import {
 import type {
   Category,
   CategoryRule,
+  BalanceProjectionReport,
   CategoryTrendReport,
   BudgetProgress,
   CashflowReport,
@@ -566,6 +567,18 @@ const savingsRateReportQuerySchema = {
 } as const;
 
 const savingsRateReportResponseSchema = {
+  type: "object",
+  additionalProperties: true,
+} as const;
+
+const balanceProjectionReportQuerySchema = {
+  type: "object",
+  properties: {
+    days: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+const balanceProjectionReportResponseSchema = {
   type: "object",
   additionalProperties: true,
 } as const;
@@ -2807,6 +2820,50 @@ function registerLocalApiRoutes(
             error instanceof Error
               ? error.message
               : "Savings rate report could not be generated.",
+        };
+      }
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/reports/balance-projection`,
+    {
+      schema: {
+        querystring: balanceProjectionReportQuerySchema,
+        response: {
+          200: balanceProjectionReportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | BalanceProjectionReport
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const days = readNumberQuery(query.days);
+
+      try {
+        return await services.queryService.getBalanceProjectionReport(
+          services.profile,
+          days,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_balance_projection_report_query",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Balance projection report could not be generated.",
         };
       }
     },

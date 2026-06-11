@@ -76,6 +76,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const categorySpending = await queryService.listCategorySpending();
       const cashflowReport = await queryService.getCashflowReport();
       const savingsRateReport = await queryService.getSavingsRateReport();
+      const balanceProjectionReport =
+        await queryService.getBalanceProjectionReport();
       const categoryTrendReport = await queryService.getCategoryTrendReport();
       const merchantTrendReport = await queryService.getMerchantTrendReport();
       const monthlySpendingReport =
@@ -104,6 +106,8 @@ test("query service defaults profile and wraps storage reads", async () => {
         await queryServices.reports.getCashflowReport();
       const groupedSavingsRateReport =
         await queryServices.reports.getSavingsRateReport();
+      const groupedBalanceProjectionReport =
+        await queryServices.reports.getBalanceProjectionReport();
       const groupedCategoryTrendReport =
         await queryServices.reports.getCategoryTrendReport();
       const groupedMerchantTrendReport =
@@ -249,6 +253,60 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", 978, 20000, 20000, 0, 0, 2],
           ["2026-04", 980, 8500000, 335750, 8164250, 96.05, 4],
         ],
+      );
+      const expectedBalanceTotals = [
+        ...balances
+          .reduce((totals, balance) => {
+            totals.set(
+              balance.currencyCode,
+              (totals.get(balance.currencyCode) ?? 0) + balance.balance,
+            );
+
+            return totals;
+          }, new Map())
+          .entries(),
+      ].sort((left, right) => left[0] - right[0]);
+
+      assert.equal(balanceProjectionReport.days, 30);
+      assert.equal(balanceProjectionReport.totalProjectedOutflows, 0);
+      assert.equal(balanceProjectionReport.events.length, 0);
+      assert.deepEqual(
+        balanceProjectionReport.totals
+          .map((row) => [
+            row.currencyCode,
+            row.currentBalance,
+            row.projectedOutflows,
+            row.projectedBalance,
+            row.eventCount,
+          ])
+          .sort((left, right) => left[0] - right[0]),
+        expectedBalanceTotals.map(([currencyCode, balance]) => [
+          currencyCode,
+          balance,
+          0,
+          balance,
+          0,
+        ]),
+      );
+      assert.deepEqual(
+        balanceProjectionReport.points
+          .map((row) => [
+            row.date,
+            row.currencyCode,
+            row.startingBalance,
+            row.projectedOutflows,
+            row.projectedBalance,
+            row.eventCount,
+          ])
+          .sort((left, right) => left[1] - right[1]),
+        expectedBalanceTotals.map(([currencyCode, balance]) => [
+          balanceProjectionReport.from,
+          currencyCode,
+          balance,
+          0,
+          balance,
+          0,
+        ]),
       );
       const singleMonthCashflowReport = await queryService.getCashflowReport(
         undefined,
@@ -443,6 +501,16 @@ test("query service defaults profile and wraps storage reads", async () => {
       );
       assert.deepEqual(
         {
+          ...groupedBalanceProjectionReport,
+          generatedAt: "generated",
+        },
+        {
+          ...balanceProjectionReport,
+          generatedAt: "generated",
+        },
+      );
+      assert.deepEqual(
+        {
           ...groupedCategoryTrendReport,
           generatedAt: "generated",
         },
@@ -574,6 +642,196 @@ test("query service ranks budget progress and overspend warnings", async () => {
       assert.deepEqual(
         await queryServices.budgets.listBudgetProgress(),
         progress,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("query service projects balances from recurring payments", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+
+      const database = new Database(databasePath);
+
+      try {
+        database.pragma("foreign_keys = ON");
+        database.exec(`
+          INSERT INTO accounts (
+            profile,
+            id,
+            type,
+            currency_code,
+            balance,
+            credit_limit,
+            masked_pan_json,
+            raw_json,
+            updated_at
+          ) VALUES (
+            'demo',
+            'account-uah',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{}',
+            '2026-05-17T08:00:00.000Z'
+          );
+
+          INSERT INTO recurring_items (
+            profile,
+            id,
+            account_id,
+            category_id,
+            merchant_name,
+            frequency,
+            expected_amount_min,
+            expected_amount_max,
+            is_active,
+            started_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          ) VALUES
+            (
+              'demo',
+              'weekly-gym',
+              'account-uah',
+              'subscriptions',
+              'Fixture Gym',
+              'weekly',
+              15000,
+              15000,
+              1,
+              '2026-04-01T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z',
+              '2026-04-01T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'monthly-internet',
+              'account-uah',
+              'subscriptions',
+              'Fixture Internet',
+              'monthly',
+              42000,
+              46000,
+              1,
+              '2026-01-20T00:00:00.000Z',
+              '2026-04-20T08:00:00.000Z',
+              '2026-01-20T00:00:00.000Z',
+              '2026-04-20T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'inactive-plan',
+              'account-uah',
+              'subscriptions',
+              'Inactive Plan',
+              'monthly',
+              1000,
+              1000,
+              0,
+              '2026-01-01T00:00:00.000Z',
+              '2026-04-01T00:00:00.000Z',
+              '2026-01-01T00:00:00.000Z',
+              '2026-04-01T00:00:00.000Z'
+            );
+        `);
+      } finally {
+        database.close();
+      }
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const asOf = new Date("2026-05-17T12:00:00.000Z");
+      const report = await queryService.getBalanceProjectionReport(
+        undefined,
+        14,
+        asOf,
+      );
+
+      assert.equal(report.from, "2026-05-17");
+      assert.equal(report.to, "2026-05-31");
+      assert.equal(report.days, 14);
+      assert.equal(report.totalCurrentBalance, 100000);
+      assert.equal(report.totalProjectedOutflows, 91000);
+      assert.equal(report.totalProjectedBalance, 9000);
+      assert.deepEqual(
+        report.totals.map((row) => [
+          row.currencyCode,
+          row.currentBalance,
+          row.projectedOutflows,
+          row.projectedBalance,
+          row.eventCount,
+        ]),
+        [[980, 100000, 91000, 9000, 4]],
+      );
+      assert.deepEqual(
+        report.points.map((row) => [
+          row.date,
+          row.currencyCode,
+          row.projectedOutflows,
+          row.projectedBalance,
+          row.eventCount,
+        ]),
+        [
+          ["2026-05-17", 980, 15000, 85000, 1],
+          ["2026-05-20", 980, 46000, 39000, 1],
+          ["2026-05-24", 980, 15000, 24000, 1],
+          ["2026-05-31", 980, 15000, 9000, 1],
+        ],
+      );
+      assert.deepEqual(
+        report.events.map((event) => [
+          event.recurringItemId,
+          event.date,
+          event.projectedAmount,
+          event.currencyCode,
+        ]),
+        [
+          ["weekly-gym", "2026-05-17", 15000, 980],
+          ["monthly-internet", "2026-05-20", 46000, 980],
+          ["weekly-gym", "2026-05-24", 15000, 980],
+          ["weekly-gym", "2026-05-31", 15000, 980],
+        ],
+      );
+      const groupedReport =
+        await queryServices.reports.getBalanceProjectionReport(
+          undefined,
+          14,
+          asOf,
+        );
+
+      assert.deepEqual(
+        {
+          ...groupedReport,
+          generatedAt: "generated",
+        },
+        {
+          ...report,
+          generatedAt: "generated",
+        },
+      );
+      await assert.rejects(
+        () => queryService.getBalanceProjectionReport(undefined, 181, asOf),
+        /between 1 and 180/,
       );
     } finally {
       await db.close();
@@ -2636,6 +2894,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       assert.equal(typeof services.query.getNetWorthTrend, "function");
       assert.equal(typeof services.query.getCashflowReport, "function");
       assert.equal(typeof services.query.getSavingsRateReport, "function");
+      assert.equal(
+        typeof services.query.getBalanceProjectionReport,
+        "function",
+      );
       assert.equal(typeof services.query.getCategoryTrendReport, "function");
       assert.equal(typeof services.query.getMerchantTrendReport, "function");
       assert.equal(typeof services.query.getMonthlySpendingReport, "function");
@@ -2671,6 +2933,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.reports.getSavingsRateReport,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.reports.getBalanceProjectionReport,
         "function",
       );
       assert.equal(

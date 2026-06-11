@@ -9,6 +9,10 @@ import type {
   SavingsRateReport,
   SavingsRateReportCurrencyTotal,
   SavingsRateReportPoint,
+  BalanceProjectionReport,
+  BalanceProjectionCurrencyTotal,
+  BalanceProjectionEvent,
+  BalanceProjectionPoint,
   CategoryTrendReport,
   CategoryTrendReportCategory,
   CategoryTrendReportPoint,
@@ -88,6 +92,11 @@ export interface LedgerReportQueryService {
     profile?: string,
     months?: number,
   ): Promise<SavingsRateReport>;
+  getBalanceProjectionReport(
+    profile?: string,
+    days?: number,
+    asOf?: Date,
+  ): Promise<BalanceProjectionReport>;
   getCategoryTrendReport(
     profile?: string,
     months?: number,
@@ -239,6 +248,8 @@ const MONTHLY_SPENDING_TRANSACTION_PAGE_SIZE = 500;
 const CASHFLOW_REPORT_TRANSACTION_PAGE_SIZE = 500;
 const DEFAULT_CASHFLOW_REPORT_MONTHS = 6;
 const MAX_CASHFLOW_REPORT_MONTHS = 24;
+const DEFAULT_BALANCE_PROJECTION_DAYS = 30;
+const MAX_BALANCE_PROJECTION_DAYS = 180;
 const TRANSFER_CATEGORY_ID = "transfers";
 const TRANSFER_DESCRIPTION_TERMS = [
   "transfer",
@@ -841,6 +852,24 @@ function readSavingsRateReportMonths(months: number | undefined): number {
   return normalizedMonths;
 }
 
+function readBalanceProjectionDays(days: number | undefined): number {
+  if (days === undefined) {
+    return DEFAULT_BALANCE_PROJECTION_DAYS;
+  }
+
+  if (!Number.isFinite(days)) {
+    throw new Error("Balance projection days must be a finite number.");
+  }
+
+  const normalizedDays = Math.trunc(days);
+
+  if (normalizedDays < 1 || normalizedDays > MAX_BALANCE_PROJECTION_DAYS) {
+    throw new Error("Balance projection days must be between 1 and 180.");
+  }
+
+  return normalizedDays;
+}
+
 function readCategoryTrendReportMonths(months: number | undefined): number {
   if (months === undefined) {
     return DEFAULT_CASHFLOW_REPORT_MONTHS;
@@ -1284,6 +1313,209 @@ async function buildSavingsRateReport(
     currencies: sortedTotals.map((row) => row.currencyCode),
     totals: sortedTotals,
     points: sortedPoints,
+  };
+}
+
+function projectedRecurringEventAmount(event: RecurringCalendarEvent): number {
+  const amount = event.expectedAmountMax ?? event.expectedAmountMin ?? 0;
+
+  return Math.max(0, amount);
+}
+
+async function buildBalanceProjectionReport(
+  db: SqliteLedgerDb,
+  profile: string,
+  daysInput: number | undefined,
+  asOf?: Date,
+): Promise<BalanceProjectionReport> {
+  const days = readBalanceProjectionDays(daysInput);
+  const fromDate = startOfUtcDate(asOf ?? new Date());
+  const toDate = addUtcDays(fromDate, days);
+  const from = fromDate.toISOString().slice(0, 10);
+  const to = toDate.toISOString().slice(0, 10);
+  const [balances, calendarEvents] = await Promise.all([
+    db.getAccountBalances(profile),
+    listRecurringCalendar(db, profile, fromDate, toDate),
+  ]);
+  const totals = new Map<number, BalanceProjectionCurrencyTotal>();
+  const pointBuckets = new Map<
+    string,
+    {
+      date: string;
+      currencyCode: number;
+      projectedOutflows: number;
+      eventCount: number;
+    }
+  >();
+  const events: BalanceProjectionEvent[] = [];
+
+  function ensureTotal(currencyCode: number): BalanceProjectionCurrencyTotal {
+    const existing = totals.get(currencyCode);
+
+    if (existing) {
+      return existing;
+    }
+
+    const created = {
+      currencyCode,
+      currentBalance: 0,
+      projectedOutflows: 0,
+      projectedBalance: 0,
+      eventCount: 0,
+    };
+
+    totals.set(currencyCode, created);
+
+    return created;
+  }
+
+  function ensurePointBucket(
+    date: string,
+    currencyCode: number,
+  ): {
+    date: string;
+    currencyCode: number;
+    projectedOutflows: number;
+    eventCount: number;
+  } {
+    const key = `${date}:${currencyCode}`;
+    const existing = pointBuckets.get(key);
+
+    if (existing) {
+      return existing;
+    }
+
+    const created = {
+      date,
+      currencyCode,
+      projectedOutflows: 0,
+      eventCount: 0,
+    };
+
+    pointBuckets.set(key, created);
+
+    return created;
+  }
+
+  for (const balance of balances) {
+    const total = ensureTotal(balance.currencyCode);
+
+    total.currentBalance += balance.balance;
+    total.projectedBalance = total.currentBalance;
+    ensurePointBucket(from, balance.currencyCode);
+  }
+
+  for (const event of calendarEvents) {
+    const projectedAmount = projectedRecurringEventAmount(event);
+
+    if (projectedAmount <= 0) {
+      continue;
+    }
+
+    const total = ensureTotal(event.currencyCode);
+    const point = ensurePointBucket(event.date, event.currencyCode);
+
+    total.projectedOutflows += projectedAmount;
+    total.projectedBalance = total.currentBalance - total.projectedOutflows;
+    total.eventCount += 1;
+    point.projectedOutflows += projectedAmount;
+    point.eventCount += 1;
+    events.push({
+      id: event.id,
+      recurringItemId: event.recurringItemId,
+      accountId: event.accountId,
+      ...(event.categoryId === undefined
+        ? {}
+        : { categoryId: event.categoryId }),
+      ...(event.merchantName === undefined
+        ? {}
+        : { merchantName: event.merchantName }),
+      frequency: event.frequency,
+      currencyCode: event.currencyCode,
+      date: event.date,
+      dueAt: event.dueAt,
+      projectedAmount,
+    });
+  }
+
+  const sortedTotals = [...totals.values()].sort((left, right) => {
+    const leftActivity = Math.abs(left.currentBalance) + left.projectedOutflows;
+    const rightActivity =
+      Math.abs(right.currentBalance) + right.projectedOutflows;
+
+    if (rightActivity !== leftActivity) {
+      return rightActivity - leftActivity;
+    }
+
+    return left.currencyCode - right.currencyCode;
+  });
+  const pointsByCurrency = new Map<number, BalanceProjectionPoint[]>();
+
+  for (const total of sortedTotals) {
+    let runningBalance = total.currentBalance;
+    const buckets = [...pointBuckets.values()]
+      .filter((bucket) => bucket.currencyCode === total.currencyCode)
+      .sort((left, right) => left.date.localeCompare(right.date));
+    const points = buckets.map((bucket): BalanceProjectionPoint => {
+      runningBalance -= bucket.projectedOutflows;
+
+      return {
+        date: bucket.date,
+        currencyCode: bucket.currencyCode,
+        startingBalance: total.currentBalance,
+        projectedOutflows: bucket.projectedOutflows,
+        projectedBalance: runningBalance,
+        eventCount: bucket.eventCount,
+      };
+    });
+
+    pointsByCurrency.set(total.currencyCode, points);
+  }
+
+  const sortedPoints = [...pointsByCurrency.values()]
+    .flat()
+    .sort((left, right) => {
+      const dateDiff = left.date.localeCompare(right.date);
+
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+
+      return left.currencyCode - right.currencyCode;
+    });
+  const sortedEvents = events.sort((left, right) => {
+    const dueDiff = Date.parse(left.dueAt) - Date.parse(right.dueAt);
+
+    if (dueDiff !== 0) {
+      return dueDiff;
+    }
+
+    return (left.merchantName ?? left.recurringItemId).localeCompare(
+      right.merchantName ?? right.recurringItemId,
+    );
+  });
+  const totalCurrentBalance = sortedTotals.reduce(
+    (sum, row) => sum + row.currentBalance,
+    0,
+  );
+  const totalProjectedOutflows = sortedTotals.reduce(
+    (sum, row) => sum + row.projectedOutflows,
+    0,
+  );
+
+  return {
+    profile,
+    from,
+    to,
+    days,
+    generatedAt: new Date().toISOString(),
+    totalCurrentBalance,
+    totalProjectedOutflows,
+    totalProjectedBalance: totalCurrentBalance - totalProjectedOutflows,
+    currencies: sortedTotals.map((row) => row.currencyCode),
+    totals: sortedTotals,
+    points: sortedPoints,
+    events: sortedEvents,
   };
 }
 
@@ -2552,6 +2784,14 @@ export function createLedgerQueryService({
         months,
       );
     },
+    getBalanceProjectionReport(profile, days, asOf) {
+      return buildBalanceProjectionReport(
+        db,
+        coerceProfile(profile, defaultProfile),
+        days,
+        asOf,
+      );
+    },
     getCategoryTrendReport(profile, months) {
       return buildCategoryTrendReport(
         db,
@@ -2660,6 +2900,7 @@ export function createLedgerQueryServices(
     reports: {
       getCashflowReport: query.getCashflowReport,
       getSavingsRateReport: query.getSavingsRateReport,
+      getBalanceProjectionReport: query.getBalanceProjectionReport,
       getCategoryTrendReport: query.getCategoryTrendReport,
       getMerchantTrendReport: query.getMerchantTrendReport,
       getMonthlySpendingReport: query.getMonthlySpendingReport,

@@ -80,6 +80,10 @@ test("documents the shared domain model contract", async () => {
     "SavingsRateReportPoint",
     "SavingsRateReportCurrencyTotal",
     "SavingsRateReport",
+    "BalanceProjectionPoint",
+    "BalanceProjectionCurrencyTotal",
+    "BalanceProjectionEvent",
+    "BalanceProjectionReport",
     "CategoryTrendReportPoint",
     "CategoryTrendReportCategory",
     "CategoryTrendReport",
@@ -259,6 +263,10 @@ test("web client caches local snapshots for offline browsing", async () => {
   );
   assert.match(
     apiSource,
+    /balanceProjectionReport:\s*snapshot\.balanceProjectionReport \?\?/,
+  );
+  assert.match(
+    apiSource,
     /categoryTrendReport:\s*snapshot\.categoryTrendReport \?\?/,
   );
   assert.match(
@@ -278,6 +286,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(apiSource, /loadMonthlySpendingReport/);
   assert.match(apiSource, /loadCashflowReport/);
   assert.match(apiSource, /loadSavingsRateReport/);
+  assert.match(apiSource, /loadBalanceProjectionReport/);
   assert.match(apiSource, /loadCategoryTrendReport/);
   assert.match(apiSource, /loadMerchantTrendReport/);
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
@@ -296,6 +305,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Net worth trend/);
   assert.match(appSource, /Cashflow report/);
   assert.match(appSource, /Savings rate report/);
+  assert.match(appSource, /Balance projection/);
   assert.match(appSource, /Category trend report/);
   assert.match(appSource, /Merchant trend report/);
   assert.match(appSource, /Monthly spending report/);
