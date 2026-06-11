@@ -14,3 +14,7 @@ Do not open public issues for vulnerabilities that may expose tokens, account id
 - Prefer local secure storage for tokens when live sync is implemented.
 - Use personal API tokens only for your own account data on your own machine.
 - Do not run this project as a hosted token relay, shared team service, or workflow for other people's banking data.
+
+## Threat model
+
+The full threat model — including the five categories (local token theft, database leakage, malicious webhook traffic, dependency compromise, accidental support data exposure) and the per-threat mitigations and residual risk — lives in [`docs/threat-model.md`](docs/threat-model.md).
