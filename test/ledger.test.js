@@ -4040,6 +4040,18 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/reports/monthly-spending",
       });
+      const cashflowReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/cashflow",
+      });
+      const oneMonthCashflowReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/cashflow?months=1",
+      });
+      const invalidCashflowReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/cashflow?months=25",
+      });
       const emptyMonthlySpendingReportResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/reports/monthly-spending?month=2026-05",
@@ -4282,6 +4294,35 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(monthlySpendingReportResponse.json().month, "2026-04");
       assert.equal(monthlySpendingReportResponse.json().totalExpenses, 408650);
       assert.equal(monthlySpendingReportResponse.json().transactionCount, 5);
+      assert.equal(cashflowReportResponse.statusCode, 200);
+      assert.equal(cashflowReportResponse.json().months, 6);
+      assert.equal(cashflowReportResponse.json().from, "2025-11-01");
+      assert.equal(cashflowReportResponse.json().to, "2026-04-30");
+      assert.equal(cashflowReportResponse.json().totalIncome, 8520000);
+      assert.equal(cashflowReportResponse.json().totalExpenses, 408650);
+      assert.equal(cashflowReportResponse.json().netCashflow, 8111350);
+      assert.deepEqual(
+        cashflowReportResponse
+          .json()
+          .totals.map((row) => [
+            row.currencyCode,
+            row.income,
+            row.expenses,
+            row.net,
+          ]),
+        [
+          [980, 8500000, 335750, 8164250],
+          [840, 0, 52900, -52900],
+          [978, 20000, 20000, 0],
+        ],
+      );
+      assert.equal(oneMonthCashflowReportResponse.statusCode, 200);
+      assert.equal(oneMonthCashflowReportResponse.json().from, "2026-04-01");
+      assert.equal(invalidCashflowReportResponse.statusCode, 400);
+      assert.equal(
+        invalidCashflowReportResponse.json().error,
+        "invalid_cashflow_report_query",
+      );
       assert.deepEqual(
         monthlySpendingReportResponse
           .json()

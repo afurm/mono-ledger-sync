@@ -145,6 +145,7 @@ import {
   deleteMonthlyCategoryBudget,
   createMonthlyCategoryBudget,
   ignoreRecurringDetection,
+  loadCashflowReport,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
   loadMonthlySpendingReport,
@@ -4318,6 +4319,236 @@ function MonthlySpendingReportCard({
   );
 }
 
+function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  const [months, setMonths] = useState(String(snapshot.cashflowReport.months));
+  const [report, setReport] = useState<LocalAppSnapshot["cashflowReport"]>(
+    snapshot.cashflowReport,
+  );
+  const [status, setStatus] = useState<
+    | { state: "idle" }
+    | { state: "loading" }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
+  const rows = report.points.slice(-8);
+  const maxActivity = Math.max(
+    ...rows.map((row) => row.income + row.expenses),
+    0,
+  );
+  const singleCurrencyTotal =
+    report.totals.length === 1 ? report.totals[0] : undefined;
+  const incomeLabel =
+    singleCurrencyTotal === undefined
+      ? report.totals.length === 0
+        ? "0"
+        : `${report.totals.length} currencies`
+      : formatMinorAmount(
+          singleCurrencyTotal.income,
+          singleCurrencyTotal.currencyCode,
+        );
+  const expenseLabel =
+    singleCurrencyTotal === undefined
+      ? report.totals.length === 0
+        ? "0"
+        : `${report.totals.length} currencies`
+      : formatMinorAmount(
+          singleCurrencyTotal.expenses,
+          singleCurrencyTotal.currencyCode,
+        );
+  const netLabel =
+    singleCurrencyTotal === undefined
+      ? report.totals.length === 0
+        ? "0"
+        : "Mixed"
+      : formatMinorAmount(
+          singleCurrencyTotal.net,
+          singleCurrencyTotal.currencyCode,
+        );
+
+  useEffect(() => {
+    setMonths(String(snapshot.cashflowReport.months));
+    setReport(snapshot.cashflowReport);
+    setStatus({ state: "idle" });
+  }, [snapshot.cashflowReport]);
+
+  async function refreshReport() {
+    const parsedMonths = Number(months);
+
+    setStatus({ state: "loading" });
+
+    try {
+      setReport(await loadCashflowReport({ months: parsedMonths }));
+      setStatus({ state: "idle" });
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Cashflow report could not be loaded.",
+      });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Cashflow report</CardTitle>
+        <CardDescription>
+          {report.from} through {report.to}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">{report.months} months</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void refreshReport();
+          }}
+        >
+          <Input
+            aria-label="Cashflow months"
+            className="h-9 w-[110px]"
+            max={24}
+            min={1}
+            type="number"
+            value={months}
+            onChange={(event) => setMonths(event.target.value)}
+          />
+          <Button disabled={status.state === "loading"} size="sm" type="submit">
+            <RefreshCwIcon />
+            {status.state === "loading" ? "Loading" : "Load"}
+          </Button>
+        </form>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Income</p>
+            <p className="mt-1 truncate text-sm font-semibold">{incomeLabel}</p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Expenses</p>
+            <p className="mt-1 truncate text-sm font-semibold">
+              {expenseLabel}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Net</p>
+            <p className="mt-1 truncate text-sm font-semibold">{netLabel}</p>
+          </div>
+        </div>
+
+        {report.totals.length > 1 ? (
+          <div className="grid gap-2">
+            {report.totals.map((total) => (
+              <div
+                className="grid gap-2 rounded-md border border-border p-3"
+                key={total.currencyCode}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {currencyLabel(total.currencyCode)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {total.transactionCount} transactions
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold">
+                    {formatMinorAmount(total.net, total.currencyCode)}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <span>
+                    +{formatMinorAmount(total.income, total.currencyCode)}
+                  </span>
+                  <span className="text-right">
+                    -{formatMinorAmount(total.expenses, total.currencyCode)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No cashflow activity found for this window.
+          </p>
+        ) : (
+          <div className="grid gap-3">
+            {rows.map((row) => {
+              const activity = row.income + row.expenses;
+              const incomeWidth =
+                maxActivity > 0
+                  ? Math.max(4, (row.income / maxActivity) * 100)
+                  : 0;
+              const expenseWidth =
+                maxActivity > 0
+                  ? Math.max(4, (row.expenses / maxActivity) * 100)
+                  : 0;
+              const href = buildTransactionFiltersHash({
+                ...defaultTransactionFilters(),
+                dateFrom: row.from,
+                dateTo: row.to,
+              });
+
+              return (
+                <a
+                  className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                  href={href}
+                  key={`${row.month}:${row.currencyCode}`}
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {row.month} · {currencyLabel(row.currencyCode)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.transactionCount} transactions
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold">
+                        {formatMinorAmount(row.net, row.currencyCode)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {activity === 0
+                          ? "No movement"
+                          : `${formatMinorAmount(row.income, row.currencyCode)} in`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid gap-1">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-emerald-500"
+                        style={{ width: `${incomeWidth}%` }}
+                      />
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-destructive"
+                        style={{ width: `${expenseWidth}%` }}
+                      />
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        )}
+
+        {status.state === "error" ? (
+          <p className="text-sm text-destructive">{status.message}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function recurringPaymentAmountLabel(payment: {
   expectedAmountMin?: number;
   expectedAmountMax?: number;
@@ -5309,6 +5540,7 @@ function OverviewRoute({
           <SubscriptionIncreaseAlertsCard snapshot={snapshot} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <RecurringCalendarCard snapshot={snapshot} />
+          <CashflowReportCard snapshot={snapshot} />
           <MonthlySpendingReportCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard

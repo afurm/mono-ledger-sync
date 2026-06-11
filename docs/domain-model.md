@@ -47,6 +47,9 @@ configuration, and direct filesystem behavior.
 - `MonthlySpendingReport`, `MonthlySpendingCurrencyTotal`,
   `MonthlySpendingCategory`, and `MonthlySpendingMerchant` define a month-scoped
   local spending report with category, merchant, and currency breakdowns.
+- `CashflowReport`, `CashflowReportCurrencyTotal`, and `CashflowReportPoint`
+  define a local income, expense, and net cashflow report over a bounded monthly
+  window.
 - `NetWorthTrend` defines the feature-gated net worth history response that
   remains disabled until manual accounts and assets exist.
 - `RecurringItem` defines a confirmed or user-managed recurring transaction

@@ -347,6 +347,40 @@ export interface MonthlySpendingReport {
   merchants: readonly MonthlySpendingMerchant[];
 }
 
+export interface CashflowReportPoint {
+  month: string;
+  from: string;
+  to: string;
+  currencyCode: number;
+  income: number;
+  expenses: number;
+  net: number;
+  transactionCount: number;
+}
+
+export interface CashflowReportCurrencyTotal {
+  currencyCode: number;
+  income: number;
+  expenses: number;
+  net: number;
+  transactionCount: number;
+}
+
+export interface CashflowReport {
+  profile: string;
+  from: string;
+  to: string;
+  months: number;
+  generatedAt: string;
+  totalIncome: number;
+  totalExpenses: number;
+  netCashflow: number;
+  transactionCount: number;
+  currencies: readonly number[];
+  totals: readonly CashflowReportCurrencyTotal[];
+  points: readonly CashflowReportPoint[];
+}
+
 export interface BudgetProgress {
   id: string;
   budgetId: string;
