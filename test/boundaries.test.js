@@ -75,6 +75,8 @@ const customControlSelectorPattern =
   /\.(?:button|btn|card|table|tabs|sidebar|drawer|dialog|toast|skeleton|badge|input|select|textarea|checkbox|switch|pagination|menu)(?=$|[\s.#:{>,\[])/;
 const genericDashboardCopyPattern =
   /\b(?:lorem ipsum|acme|generic dashboard|dashboard template|sample dashboard|analytics dashboard|sales dashboard|marketing dashboard|customer churn|conversion rate|total revenue|active users)\b/i;
+const placeholderRouteCopyPattern =
+  /\b(?:route wired into the app shell|next focused product slice|coming soon|under construction|placeholder route)\b/i;
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -419,6 +421,12 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
     /Rules & Mappings/,
     /Sync & Webhooks/,
     /Local reports/,
+    /Local setup runbook/,
+    /Token setup/,
+    /Backup, restore, and exports/,
+    /Troubleshooting/,
+    /Privacy model/,
+    /masked client-info probe/,
   ];
 
   for (const copyAnchor of productCopyAnchors) {
@@ -429,6 +437,8 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
   }
 
   assert.doesNotMatch(productUiSource, genericDashboardCopyPattern);
+  assert.doesNotMatch(productUiSource, placeholderRouteCopyPattern);
+  assert.doesNotMatch(productUiSource, /function PlaceholderRoute/);
 });
 
 test("keeps finance workspace typography compact", async () => {
