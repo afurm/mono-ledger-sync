@@ -18,6 +18,13 @@ import {
   type ExportPreset,
 } from "../exports/index.js";
 import {
+  collectDiagnostics,
+  collectSupportBundle,
+  type CollectDiagnosticsTokenStatus,
+  type DiagnosticsSnapshot,
+  type SupportBundleSnapshot,
+} from "./diagnostics.js";
+import {
   isLedgerSource,
   productArchitecture,
   version,
@@ -417,6 +424,105 @@ const healthResponseSchema = {
         storage: { const: productArchitecture.storage },
       },
     },
+  },
+} as const;
+
+const diagnosticsResponseSchema = {
+  type: "object",
+  required: [
+    "schemaVersion",
+    "profile",
+    "source",
+    "version",
+    "architecture",
+    "generatedAt",
+    "secureStorage",
+    "database",
+    "sync",
+    "webhooks",
+    "duplicates",
+    "token",
+  ],
+  properties: {
+    schemaVersion: { type: "string" },
+    profile: { type: "string" },
+    source: { enum: ["fixture", "monobank"] },
+    version: { type: "string" },
+    architecture: { type: "object" },
+    generatedAt: { type: "string" },
+    secureStorage: {
+      type: "object",
+      required: ["available", "platform", "backend"],
+      properties: {
+        available: { type: "boolean" },
+        platform: { type: "string" },
+        backend: { enum: ["keychain", "secret-service", "session"] },
+        reason: { type: "string" },
+      },
+    },
+    database: {
+      type: "object",
+      required: ["integrity", "filePath", "fileSize", "lastModified"],
+      properties: {
+        integrity: { enum: ["ok", "error"] },
+        integrityError: { type: "string" },
+        filePath: { type: "string" },
+        fileSize: { type: "number" },
+        lastModified: { type: "string" },
+      },
+    },
+    sync: {
+      type: "object",
+      required: ["lastSuccessfulAt", "ageHours", "staleCursors"],
+      properties: {
+        lastSuccessfulAt: { type: ["string", "null"] },
+        ageHours: { type: ["number", "null"] },
+        staleCursors: { type: "array" },
+      },
+    },
+    webhooks: {
+      type: "object",
+      required: ["pending", "processed", "failed", "ignored", "duplicate"],
+      properties: {
+        pending: { type: "number" },
+        processed: { type: "number" },
+        failed: { type: "number" },
+        ignored: { type: "number" },
+        duplicate: { type: "number" },
+      },
+    },
+    duplicates: {
+      type: "object",
+      required: ["last24h", "sinceFirstRun"],
+      properties: {
+        last24h: { type: "number" },
+        sinceFirstRun: { type: "number" },
+      },
+    },
+    token: {
+      type: "object",
+      required: ["present", "storage", "persistence"],
+      properties: {
+        present: { type: "boolean" },
+        storage: { enum: ["secure", "session"] },
+        persistence: { enum: ["persistent", "session"] },
+        fallbackReason: { type: "string" },
+      },
+    },
+  },
+} as const;
+
+const supportBundleResponseSchema = {
+  ...diagnosticsResponseSchema,
+  required: [
+    ...diagnosticsResponseSchema.required.filter((k) => k !== "token"),
+    "supportBundle",
+    "tokenRedacted",
+  ],
+  properties: {
+    ...diagnosticsResponseSchema.properties,
+    supportBundle: { const: true },
+    tokenRedacted: { const: true },
   },
 } as const;
 
@@ -4289,6 +4395,27 @@ export function createLocalApiServer(
   let webhookPort = options.port ?? 0;
   let webhookHost = localApiHost;
 
+  async function buildDiagnosticsTokenStatus(
+    services: LocalAppServices,
+  ): Promise<CollectDiagnosticsTokenStatus> {
+    const profile = services.profile;
+    const token = await monobankTokenStore.getToken(profile);
+    const status = (await monobankTokenStore.getStatus?.(profile)) ?? {
+      storage: token === undefined ? ("session" as const) : ("secure" as const),
+      persistence:
+        token === undefined ? ("session" as const) : ("persistent" as const),
+    };
+    const result: CollectDiagnosticsTokenStatus = {
+      hasToken: token !== undefined,
+      storage: status.storage,
+      persistence: status.persistence,
+    };
+    if (status.fallbackReason !== undefined) {
+      result.fallbackReason = status.fallbackReason;
+    }
+    return result;
+  }
+
   function resolveWebhookSettings(): Omit<
     LocalApiWebhookSettings,
     "enabled" | "path"
@@ -4739,6 +4866,54 @@ export function createLocalApiServer(
     localWebhookRoutePath,
     resolveWebhookSettings,
     monobankRateLimitState,
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/app/diagnostics`,
+    {
+      schema: {
+        response: {
+          200: diagnosticsResponseSchema,
+        },
+      },
+    },
+    async (): Promise<DiagnosticsSnapshot> => {
+      const services = await getServices();
+      const tokenStatus = await buildDiagnosticsTokenStatus(services);
+      return collectDiagnostics({
+        db: services.db,
+        queryService: services.queryService,
+        monobankTokenStore,
+        profile: services.profile,
+        source: services.source,
+        databasePath: services.databasePath,
+        tokenStatus,
+      });
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/app/diagnostics/support-bundle`,
+    {
+      schema: {
+        response: {
+          200: supportBundleResponseSchema,
+        },
+      },
+    },
+    async (): Promise<SupportBundleSnapshot> => {
+      const services = await getServices();
+      const tokenStatus = await buildDiagnosticsTokenStatus(services);
+      return collectSupportBundle({
+        db: services.db,
+        queryService: services.queryService,
+        monobankTokenStore,
+        profile: services.profile,
+        source: services.source,
+        databasePath: services.databasePath,
+        tokenStatus,
+      });
+    },
   );
 
   return {
