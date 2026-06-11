@@ -71,7 +71,7 @@ const themeTokenColorLinePattern = /^\s*--[a-z0-9-]+:\s*#[0-9a-fA-F]{3,8};\s*$/;
 const arbitraryVisualUtilityPattern =
   /\b(?:rounded|text|tracking|leading|font)-\[[^\]]+\]/;
 const customControlSelectorPattern =
-  /\.(?:button|btn|card|table|tabs|sidebar|drawer|dialog|toast|skeleton|badge|input|select|textarea|checkbox|menu)(?=$|[\s.#:{>,\[])/;
+  /\.(?:button|btn|card|table|tabs|sidebar|drawer|dialog|toast|skeleton|badge|input|select|textarea|checkbox|switch|pagination|menu)(?=$|[\s.#:{>,\[])/;
 const genericDashboardCopyPattern =
   /\b(?:lorem ipsum|acme|generic dashboard|dashboard template|sample dashboard|analytics dashboard|sales dashboard|marketing dashboard|customer churn|conversion rate|total revenue|active users)\b/i;
 
@@ -337,23 +337,37 @@ test("documents thin local UI component wrappers", async () => {
 test("keeps standard visual controls on shadcn primitives", async () => {
   const appSource = await readFile("src/web/App.tsx", "utf8");
   const requiredCompositionImports = [
+    /from "@\/components\/ui\/badge"/,
     /from "@\/components\/ui\/card"/,
     /from "@\/components\/ui\/dropdown-menu"/,
+    /from "@\/components\/ui\/dialog"/,
     /from "@\/components\/ui\/input"/,
     /from "@\/components\/ui\/label"/,
+    /from "@\/components\/ui\/pagination"/,
     /from "@\/components\/ui\/select"/,
     /from "@\/components\/ui\/sheet"/,
     /from "@\/components\/ui\/sidebar"/,
     /from "@\/components\/ui\/table"/,
     /from "@\/components\/ui\/tabs"/,
     /from "@\/components\/ui\/textarea"/,
+    /from "@\/components\/ui\/tooltip"/,
+    /from "@\/components\/ui\/sonner"/,
+    /from "@\/components\/ui\/switch"/,
   ];
 
   assert.match(appSource, /from "@\/components\/ui\/checkbox"/);
+  assert.match(appSource, /from "@\/components\/ui\/skeleton"/);
   assert.match(appSource, /from "@\/components\/ui\/textarea"/);
+  assert.match(appSource, /from "sonner"/);
   for (const importPattern of requiredCompositionImports) {
     assert.match(appSource, importPattern);
   }
+  assert.match(appSource, /<Pagination\b/);
+  assert.match(appSource, /<Switch\b/);
+  assert.match(appSource, /<Dialog\b/);
+  assert.match(appSource, /<Toaster\b/);
+  assert.match(appSource, /toast\.success/);
+  assert.match(appSource, /toast\.error/);
   assert.doesNotMatch(appSource, /<button\b/);
   assert.doesNotMatch(appSource, /<input\b/);
   assert.doesNotMatch(appSource, /<label\b/);

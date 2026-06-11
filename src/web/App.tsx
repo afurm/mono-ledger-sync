@@ -15,7 +15,6 @@ import {
   BanIcon,
   CalendarDaysIcon,
   CheckCheckIcon,
-  ChevronLeftIcon,
   ChevronRightIcon,
   CheckCircle2Icon,
   DatabaseIcon,
@@ -45,6 +44,7 @@ import {
   UserRoundIcon,
   WifiOffIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   Alert,
@@ -75,8 +75,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import {
   Select,
   SelectContent,
@@ -111,6 +128,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -129,6 +147,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Toaster } from "@/components/ui/sonner";
 
 import {
   type CategoryRule,
@@ -7181,29 +7200,55 @@ function TransactionsRoute({
               ? `Showing ${firstVisible}-${lastVisible} of ${transactions.total}`
               : "No rows to show"}
           </p>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={filters.page <= 1 || loading}
-              onClick={() => setPage(filters.page - 1)}
-            >
-              <ChevronLeftIcon data-icon="inline-start" />
-              Previous
-            </Button>
-            <Badge variant="outline">
-              Page {filters.page} of {totalPages}
-            </Badge>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={filters.page >= totalPages || loading}
-              onClick={() => setPage(filters.page + 1)}
-            >
-              Next
-              <ChevronRightIcon data-icon="inline-end" />
-            </Button>
-          </div>
+          <Pagination className="sm:w-auto sm:justify-end">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#transactions"
+                  aria-disabled={filters.page <= 1 || loading}
+                  tabIndex={filters.page <= 1 || loading ? -1 : undefined}
+                  className={
+                    filters.page <= 1 || loading
+                      ? "pointer-events-none opacity-50"
+                      : undefined
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+
+                    if (filters.page > 1 && !loading) {
+                      setPage(filters.page - 1);
+                    }
+                  }}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <Badge variant="outline">
+                  Page {filters.page} of {totalPages}
+                </Badge>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#transactions"
+                  aria-disabled={filters.page >= totalPages || loading}
+                  tabIndex={
+                    filters.page >= totalPages || loading ? -1 : undefined
+                  }
+                  className={
+                    filters.page >= totalPages || loading
+                      ? "pointer-events-none opacity-50"
+                      : undefined
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+
+                    if (filters.page < totalPages && !loading) {
+                      setPage(filters.page + 1);
+                    }
+                  }}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
         </div>
       </CardContent>
     </Card>
@@ -7578,6 +7623,7 @@ function SettingsRoute({
   const [showToken, setShowToken] = useState(false);
   const [acknowledgedLocalToken, setAcknowledgedLocalToken] = useState(false);
   const [confirmedTokenRemoval, setConfirmedTokenRemoval] = useState(false);
+  const [tokenRemovalDialogOpen, setTokenRemovalDialogOpen] = useState(false);
   const [isSwitchingSource, setIsSwitchingSource] = useState(false);
   const [sourceActionError, setSourceActionError] = useState<
     string | undefined
@@ -7673,11 +7719,13 @@ function SettingsRoute({
       const tokenStatus = await clearMonobankToken();
       setAcknowledgedLocalToken(false);
       setConfirmedTokenRemoval(false);
+      setTokenRemovalDialogOpen(false);
       setTokenActionMessage(
         `Monobank token removed from the ${tokenStatus.profile} local profile.`,
       );
       await onRefresh();
     } catch (error) {
+      setTokenRemovalDialogOpen(false);
       setTokenActionError(
         error instanceof Error ? error.message : "Unable to remove token.",
       );
@@ -7944,19 +7992,55 @@ function SettingsRoute({
               >
                 {isSavingToken ? "Saving..." : "Save token"}
               </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={
-                  isBusy ||
-                  !snapshot.config.token.hasToken ||
-                  !confirmedTokenRemoval
-                }
-                onClick={removeToken}
+              <Dialog
+                open={tokenRemovalDialogOpen}
+                onOpenChange={setTokenRemovalDialogOpen}
               >
-                <Trash2Icon data-icon="inline-start" />
-                {isDeletingToken ? "Removing..." : "Remove token"}
-              </Button>
+                <DialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={
+                      isBusy ||
+                      !snapshot.config.token.hasToken ||
+                      !confirmedTokenRemoval
+                    }
+                  >
+                    <Trash2Icon data-icon="inline-start" />
+                    {isDeletingToken ? "Removing..." : "Remove token"}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Remove Monobank token?</DialogTitle>
+                    <DialogDescription>
+                      This deletes the saved token for the {activeProfile} local
+                      profile. Existing SQLite ledger data and exports remain on
+                      this device.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={isDeletingToken}
+                      >
+                        Cancel
+                      </Button>
+                    </DialogClose>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={isDeletingToken}
+                      onClick={() => void removeToken()}
+                    >
+                      <Trash2Icon data-icon="inline-start" />
+                      {isDeletingToken ? "Removing..." : "Remove token"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </form>
 
@@ -8009,30 +8093,32 @@ function SettingsRoute({
             <span className="text-xs font-medium text-muted-foreground">
               Data source
             </span>
-            <div className="flex items-center gap-2">
-              <Select
-                value={snapshot.config.source}
-                onValueChange={(value) =>
-                  void setSource(value as LocalAppSnapshot["config"]["source"])
-                }
+            <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+              <Label htmlFor="monobank-source-switch" className="grid gap-1">
+                <span className="text-sm font-medium">Monobank API source</span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {isMonobankSource
+                    ? "Live Monobank API requests are enabled for local sync."
+                    : "Fixture mode keeps local review fully offline."}
+                </span>
+              </Label>
+              <Switch
+                id="monobank-source-switch"
+                checked={isMonobankSource}
                 disabled={isConfigBusy}
-              >
-                <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="Select source" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="fixture">
-                      Fixture (offline demo)
-                    </SelectItem>
-                    <SelectItem value="monobank">Monobank API</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <span className="text-xs text-muted-foreground">
-                {isConfigBusy ? "Updating source..." : "Switch source"}
-              </span>
+                aria-label="Use Monobank API source"
+                onCheckedChange={(checked) =>
+                  void setSource(checked ? "monobank" : "fixture")
+                }
+              />
             </div>
+            <span className="text-xs text-muted-foreground">
+              {isConfigBusy
+                ? "Updating source..."
+                : isMonobankSource
+                  ? "Monobank API source selected"
+                  : "Fixture source selected"}
+            </span>
           </div>
           <p className="text-muted-foreground">
             Data directory:{" "}
@@ -9970,9 +10056,20 @@ export default function App() {
 
   const runSync = useCallback(async () => {
     setSyncing(true);
+
     try {
       await runFixtureSync();
       await refresh();
+      toast.success("Local sync complete", {
+        description: "SQLite ledger data refreshed from the configured source.",
+      });
+    } catch (error) {
+      toast.error("Local sync failed", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "The local Fastify API could not complete sync.",
+      });
     } finally {
       setSyncing(false);
     }
@@ -10088,6 +10185,7 @@ export default function App() {
           </main>
         </SidebarInset>
       </SidebarProvider>
+      <Toaster theme={themeMode} />
     </TooltipProvider>
   );
 }
