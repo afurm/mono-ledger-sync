@@ -23,12 +23,12 @@ development, expose the local app through a temporary HTTPS tunnel and register
 only the tunnel origin plus the exact high-entropy webhook path from
 `/api/app/config`.
 
-The local API binds to `127.0.0.1` by default and rejects public interface
-binds until an authenticated external access mode exists. Keep tunnels
-short-lived, avoid public interface binds, never place tokens in webhook URLs,
-and remove the Monobank webhook URL or stop the tunnel when the session ends.
-Received webhook payloads remain local hints until a statement pull reconciles
-them into the ledger.
+The local API binds to `127.0.0.1` by default. Non-loopback binds require a
+passcode and should be temporary. Keep tunnels short-lived, avoid public
+interface binds unless passcode protection is enabled, never place tokens in
+webhook URLs, and remove the Monobank webhook URL or stop the tunnel when the
+session ends. Received webhook payloads remain local hints until a statement
+pull reconciles them into the ledger.
 
 ## Moving and restoring data
 

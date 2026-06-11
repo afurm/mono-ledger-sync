@@ -2133,6 +2133,14 @@ function WebhookSettingsPanel({
       mono: true,
     },
     {
+      label: "Access",
+      value:
+        config?.access?.authentication === "passcode"
+          ? "Passcode protected"
+          : "Local browser only",
+      mono: false,
+    },
+    {
       label: "Port",
       value: webhook ? String(webhook.port) : "Unknown",
       mono: true,
@@ -2167,7 +2175,7 @@ function WebhookSettingsPanel({
             pulls before relying on ledger changes.
           </AlertDescription>
         </Alert>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {settings.map((setting) => (
             <div
               className="rounded-md border border-border bg-muted/30 px-3 py-2"
@@ -2289,23 +2297,31 @@ function LocalOnlyIndicator({
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
 }) {
+  const access = snapshot?.config.access;
   const label = snapshot
-    ? snapshot.config.localOnly
+    ? (access?.localOnly ?? snapshot.config.localOnly)
       ? "Local only"
-      : "External connection"
+      : access?.authentication === "passcode"
+        ? "Passcode protected"
+        : "External connection"
     : loading
       ? "Checking local"
       : "Local unavailable";
   const detail = snapshot
     ? `${snapshot.health.status} API on ${
-        snapshot.config.access?.host ?? snapshot.config.webhook.host
-      } / ${snapshot.config.source} source`
+        access?.host ?? snapshot.config.webhook.host
+      } / ${snapshot.config.source} source / ${
+        access?.authentication === "passcode" ? "passcode" : "no"
+      } access gate`
     : "Waiting for the local Fastify API";
-  const variant = snapshot?.config.localOnly
-    ? "secondary"
-    : snapshot
-      ? "destructive"
-      : "outline";
+  const variant =
+    (access?.localOnly ?? snapshot?.config.localOnly)
+      ? "secondary"
+      : access?.authentication === "passcode"
+        ? "outline"
+        : snapshot
+          ? "destructive"
+          : "outline";
 
   return (
     <Tooltip>

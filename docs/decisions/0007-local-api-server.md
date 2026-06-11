@@ -21,8 +21,7 @@ Fastify route handlers should stay thin. They can validate requests, map HTTP er
 Default server behavior:
 
 - Bind to localhost by default.
-- Reject public interface binds unless the server has an authenticated external
-  access mode.
+- Require passcode authentication for public interface binds.
 - Choose a safe available port or fail with clear instructions.
 - Serve only the local UI and local product API.
 - Disable hosted/team/multi-tenant behavior because it is not part of the product.

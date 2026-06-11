@@ -1,20 +1,15 @@
 import { isLedgerSource, type LedgerSource } from "../core/index.js";
-import {
-  createLocalApiServer,
-  resolveLocalApiHost,
-  type LocalApiHost,
-  type LocalApiServerOptions,
-} from "./index.js";
+import { createLocalApiServer, type LocalApiServerOptions } from "./index.js";
 import { logStructured } from "../logging/index.js";
 
-function readHost(): LocalApiHost | undefined {
+function readHost(): string | undefined {
   const host = process.env.MONO_LEDGER_SYNC_HOST ?? process.env.HOST;
 
   if (host === undefined || host === "") {
     return undefined;
   }
 
-  return resolveLocalApiHost(host);
+  return host;
 }
 
 function readPort(): number | undefined {
@@ -74,6 +69,10 @@ if (process.env.MONO_LEDGER_SYNC_DATA_DIR) {
 
 if (process.env.MONOBANK_TOKEN) {
   serverOptions.monobankToken = process.env.MONOBANK_TOKEN;
+}
+
+if (process.env.MONO_LEDGER_SYNC_ACCESS_PASSCODE) {
+  serverOptions.accessPasscode = process.env.MONO_LEDGER_SYNC_ACCESS_PASSCODE;
 }
 
 const server = createLocalApiServer(serverOptions);
