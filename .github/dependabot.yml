@@ -1,13 +1,42 @@
 version: 2
+
+# Dependabot watches two ecosystems for the project:
+#   1. `npm` — the runtime and dev dependency graph from package.json.
+#   2. `github-actions` — the action SHAs pinned across .github/workflows/*.yml.
+#
+# Both ecosystems run on a weekly schedule so the security-advisory flow has a
+# consistent cadence, and both group minor/patch updates into a single PR so
+# the noise is bounded.
+
 updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
-      - "bot"
-    commit-message:
-      prefix: "chore"
-      include: "scope"
+      - "npm"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      patch-and-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "ci"
+      - "dependencies"
