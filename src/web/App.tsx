@@ -18,10 +18,12 @@ import {
   CheckCircle2Icon,
   DatabaseIcon,
   DownloadIcon,
+  ExternalLinkIcon,
   EyeOffIcon,
   EyeIcon,
   FilterXIcon,
   FileClockIcon,
+  KeyRoundIcon,
   LaptopIcon,
   MenuIcon,
   MoonIcon,
@@ -134,6 +136,7 @@ import {
   type LedgerTransactionSortField,
   type LocalActivityEvent,
   type LocalActivityEventType,
+  type LocalApiMonobankTokenStatus,
   type LocalAppSnapshot,
   type SyncRun,
   type WebhookEvent,
@@ -162,6 +165,10 @@ import {
   findLedgerEntryReviewCandidates,
 } from "./review";
 import { type SyncRunSummaryStats, summarizeSyncRuns } from "./sync-summary";
+import {
+  type FirstRunSignInCardView,
+  buildFirstRunSignInCardView,
+} from "./signin-card";
 
 type LoadState =
   | { status: "loading"; data?: LocalAppSnapshot; error?: undefined }
@@ -5517,6 +5524,78 @@ function maskTokenPreview(value: string): string {
   return `•••• ${normalized.slice(-4)}`;
 }
 
+function FirstRunSignInCard({
+  token,
+  profile,
+}: {
+  token: LocalApiMonobankTokenStatus;
+  profile: string;
+}) {
+  const view = buildFirstRunSignInCardView(token);
+  const hasInventory = view.inventoryStatus === "live";
+
+  return (
+    <Card data-testid="first-run-signin-card">
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="grid gap-1">
+            <CardTitle className="flex items-center gap-2">
+              <KeyRoundIcon
+                aria-hidden="true"
+                className="size-4 text-primary"
+              />
+              <span data-testid="first-run-signin-heading">{view.heading}</span>
+            </CardTitle>
+            <CardDescription data-testid="first-run-signin-description">
+              {view.description}
+            </CardDescription>
+          </div>
+          <Badge variant={token.hasToken ? "default" : "outline"}>
+            {profile}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        {!token.hasToken && (
+          <div className="grid gap-2">
+            <p className="text-muted-foreground">
+              Open the Monobank developer portal to copy a fresh personal API
+              token, then paste it into the form below.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm" variant="outline">
+                <a
+                  href={view.ctaHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="open-monobank-portal"
+                >
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  {view.ctaLabel}
+                </a>
+              </Button>
+            </div>
+          </div>
+        )}
+        {token.hasToken && (
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={hasInventory ? "default" : "secondary"}>
+                {view.inventoryLabel}
+              </Badge>
+              <span className="text-muted-foreground">
+                {hasInventory
+                  ? "Your masked account summary is loaded from a live client-info probe."
+                  : "Save changes or run a sync to populate the masked account summary."}
+              </span>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SettingsRoute({
   snapshot,
   loading,
@@ -5691,6 +5770,10 @@ function SettingsRoute({
 
   return (
     <div className="flex flex-col gap-4">
+      <FirstRunSignInCard
+        token={snapshot.config.token}
+        profile={activeProfile}
+      />
       <Card>
         <CardHeader>
           <CardTitle>Workspace setup</CardTitle>
