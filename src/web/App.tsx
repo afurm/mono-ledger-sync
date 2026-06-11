@@ -146,6 +146,7 @@ import {
   loadLedgerTransactions,
   clearMonobankToken,
   initializeWorkspace,
+  recheckMonobankConnection,
   saveMonobankToken,
   runFixtureSync,
   setMonobankSource,
@@ -5587,12 +5588,48 @@ function FirstRunEmptyStatePrompt({
 function FirstRunSignInCard({
   token,
   profile,
+  onRecheckRefresh,
 }: {
   token: LocalApiMonobankTokenStatus;
   profile: string;
+  onRecheckRefresh: () => Promise<void>;
 }) {
   const view = buildFirstRunSignInCardView(token);
   const hasInventory = view.inventoryStatus === "live";
+  const [recheckState, setRecheckState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "success"; checkedAt: string }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+  const [isRechecking, setIsRechecking] = useState(false);
+
+  async function handleRecheck(): Promise<void> {
+    setIsRechecking(true);
+    setRecheckState({ status: "loading" });
+    try {
+      const result = await recheckMonobankConnection();
+      if ("error" in result && result.error !== undefined) {
+        setRecheckState({
+          status: "error",
+          message: result.message ?? "Re-check failed.",
+        });
+      } else {
+        setRecheckState({
+          status: "success",
+          checkedAt: new Date().toISOString(),
+        });
+        await onRecheckRefresh();
+      }
+    } catch (error) {
+      setRecheckState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Re-check failed.",
+      });
+    } finally {
+      setIsRechecking(false);
+    }
+  }
 
   return (
     <Card data-testid="first-run-signin-card">
@@ -5638,17 +5675,49 @@ function FirstRunSignInCard({
           </div>
         )}
         {token.hasToken && (
-          <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={hasInventory ? "default" : "secondary"}>
-                {view.inventoryLabel}
-              </Badge>
-              <span className="text-muted-foreground">
-                {hasInventory
-                  ? "Your masked account summary is loaded from a live client-info probe."
-                  : "Save changes or run a sync to populate the masked account summary."}
-              </span>
+          <div className="grid gap-2">
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={hasInventory ? "default" : "secondary"}>
+                  {view.inventoryLabel}
+                </Badge>
+                <span className="text-muted-foreground">
+                  {hasInventory
+                    ? "Your masked account summary is loaded from a live client-info probe."
+                    : "Save changes or run a sync to populate the masked account summary."}
+                </span>
+              </div>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onClick={() => void handleRecheck()}
+                disabled={isRechecking}
+                data-testid="recheck-monobank-connection"
+              >
+                <RefreshCwIcon data-icon="inline-start" />
+                {isRechecking ? "Re-checking..." : view.ctaLabel}
+              </Button>
+            </div>
+            {recheckState.status === "success" && (
+              <Alert data-testid="recheck-success">
+                <CheckCircle2Icon />
+                <AlertTitle>Connection verified</AlertTitle>
+                <AlertDescription>
+                  Monobank client-info re-checked successfully at{" "}
+                  {new Date(recheckState.checkedAt).toLocaleString()}.
+                </AlertDescription>
+              </Alert>
+            )}
+            {recheckState.status === "error" && (
+              <Alert variant="destructive" data-testid="recheck-error">
+                <AlertCircleIcon />
+                <AlertTitle>Re-check failed</AlertTitle>
+                <AlertDescription>{recheckState.message}</AlertDescription>
+              </Alert>
+            )}
           </div>
         )}
       </CardContent>
@@ -5833,6 +5902,7 @@ function SettingsRoute({
       <FirstRunSignInCard
         token={snapshot.config.token}
         profile={activeProfile}
+        onRecheckRefresh={onRefresh}
       />
       <Card>
         <CardHeader>

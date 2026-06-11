@@ -1886,6 +1886,9 @@ function registerLocalApiRoutes(
     token: string,
     profile: string,
   ) => Promise<LocalApiMonobankTokenStatus>,
+  recheckMonobankToken: (
+    profile: string,
+  ) => Promise<LocalApiMonobankTokenStatus>,
   removeMonobankToken: () => Promise<LocalApiMonobankTokenStatus>,
   setSource: (source: LedgerSource) => Promise<void>,
   getMonobankTokenStoreStatus: (
@@ -2219,6 +2222,34 @@ function registerLocalApiRoutes(
       },
     },
     async (): Promise<LocalApiMonobankTokenStatus> => removeMonobankToken(),
+  );
+
+  app.post(
+    `${localApiRoutePrefix}/app/token/recheck`,
+    {
+      schema: {
+        response: {
+          200: monobankTokenResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      _request,
+      reply,
+    ): Promise<
+      LocalApiMonobankTokenStatus | { error: string; message: string }
+    > => {
+      const profile = resolveProfile(options);
+      const result = await recheckMonobankToken(profile);
+
+      if ("error" in result) {
+        reply.code(400);
+        return result;
+      }
+
+      return result;
+    },
   );
 
   app.patch(
@@ -3353,6 +3384,116 @@ export function createLocalApiServer(
     };
   }
 
+  async function recheckMonobankToken(profile: string): Promise<
+    LocalApiMonobankTokenStatus & {
+      clientInfo?: LocalApiMonobankClientInfoSummary;
+      error?: string;
+      message?: string;
+      upstreamStatus?: number;
+    }
+  > {
+    const token = monobankToken ?? (await monobankTokenStore.getToken(profile));
+
+    if (token === undefined) {
+      return {
+        profile,
+        hasToken: false,
+        storage: "session",
+        persistence: "session",
+        error: "no_token",
+        message: "No Monobank token is saved for this profile.",
+      };
+    }
+
+    const probe = options.monobankTokenProbeAdapter
+      ? options.monobankTokenProbeAdapter
+      : createMonobankHttpAdapter({
+          token,
+          ...(options.monobankBaseUrl !== undefined
+            ? { baseUrl: options.monobankBaseUrl }
+            : {}),
+          rateLimitState: monobankRateLimitState,
+        });
+
+    try {
+      const clientInfo = await probe.getClientInfo();
+      const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
+      const storage = tokenStoreStatus.storage;
+      const persistence = tokenStoreStatus.persistence;
+      const fallbackReason = tokenStoreStatus.fallbackReason;
+
+      logStructured(
+        "info",
+        "Monobank client-info re-checked against the live API.",
+        {
+          profile,
+          accountCount: clientInfo.accounts.length,
+          jarCount: clientInfo.jars?.length ?? 0,
+          clientId: clientInfo.clientId,
+        },
+        {
+          secrets: [token],
+          ...(options.logSink !== undefined ? { logger: options.logSink } : {}),
+        },
+      );
+
+      return {
+        profile,
+        hasToken: true,
+        storage,
+        persistence,
+        ...(fallbackReason !== undefined ? { fallbackReason } : {}),
+        clientInfo: {
+          clientId: clientInfo.clientId,
+          name: clientInfo.name,
+          accounts: clientInfo.accounts.length,
+          jars: clientInfo.jars?.length ?? 0,
+          masked: true,
+        },
+      };
+    } catch (error) {
+      const upstreamStatus =
+        error instanceof MonobankApiError
+          ? error.response.statusCode
+          : undefined;
+      const upstreamMessage =
+        error instanceof MonobankApiError
+          ? error.response.message
+          : error instanceof Error
+            ? error.message
+            : "Monobank personal API probe failed.";
+
+      logStructured(
+        "warn",
+        "Monobank client-info re-check failed against the live API.",
+        {
+          profile,
+          ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+        },
+        {
+          secrets: [token],
+          ...(options.logSink !== undefined ? { logger: options.logSink } : {}),
+        },
+      );
+
+      const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
+      const storage = tokenStoreStatus.storage;
+      const persistence = tokenStoreStatus.persistence;
+      const fallbackReason = tokenStoreStatus.fallbackReason;
+
+      return {
+        profile,
+        hasToken: true,
+        storage,
+        persistence,
+        ...(fallbackReason !== undefined ? { fallbackReason } : {}),
+        error: "monobank_token_invalid",
+        message: upstreamMessage,
+        ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+      };
+    }
+  }
+
   async function saveMonobankToken(
     token: string,
     profile: string,
@@ -3534,6 +3675,7 @@ export function createLocalApiServer(
     getServices,
     getMonobankToken,
     saveMonobankToken,
+    recheckMonobankToken,
     removeMonobankToken,
     updateSource,
     getMonobankTokenStoreStatus,
