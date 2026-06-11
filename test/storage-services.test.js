@@ -812,13 +812,22 @@ test("query service projects balances from recurring payments", async () => {
           ["weekly-gym", "2026-05-31", 15000, 980],
         ],
       );
-      assert.deepEqual(
+      const groupedReport =
         await queryServices.reports.getBalanceProjectionReport(
           undefined,
           14,
           asOf,
-        ),
-        report,
+        );
+
+      assert.deepEqual(
+        {
+          ...groupedReport,
+          generatedAt: "generated",
+        },
+        {
+          ...report,
+          generatedAt: "generated",
+        },
       );
       await assert.rejects(
         () => queryService.getBalanceProjectionReport(undefined, 181, asOf),
