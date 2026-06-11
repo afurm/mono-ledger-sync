@@ -102,7 +102,10 @@ export const localApiRoutePrefix = "/api";
 export const defaultLocalApiHost = "127.0.0.1";
 const localApiLocalHosts = [defaultLocalApiHost, "localhost"] as const;
 export type LocalApiHost = (typeof localApiLocalHosts)[number];
+export type LocalApiAccessAuthentication = "none" | "passcode";
 const defaultWebhookPathEntropyBytes = 16;
+const localApiAccessPasscodeHeader = "x-mono-ledger-sync-passcode";
+const localApiAccessBasicRealm = "mono-ledger-sync";
 const webhookRouteIdPrefix = `${localApiRoutePrefix}/webhooks/monobank-`;
 type LocalWebhookRoutePath =
   `${typeof localApiRoutePrefix}/webhooks/monobank-${string}`;
@@ -134,6 +137,112 @@ export function resolveLocalApiHost(host: string | undefined): LocalApiHost {
   );
 }
 
+function resolveLocalApiAccessPasscode(
+  options: Pick<LocalApiServerOptions, "accessPasscode">,
+): string | undefined {
+  const optionPasscode = options.accessPasscode?.trim();
+
+  if (optionPasscode) {
+    return optionPasscode;
+  }
+
+  const envPasscode = process.env.MONO_LEDGER_SYNC_ACCESS_PASSCODE?.trim();
+
+  return envPasscode || undefined;
+}
+
+export function resolveLocalApiAccessBinding(
+  options: Pick<LocalApiServerOptions, "host" | "accessPasscode"> = {},
+): LocalApiAccessBinding {
+  const host = options.host?.trim() || defaultLocalApiHost;
+
+  if (isLocalApiHost(host)) {
+    return {
+      localOnly: true,
+      host,
+      authentication: "none",
+    };
+  }
+
+  if (resolveLocalApiAccessPasscode(options) === undefined) {
+    throw new DomainError(
+      "External Local API binding requires MONO_LEDGER_SYNC_ACCESS_PASSCODE or accessPasscode.",
+      "config_invalid",
+      "config",
+      { field: "accessPasscode", host, localOnly: false },
+    );
+  }
+
+  return {
+    localOnly: false,
+    host,
+    authentication: "passcode",
+  };
+}
+
+interface LocalApiAccessControl extends LocalApiAccessBinding {
+  passcode?: string;
+}
+
+function resolveLocalApiAccessControl(
+  options: Pick<LocalApiServerOptions, "host" | "accessPasscode">,
+): LocalApiAccessControl {
+  const binding = resolveLocalApiAccessBinding(options);
+  const passcode = resolveLocalApiAccessPasscode(options);
+
+  return passcode === undefined ? binding : { ...binding, passcode };
+}
+
+function constantTimeStringEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    crypto.timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
+function readHeaderValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function readBasicAuthPasscode(
+  authorization: string | undefined,
+): string | undefined {
+  if (!authorization?.startsWith("Basic ")) {
+    return undefined;
+  }
+
+  try {
+    const decoded = Buffer.from(authorization.slice(6), "base64").toString(
+      "utf8",
+    );
+    const separator = decoded.indexOf(":");
+
+    return separator === -1 ? undefined : decoded.slice(separator + 1);
+  } catch {
+    return undefined;
+  }
+}
+
+function requestHasAccessPasscode(
+  headers: Record<string, string | string[] | undefined>,
+  passcode: string,
+): boolean {
+  const headerPasscode = readHeaderValue(headers[localApiAccessPasscodeHeader]);
+  const basicPasscode = readBasicAuthPasscode(
+    readHeaderValue(headers.authorization),
+  );
+
+  return [headerPasscode, basicPasscode].some(
+    (candidate) =>
+      candidate !== undefined && constantTimeStringEquals(candidate, passcode),
+  );
+}
+
 const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
 const localWebBuildDir = path.resolve(serverModuleDir, "../web");
 const localWebAssetsDir = path.join(localWebBuildDir, "assets");
@@ -141,6 +250,7 @@ const localWebAssetsDir = path.join(localWebBuildDir, "assets");
 export interface LocalApiServerOptions {
   host?: string;
   port?: number;
+  accessPasscode?: string;
   profile?: string;
   source?: LedgerSource;
   dataDir?: string;
@@ -186,7 +296,7 @@ export interface LocalApiTestResponse {
 
 export interface LocalApiHealth {
   status: "ok";
-  localOnly: true;
+  localOnly: boolean;
   version: typeof version;
   framework: typeof localApiServerFramework;
   apiPrefix: typeof localApiRoutePrefix;
@@ -202,8 +312,9 @@ export interface LocalApiWebhookSettings {
 }
 
 export interface LocalApiAccessBinding {
-  localOnly: true;
-  host: LocalApiHost;
+  localOnly: boolean;
+  host: string;
+  authentication: LocalApiAccessAuthentication;
 }
 
 interface LocalApiMonobankTokenStatus {
@@ -233,7 +344,7 @@ export interface LocalApiAppConfig {
   source: LedgerSource;
   dataDir: string;
   databasePath: string;
-  localOnly: true;
+  localOnly: boolean;
   access: LocalApiAccessBinding;
   webhook: LocalApiWebhookSettings;
   token: LocalApiMonobankTokenStatus;
@@ -293,7 +404,7 @@ const healthResponseSchema = {
   ],
   properties: {
     status: { const: "ok" },
-    localOnly: { const: true },
+    localOnly: { type: "boolean" },
     version: { const: version },
     framework: { const: localApiServerFramework },
     apiPrefix: { const: localApiRoutePrefix },
@@ -393,14 +504,15 @@ const appConfigResponseSchema = {
     source: { enum: ["fixture", "monobank"] },
     dataDir: { type: "string" },
     databasePath: { type: "string" },
-    localOnly: { const: true },
+    localOnly: { type: "boolean" },
     access: {
       type: "object",
-      required: ["localOnly", "host"],
+      required: ["localOnly", "host", "authentication"],
       additionalProperties: false,
       properties: {
-        localOnly: { const: true },
-        host: { enum: ["127.0.0.1", "localhost"] },
+        localOnly: { type: "boolean" },
+        host: { type: "string" },
+        authentication: { enum: ["none", "passcode"] },
       },
     },
     webhook: {
@@ -2181,10 +2293,70 @@ async function readBuiltWebAsset(
   }
 }
 
+function requestPathname(url: string): string {
+  return new URL(url, "http://local").pathname;
+}
+
+function requestCanBypassAccessGuard(
+  method: string,
+  url: string,
+  localWebhookRoutePath: LocalWebhookRoutePath,
+): boolean {
+  return method === "POST" && requestPathname(url) === localWebhookRoutePath;
+}
+
+function registerLocalApiAccessGuard(
+  app: FastifyInstance,
+  access: LocalApiAccessControl,
+  localWebhookRoutePath: LocalWebhookRoutePath,
+): void {
+  if (access.authentication === "none") {
+    return;
+  }
+
+  const passcode = access.passcode;
+
+  if (passcode === undefined) {
+    throw new DomainError(
+      "External Local API binding requires an access passcode.",
+      "config_invalid",
+      "config",
+      { field: "accessPasscode", host: access.host, localOnly: false },
+    );
+  }
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (
+      requestCanBypassAccessGuard(
+        request.method,
+        request.url,
+        localWebhookRoutePath,
+      )
+    ) {
+      return;
+    }
+
+    if (requestHasAccessPasscode(request.headers, passcode)) {
+      return;
+    }
+
+    reply
+      .code(401)
+      .header(
+        "www-authenticate",
+        `Basic realm="${localApiAccessBasicRealm}", charset="UTF-8"`,
+      )
+      .send({
+        error: "access_auth_required",
+        message: "Local API access passcode is required.",
+      });
+  });
+}
+
 function registerLocalApiRoutes(
   app: FastifyInstance,
   options: LocalApiServerOptions,
-  localApiHost: LocalApiHost,
+  localApiAccess: LocalApiAccessBinding,
   getServices: () => Promise<LocalAppServices>,
   getMonobankToken: () => string | undefined,
   saveMonobankToken: (
@@ -2334,11 +2506,8 @@ function registerLocalApiRoutes(
       source: services.source,
       dataDir: services.dataDir,
       databasePath: services.databasePath,
-      localOnly: true,
-      access: {
-        localOnly: true,
-        host: localApiHost,
-      },
+      localOnly: localApiAccess.localOnly,
+      access: localApiAccess,
       token: {
         profile: services.profile,
         hasToken: monobankToken !== undefined,
@@ -2401,7 +2570,7 @@ function registerLocalApiRoutes(
     },
     async (): Promise<LocalApiHealth> => ({
       status: "ok",
-      localOnly: true,
+      localOnly: localApiAccess.localOnly,
       version,
       framework: localApiServerFramework,
       apiPrefix: localApiRoutePrefix,
@@ -4093,7 +4262,9 @@ function registerLocalApiRoutes(
 export function createLocalApiServer(
   options: LocalApiServerOptions = {},
 ): LocalApiServer {
-  const localApiHost = resolveLocalApiHost(options.host);
+  const localApiAccessControl = resolveLocalApiAccessControl(options);
+  const { passcode: _passcode, ...localApiAccess } = localApiAccessControl;
+  const localApiHost = localApiAccess.host;
   const app = Fastify({
     logger: false,
   });
@@ -4116,7 +4287,7 @@ export function createLocalApiServer(
   let storedSettingsLoadPromise: Promise<void> | undefined;
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
-  let webhookHost: LocalApiHost = localApiHost;
+  let webhookHost = localApiHost;
 
   function resolveWebhookSettings(): Omit<
     LocalApiWebhookSettings,
@@ -4136,12 +4307,7 @@ export function createLocalApiServer(
     if (Number.isFinite(parsedPort) && parsedPort > 0) {
       webhookPort = parsedPort;
     }
-    if (
-      parsedUrl.hostname === "127.0.0.1" ||
-      parsedUrl.hostname === "localhost"
-    ) {
-      webhookHost = resolveLocalApiHost(parsedUrl.hostname);
-    }
+    webhookHost = parsedUrl.hostname || webhookHost;
 
     return {
       host: webhookHost,
@@ -4553,10 +4719,16 @@ export function createLocalApiServer(
     );
   }
 
+  registerLocalApiAccessGuard(
+    app,
+    localApiAccessControl,
+    localWebhookRoutePath,
+  );
+
   registerLocalApiRoutes(
     app,
     options,
-    localApiHost,
+    localApiAccess,
     getServices,
     getMonobankToken,
     saveMonobankToken,

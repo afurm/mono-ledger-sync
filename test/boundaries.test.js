@@ -8,6 +8,7 @@ import {
   defaultLocalApiHost,
   localApiRoutePrefix,
   localApiServerFramework,
+  resolveLocalApiAccessBinding,
   resolveLocalApiHost,
 } from "mono-ledger-sync/server";
 import {
@@ -367,13 +368,29 @@ test("local API binding defaults to loopback and rejects public hosts", async ()
   assert.equal(defaultLocalApiHost, "127.0.0.1");
   assert.equal(resolveLocalApiHost(undefined), "127.0.0.1");
   assert.equal(resolveLocalApiHost(" localhost "), "localhost");
+  assert.deepEqual(resolveLocalApiAccessBinding(), {
+    localOnly: true,
+    host: "127.0.0.1",
+    authentication: "none",
+  });
   assert.throws(
     () => resolveLocalApiHost("0.0.0.0"),
     /Local API host must be 127\.0\.0\.1 or localhost/,
   );
   assert.throws(
     () => createLocalApiServer({ host: "0.0.0.0" }),
-    /external binding is protected by authentication/,
+    /External Local API binding requires/,
+  );
+  assert.deepEqual(
+    resolveLocalApiAccessBinding({
+      host: "0.0.0.0",
+      accessPasscode: "test-passcode",
+    }),
+    {
+      localOnly: false,
+      host: "0.0.0.0",
+      authentication: "passcode",
+    },
   );
 
   const server = createLocalApiServer({
@@ -395,8 +412,65 @@ test("local API binding defaults to loopback and rejects public hosts", async ()
     assert.deepEqual(body.access, {
       localOnly: true,
       host: "127.0.0.1",
+      authentication: "none",
     });
     assert.equal(body.webhook.host, "127.0.0.1");
+  } finally {
+    await server.close();
+  }
+});
+
+test("external local API binding requires passcode access", async () => {
+  const passcode = "test-passcode";
+  const authorization = `Basic ${Buffer.from(`local:${passcode}`).toString(
+    "base64",
+  )}`;
+  const server = createLocalApiServer({
+    host: "0.0.0.0",
+    accessPasscode: passcode,
+    profile: "demo",
+    source: "fixture",
+  });
+
+  try {
+    const blocked = await server.inject({
+      method: "GET",
+      url: "/api/app/config",
+    });
+
+    assert.equal(blocked.statusCode, 401);
+    assert.equal(blocked.json().error, "access_auth_required");
+    assert.match(String(blocked.headers["www-authenticate"]), /Basic realm/);
+
+    const configResponse = await server.inject({
+      method: "GET",
+      url: "/api/app/config",
+      headers: { authorization },
+    });
+    const config = configResponse.json();
+
+    assert.equal(configResponse.statusCode, 200);
+    assert.deepEqual(config.access, {
+      localOnly: false,
+      host: "0.0.0.0",
+      authentication: "passcode",
+    });
+
+    const headerConfigResponse = await server.inject({
+      method: "GET",
+      url: "/api/app/config",
+      headers: { "x-mono-ledger-sync-passcode": passcode },
+    });
+
+    assert.equal(headerConfigResponse.statusCode, 200);
+
+    const webhookResponse = await server.inject({
+      method: "POST",
+      url: config.webhook.path,
+      body: {},
+    });
+
+    assert.notEqual(webhookResponse.statusCode, 401);
   } finally {
     await server.close();
   }
@@ -421,6 +495,7 @@ test("exposes local webhook settings in app config", async () => {
     assert.deepEqual(body.access, {
       localOnly: true,
       host: "127.0.0.1",
+      authentication: "none",
     });
     assert.equal(body.webhook.enabled, true);
     assert.match(body.webhook.path, /^\/api\/webhooks\/monobank-[a-f0-9]{32}$/);

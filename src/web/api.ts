@@ -7,7 +7,7 @@ import type {
 
 export interface LocalApiHealth {
   status: "ok";
-  localOnly: true;
+  localOnly: boolean;
   version: string;
   framework: string;
   apiPrefix: string;
@@ -27,8 +27,9 @@ export interface LocalApiWebhookSettings {
 }
 
 export interface LocalApiAccessBinding {
-  localOnly: true;
-  host: "127.0.0.1" | "localhost";
+  localOnly: boolean;
+  host: string;
+  authentication: "none" | "passcode";
 }
 
 export interface LocalApiMonobankClientInfoSummary {
@@ -53,7 +54,7 @@ export interface LocalApiAppConfig {
   source: "fixture" | "monobank";
   dataDir: string;
   databasePath: string;
-  localOnly: true;
+  localOnly: boolean;
   access: LocalApiAccessBinding;
   webhook: LocalApiWebhookSettings;
   token: LocalApiMonobankTokenStatus;

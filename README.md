@@ -107,9 +107,10 @@ If you need live personal webhook delivery while developing locally:
 4. Keep the tunnel open only while you are actively using it, then remove the
    webhook URL from Monobank or stop the tunnel.
 
-Do not bind the local API to a public interface, reuse stale tunnel URLs, share
-the tunnel URL publicly, or put tokens in webhook URLs. The route path is an
-unguessable local receiver path, not an authentication system.
+Do not bind the local API to a public interface unless passcode protection is
+enabled, reuse stale tunnel URLs, share the tunnel URL publicly, or put tokens
+in webhook URLs. The route path is an unguessable local receiver path, not an
+authentication system.
 
 Webhook payloads are recorded as local hints and are reconciled through
 statement pulls before they affect the final ledger state.
@@ -139,8 +140,10 @@ API token is saved in the in-app sign-in flow. Sanitized fixture endpoints
 remain available for development; pass `MONO_LEDGER_SYNC_SOURCE=fixture npm
 run dev` to skip live calls.
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
-The local API binds to `127.0.0.1` by default and rejects public host binds
-until external access has authentication.
+The local API binds to `127.0.0.1` by default. Binding to a non-loopback host
+requires `MONO_LEDGER_SYNC_ACCESS_PASSCODE`; the server protects the browser UI
+and API with Basic auth while keeping the high-entropy Monobank webhook receiver
+available for delivery.
 Use `npm run web:dev` when working on the Vite UI; it starts the same local API
 server and proxies browser requests through `http://127.0.0.1:5173`.
 
