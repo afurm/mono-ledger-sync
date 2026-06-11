@@ -13,6 +13,11 @@ Closes #
 - [ ] `npm run format`
 - [ ] Not run, with reason:
 
+## UI checklist
+
+- [ ] No UI changes.
+- [ ] Checked the shadcn/ui registry and existing `src/components/ui` primitives before adding or changing local components.
+
 ## Privacy checklist
 
 - [ ] No real banking tokens, account identifiers, raw personal statements, or unredacted financial payloads are committed.

@@ -212,6 +212,20 @@ test("keeps web screens composed through shadcn primitives", async () => {
   assert.deepEqual(primitiveImportViolations, []);
 });
 
+test("documents shadcn registry checks before new UI components", async () => {
+  const contributing = await readFile("CONTRIBUTING.md", "utf8");
+  const pullRequestTemplate = await readFile(
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "utf8",
+  );
+
+  assert.match(contributing, /shadcn\/ui registry/);
+  assert.match(contributing, /src\/components\/ui/);
+  assert.match(contributing, /before creating a new component/);
+  assert.match(pullRequestTemplate, /shadcn\/ui registry/);
+  assert.match(pullRequestTemplate, /src\/components\/ui/);
+});
+
 test("documents the minimum local product flow", async () => {
   const workflow = await readFile(
     "examples/sample-workflows/minimum-product-flow.md",

@@ -16,4 +16,5 @@ npm test
 - Prefer fixture-backed tests over live Monobank API calls.
 - Do not commit real tokens, account identifiers, raw personal statements, or unredacted financial payloads.
 - Preserve the local-first privacy model.
+- For UI changes, check the shadcn/ui registry and existing `src/components/ui` primitives before creating a new component; prefer composition over bespoke primitives.
 - Run the relevant validation command before opening a pull request.
