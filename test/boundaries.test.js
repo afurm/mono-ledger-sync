@@ -53,6 +53,8 @@ const shadcnImplementationPackageNames = new Set([
 const shadcnImplementationPackagePrefixes = ["@radix-ui/"];
 const rawPaletteUtilityPattern =
   /\b(?:bg|text|border|ring|from|to|via)-(?:red|blue|green|yellow|purple|orange|pink|slate|gray|zinc|neutral|stone|amber|emerald|teal|cyan|sky|indigo|violet|fuchsia|rose)-[0-9]{2,3}\b/;
+const arbitraryVisualUtilityPattern =
+  /\b(?:rounded|text|tracking|leading|font)-\[[^\]]+\]/;
 
 async function readJson(pathname) {
   return JSON.parse(await readFile(pathname, "utf8"));
@@ -260,6 +262,7 @@ test("keeps screen status colors on semantic tokens", async () => {
   const badgeSource = await readFile("src/components/ui/badge.tsx", "utf8");
 
   assert.doesNotMatch(appSource, rawPaletteUtilityPattern);
+  assert.doesNotMatch(appSource, arbitraryVisualUtilityPattern);
   assert.match(stylesSource, /--color-success:/);
   assert.match(stylesSource, /--color-warning:/);
   assert.match(stylesSource, /--color-info:/);
