@@ -4146,6 +4146,80 @@ function missedRecurringPaymentLabel(
   return `${payment.daysOverdue}d missed`;
 }
 
+function subscriptionIncreaseBadgeLabel(
+  alert: LocalAppSnapshot["subscriptionIncreaseAlerts"][number],
+): string {
+  return `+${formatMinorAmount(alert.increaseAmount, alert.currencyCode)}`;
+}
+
+function SubscriptionIncreaseAlertsCard({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot;
+}) {
+  const rows = snapshot.subscriptionIncreaseAlerts.slice(0, 6);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Subscription increase alerts</CardTitle>
+        <CardDescription>
+          Latest charges above expected recurring ranges.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No subscription increases found in the current ledger.
+          </p>
+        ) : (
+          rows.map((alert) => {
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              accountId: alert.accountId,
+              ...(alert.categoryId === undefined
+                ? {}
+                : { categoryId: alert.categoryId }),
+              ...(alert.merchantName === undefined
+                ? {}
+                : { merchantName: alert.merchantName }),
+            });
+
+            return (
+              <a
+                className="flex items-start justify-between gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={alert.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <AlertCircleIcon className="size-4 shrink-0 text-destructive" />
+                    <p className="truncate text-sm font-medium">
+                      {alert.merchantName ?? alert.recurringItemId}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatDate(Date.parse(alert.occurredAt) / 1000)} · +
+                    {alert.increasePercentage}%
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold">
+                    {formatMinorAmount(alert.actualAmount, alert.currencyCode)}
+                  </p>
+                  <Badge variant="destructive">
+                    {subscriptionIncreaseBadgeLabel(alert)}
+                  </Badge>
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function MissedRecurringPaymentsCard({
   snapshot,
 }: {
@@ -4895,6 +4969,7 @@ function OverviewRoute({
           />
           <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />
           <MissedRecurringPaymentsCard snapshot={snapshot} />
+          <SubscriptionIncreaseAlertsCard snapshot={snapshot} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <RecurringCalendarCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />

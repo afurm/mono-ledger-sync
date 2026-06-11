@@ -4050,6 +4050,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/missed-recurring-payments?asOf=2026-02-30",
       });
+      const subscriptionIncreaseAlertsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/subscription-increase-alerts?asOf=2026-04-30",
+      });
+      const invalidSubscriptionIncreaseAlertsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/subscription-increase-alerts?asOf=2026-02-30",
+      });
       const recurringDetectionsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/recurring-detections",
@@ -4289,6 +4297,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(
         invalidMissedRecurringPaymentsResponse.json().error,
         "invalid_missed_recurring_payments_query",
+      );
+      assert.equal(subscriptionIncreaseAlertsResponse.statusCode, 200);
+      assert.deepEqual(subscriptionIncreaseAlertsResponse.json(), []);
+      assert.equal(invalidSubscriptionIncreaseAlertsResponse.statusCode, 400);
+      assert.equal(
+        invalidSubscriptionIncreaseAlertsResponse.json().error,
+        "invalid_subscription_increase_alerts_query",
       );
       assert.equal(recurringDetectionsResponse.statusCode, 200);
       assert.deepEqual(recurringDetectionsResponse.json(), []);

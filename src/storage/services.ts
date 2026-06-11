@@ -23,6 +23,7 @@ import type {
   RecurringItem,
   SavingsGoalProgress,
   StoredWebhookEvent,
+  SubscriptionIncreaseAlert,
   SyncRun,
   UpcomingRecurringPayment,
 } from "./index.js";
@@ -73,6 +74,10 @@ export interface LedgerRecurringItemQueryService {
     profile?: string,
     asOf?: Date,
   ): Promise<readonly MissedRecurringPayment[]>;
+  listSubscriptionIncreaseAlerts(
+    profile?: string,
+    asOf?: Date,
+  ): Promise<readonly SubscriptionIncreaseAlert[]>;
   listRecurringCalendar(
     profile?: string,
     from?: Date,
@@ -176,6 +181,8 @@ interface CreateLedgerServicesOptions {
 const DEFAULT_SYNC_LIST_LIMIT = 20;
 const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
 const MISSED_RECURRING_PAYMENT_PAGE_SIZE = 100;
+const SUBSCRIPTION_INCREASE_LOOKBACK_DAYS = 370;
+const SUBSCRIPTION_INCREASE_PAGE_SIZE = 100;
 const RECURRING_DETECTION_PAGE_SIZE = 500;
 const RECURRING_DETECTION_ENTRY_LIMIT = 2_000;
 const RECURRING_CALENDAR_DEFAULT_DAYS = 90;
@@ -890,7 +897,7 @@ function recurringPaymentMerchantMatches(
   return actual === expected || actual.includes(expected);
 }
 
-function recurringPaymentEntryMatches(
+function recurringPaymentIdentityMatches(
   item: RecurringItem,
   currencyCode: number,
   entry: LedgerEntry,
@@ -909,8 +916,16 @@ function recurringPaymentEntryMatches(
     return false;
   }
 
+  return recurringPaymentMerchantMatches(item, entry);
+}
+
+function recurringPaymentEntryMatches(
+  item: RecurringItem,
+  currencyCode: number,
+  entry: LedgerEntry,
+): boolean {
   return (
-    recurringPaymentMerchantMatches(item, entry) &&
+    recurringPaymentIdentityMatches(item, currencyCode, entry) &&
     recurringPaymentAmountMatches(item, entry)
   );
 }
@@ -1057,6 +1072,155 @@ async function listMissedRecurringPayments(
 
     if (dueDiff !== 0) {
       return dueDiff;
+    }
+
+    return (left.merchantName ?? left.recurringItemId).localeCompare(
+      right.merchantName ?? right.recurringItemId,
+    );
+  });
+}
+
+async function findLatestMatchingRecurringLedgerEntry(
+  db: SqliteLedgerDb,
+  profile: string,
+  item: RecurringItem,
+  currencyCode: number,
+  asOfDate: Date,
+): Promise<LedgerEntry | undefined> {
+  let offset = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      accountId: item.accountId,
+      ...(item.categoryId === undefined ? {} : { categoryId: item.categoryId }),
+      status: "posted",
+      from: startOfUtcDateEpoch(
+        addUtcDays(asOfDate, -SUBSCRIPTION_INCREASE_LOOKBACK_DAYS),
+      ),
+      to: endOfUtcDateEpoch(asOfDate),
+      sortBy: "time",
+      sortDirection: "desc",
+      limit: SUBSCRIPTION_INCREASE_PAGE_SIZE,
+      offset,
+    });
+
+    const match = page.entries.find((entry) =>
+      recurringPaymentIdentityMatches(item, currencyCode, entry),
+    );
+
+    if (match !== undefined) {
+      return match;
+    }
+
+    offset += page.entries.length;
+
+    if (page.entries.length === 0 || offset >= page.total) {
+      return undefined;
+    }
+  }
+}
+
+function buildSubscriptionIncreaseAlert(
+  item: RecurringItem,
+  currencyCode: number,
+  entry: LedgerEntry,
+  expectedAmountMax: number,
+): SubscriptionIncreaseAlert | undefined {
+  const actualAmount = Math.abs(entry.amount);
+
+  if (expectedAmountMax <= 0 || actualAmount <= expectedAmountMax) {
+    return undefined;
+  }
+
+  const increaseAmount = actualAmount - expectedAmountMax;
+
+  return {
+    id: `${item.id}:${entry.id}:increase`,
+    recurringItemId: item.id,
+    ledgerEntryId: entry.id,
+    profile: item.profile,
+    accountId: item.accountId,
+    ...(item.categoryId === undefined ? {} : { categoryId: item.categoryId }),
+    ...(item.merchantName === undefined
+      ? {}
+      : { merchantName: item.merchantName }),
+    frequency: item.frequency,
+    ...(item.expectedAmountMin === undefined
+      ? {}
+      : { expectedAmountMin: item.expectedAmountMin }),
+    expectedAmountMax,
+    actualAmount,
+    increaseAmount,
+    increasePercentage: roundToTwoDecimals(
+      (increaseAmount / expectedAmountMax) * 100,
+    ),
+    currencyCode,
+    occurredAt: new Date(entry.time * 1000).toISOString(),
+    ...(item.lastSeenAt === undefined ? {} : { lastSeenAt: item.lastSeenAt }),
+  };
+}
+
+async function listSubscriptionIncreaseAlerts(
+  db: SqliteLedgerDb,
+  profile: string,
+  asOf = new Date(),
+): Promise<readonly SubscriptionIncreaseAlert[]> {
+  const [items, accounts] = await Promise.all([
+    db.listRecurringItems(profile),
+    db.listAccounts(profile),
+  ]);
+  const accountCurrencyCodes = new Map(
+    accounts.map((account) => [account.id, account.currencyCode]),
+  );
+  const asOfDate = startOfUtcDate(asOf);
+  const alerts: SubscriptionIncreaseAlert[] = [];
+
+  for (const item of items) {
+    if (!item.isActive || item.expectedAmountMax === undefined) {
+      continue;
+    }
+
+    const currencyCode = accountCurrencyCodes.get(item.accountId);
+
+    if (currencyCode === undefined) {
+      continue;
+    }
+
+    const entry = await findLatestMatchingRecurringLedgerEntry(
+      db,
+      profile,
+      item,
+      currencyCode,
+      asOfDate,
+    );
+
+    if (entry === undefined) {
+      continue;
+    }
+
+    const alert = buildSubscriptionIncreaseAlert(
+      item,
+      currencyCode,
+      entry,
+      item.expectedAmountMax,
+    );
+
+    if (alert !== undefined) {
+      alerts.push(alert);
+    }
+  }
+
+  return alerts.sort((left, right) => {
+    const occurredDiff =
+      Date.parse(right.occurredAt) - Date.parse(left.occurredAt);
+
+    if (occurredDiff !== 0) {
+      return occurredDiff;
+    }
+
+    if (right.increaseAmount !== left.increaseAmount) {
+      return right.increaseAmount - left.increaseAmount;
     }
 
     return (left.merchantName ?? left.recurringItemId).localeCompare(
@@ -1453,6 +1617,13 @@ export function createLedgerQueryService({
         asOf,
       );
     },
+    listSubscriptionIncreaseAlerts(profile, asOf) {
+      return listSubscriptionIncreaseAlerts(
+        db,
+        coerceProfile(profile, defaultProfile),
+        asOf,
+      );
+    },
     listRecurringCalendar(profile, from, to) {
       return listRecurringCalendar(
         db,
@@ -1518,6 +1689,7 @@ export function createLedgerQueryServices(
       listRecurringItems: query.listRecurringItems,
       detectRecurringTransactions: query.detectRecurringTransactions,
       listMissedRecurringPayments: query.listMissedRecurringPayments,
+      listSubscriptionIncreaseAlerts: query.listSubscriptionIncreaseAlerts,
       listRecurringCalendar: query.listRecurringCalendar,
       listUpcomingRecurringPayments: query.listUpcomingRecurringPayments,
     },
