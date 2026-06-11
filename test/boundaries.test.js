@@ -245,10 +245,26 @@ test("documents thin local UI component wrappers", async () => {
 
 test("keeps standard visual controls on shadcn primitives", async () => {
   const appSource = await readFile("src/web/App.tsx", "utf8");
+  const requiredCompositionImports = [
+    /from "@\/components\/ui\/card"/,
+    /from "@\/components\/ui\/dropdown-menu"/,
+    /from "@\/components\/ui\/input"/,
+    /from "@\/components\/ui\/label"/,
+    /from "@\/components\/ui\/select"/,
+    /from "@\/components\/ui\/sheet"/,
+    /from "@\/components\/ui\/sidebar"/,
+    /from "@\/components\/ui\/table"/,
+    /from "@\/components\/ui\/tabs"/,
+    /from "@\/components\/ui\/textarea"/,
+  ];
 
   assert.match(appSource, /from "@\/components\/ui\/checkbox"/);
   assert.match(appSource, /from "@\/components\/ui\/textarea"/);
+  for (const importPattern of requiredCompositionImports) {
+    assert.match(appSource, importPattern);
+  }
   assert.doesNotMatch(appSource, /<button\b/);
+  assert.doesNotMatch(appSource, /<label\b/);
   assert.doesNotMatch(appSource, /<select\b/);
   assert.doesNotMatch(appSource, /<table\b/);
   assert.doesNotMatch(appSource, /<textarea\b/);

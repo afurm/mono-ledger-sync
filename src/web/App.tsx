@@ -76,6 +76,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -1783,9 +1784,9 @@ function LogsRoute({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
             ))}
           </div>
           <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground">
+            <Label className="text-xs font-medium text-muted-foreground">
               Search event messages
-            </label>
+            </Label>
             <Input
               type="search"
               placeholder="Search by title, details, or reference"
@@ -3569,7 +3570,7 @@ function TransactionDetailDrawer({
               <h3 className="text-sm font-medium text-foreground">
                 Local annotations
               </h3>
-              <label className="grid gap-1">
+              <Label className="grid gap-1">
                 <span className="text-xs font-medium text-muted-foreground">
                   Note
                 </span>
@@ -3583,8 +3584,8 @@ function TransactionDetailDrawer({
                     setSaveState("idle");
                   }}
                 />
-              </label>
-              <label className="grid gap-1">
+              </Label>
+              <Label className="grid gap-1">
                 <span className="text-xs font-medium text-muted-foreground">
                   Tags
                 </span>
@@ -3596,7 +3597,7 @@ function TransactionDetailDrawer({
                     setSaveState("idle");
                   }}
                 />
-              </label>
+              </Label>
               {entry.tags && entry.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {entry.tags.map((tag) => (
@@ -6885,7 +6886,7 @@ function TransactionsRoute({
         </div>
 
         <form className="grid gap-3 lg:grid-cols-4" onSubmit={applyFilters}>
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               Search
             </span>
@@ -6904,9 +6905,9 @@ function TransactionsRoute({
                 }
               />
             </div>
-          </label>
+          </Label>
 
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               Merchant
             </span>
@@ -6920,9 +6921,9 @@ function TransactionsRoute({
                 }))
               }
             />
-          </label>
+          </Label>
 
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               Account
             </span>
@@ -6949,9 +6950,9 @@ function TransactionsRoute({
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </label>
+          </Label>
 
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               Category
             </span>
@@ -6978,9 +6979,9 @@ function TransactionsRoute({
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </label>
+          </Label>
 
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               Status
             </span>
@@ -7005,9 +7006,9 @@ function TransactionsRoute({
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </label>
+          </Label>
 
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               From
             </span>
@@ -7021,9 +7022,9 @@ function TransactionsRoute({
                 }))
               }
             />
-          </label>
+          </Label>
 
-          <label className="flex flex-col gap-1">
+          <Label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               To
             </span>
@@ -7037,10 +7038,10 @@ function TransactionsRoute({
                 }))
               }
             />
-          </label>
+          </Label>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
-            <label className="flex flex-col gap-1">
+            <Label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">
                 Min amount
               </span>
@@ -7067,8 +7068,8 @@ function TransactionsRoute({
                   {amountMinError}
                 </span>
               )}
-            </label>
-            <label className="flex flex-col gap-1">
+            </Label>
+            <Label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">
                 Max amount
               </span>
@@ -7095,7 +7096,7 @@ function TransactionsRoute({
                   {amountMaxError}
                 </span>
               )}
-            </label>
+            </Label>
           </div>
 
           <div className="flex items-end gap-2 lg:col-span-2">
@@ -7812,7 +7813,7 @@ function SettingsRoute({
           </div>
 
           <form className="grid gap-3" onSubmit={saveToken}>
-            <label className="grid gap-2">
+            <Label className="grid gap-2">
               <span className="text-xs font-medium text-muted-foreground">
                 Monobank personal API token
               </span>
@@ -7896,9 +7897,9 @@ function SettingsRoute({
                   Clear input
                 </Button>
               </div>
-            </label>
+            </Label>
 
-            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+            <Label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
               <Checkbox
                 className="mt-0.5"
                 checked={acknowledgedLocalToken}
@@ -7915,10 +7916,10 @@ function SettingsRoute({
                 I understand this token is used only by the local API on this
                 device for the {activeProfile} profile.
               </span>
-            </label>
+            </Label>
 
             {snapshot.config.token.hasToken && (
-              <label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <Label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
                 <Checkbox
                   className="mt-0.5 border-destructive/50 data-checked:border-destructive data-checked:bg-destructive data-checked:text-destructive-foreground"
                   checked={confirmedTokenRemoval}
@@ -7933,7 +7934,7 @@ function SettingsRoute({
                   Delete the saved Monobank token for the {activeProfile} local
                   profile.
                 </span>
-              </label>
+              </Label>
             )}
 
             <div className="flex flex-wrap gap-2">
@@ -8261,9 +8262,9 @@ function RuleEditorPreviewField({
 }) {
   return (
     <div className="grid gap-2">
-      <label className="text-xs font-medium text-muted-foreground" htmlFor={id}>
+      <Label className="text-xs font-medium text-muted-foreground" htmlFor={id}>
         {label}
-      </label>
+      </Label>
       <Input id={id} readOnly value={value} className="bg-background" />
     </div>
   );
@@ -9277,12 +9278,12 @@ function RulesRoute({
               </CardHeader>
               <CardContent className="grid gap-4">
                 <div className="grid gap-2 sm:max-w-sm">
-                  <label
+                  <Label
                     className="text-xs font-medium text-muted-foreground"
                     htmlFor="rules-search"
                   >
                     Search rules
-                  </label>
+                  </Label>
                   <div className="relative">
                     <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
