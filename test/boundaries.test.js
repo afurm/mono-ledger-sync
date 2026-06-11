@@ -76,6 +76,7 @@ test("documents the shared domain model contract", async () => {
     "BudgetProgress",
     "NetWorthTrend",
     "RecurringItem",
+    "RecurringDetectionCandidate",
     "UpcomingRecurringPayment",
     "DomainError",
     "LocalActivityEvent",

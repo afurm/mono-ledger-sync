@@ -4042,6 +4042,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/upcoming-recurring-payments",
       });
+      const recurringDetectionsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/recurring-detections",
+      });
       const jarsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/jars",
@@ -4263,6 +4267,8 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(missingCloseBudgetResponse.json().error, "budget_not_found");
       assert.equal(upcomingRecurringPaymentsResponse.statusCode, 200);
       assert.deepEqual(upcomingRecurringPaymentsResponse.json(), []);
+      assert.equal(recurringDetectionsResponse.statusCode, 200);
+      assert.deepEqual(recurringDetectionsResponse.json(), []);
       assert.equal(jarsResponse.statusCode, 200);
       assert.deepEqual(
         jarsResponse.json().map((jar) => jar.id),

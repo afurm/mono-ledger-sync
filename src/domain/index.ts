@@ -609,3 +609,21 @@ export interface RecurringItem {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface RecurringDetectionCandidate {
+  id: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin: number;
+  expectedAmountMax: number;
+  currencyCode: number;
+  occurrences: number;
+  confidence: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  averageGapDays?: number;
+  latestLedgerEntryId: string;
+}
