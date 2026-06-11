@@ -71,6 +71,7 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
+  RecurringDetectionCandidate,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
   SyncRun,
@@ -537,6 +538,14 @@ const ledgerCategorySpendingResponseSchema = {
 } as const;
 
 const upcomingRecurringPaymentsResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const recurringDetectionCandidatesResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2527,6 +2536,24 @@ function registerLocalApiRoutes(
       const services = await getServices();
 
       return services.queryService.listUpcomingRecurringPayments(
+        services.profile,
+      );
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/recurring-detections`,
+    {
+      schema: {
+        response: {
+          200: recurringDetectionCandidatesResponseSchema,
+        },
+      },
+    },
+    async (): Promise<readonly RecurringDetectionCandidate[]> => {
+      const services = await getServices();
+
+      return services.queryService.detectRecurringTransactions(
         services.profile,
       );
     },

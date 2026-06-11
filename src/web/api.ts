@@ -134,6 +134,30 @@ export interface UpcomingRecurringPayment {
   isOverdue: boolean;
 }
 
+export interface RecurringDetectionCandidate {
+  id: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName: string;
+  frequency:
+    | "daily"
+    | "weekly"
+    | "monthly"
+    | "quarterly"
+    | "yearly"
+    | "irregular";
+  expectedAmountMin: number;
+  expectedAmountMax: number;
+  currencyCode: number;
+  occurrences: number;
+  confidence: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  averageGapDays?: number;
+  latestLedgerEntryId: string;
+}
+
 export interface LedgerAccount {
   id: string;
   type: string;
@@ -946,6 +970,14 @@ export async function reopenMonthlyBudgetPeriod(
     {
       method: "PATCH",
     },
+  );
+}
+
+export async function loadRecurringDetectionCandidates(): Promise<
+  readonly RecurringDetectionCandidate[]
+> {
+  return requestJson<readonly RecurringDetectionCandidate[]>(
+    "/api/ledger/recurring-detections",
   );
 }
 

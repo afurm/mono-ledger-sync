@@ -17,6 +17,7 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
+  RecurringDetectionCandidate,
   RecurringItem,
   SavingsGoalProgress,
   StoredWebhookEvent,
@@ -63,6 +64,9 @@ export interface LedgerBudgetQueryService {
 
 export interface LedgerRecurringItemQueryService {
   listRecurringItems(profile?: string): Promise<readonly RecurringItem[]>;
+  detectRecurringTransactions(
+    profile?: string,
+  ): Promise<readonly RecurringDetectionCandidate[]>;
   listUpcomingRecurringPayments(
     profile?: string,
     asOf?: Date,
@@ -160,6 +164,8 @@ interface CreateLedgerServicesOptions {
 
 const DEFAULT_SYNC_LIST_LIMIT = 20;
 const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
+const RECURRING_DETECTION_PAGE_SIZE = 500;
+const RECURRING_DETECTION_ENTRY_LIMIT = 2_000;
 const BUDGET_ACTUAL_TRANSACTION_PAGE_SIZE = 500;
 const TRANSFER_CATEGORY_ID = "transfers";
 const TRANSFER_DESCRIPTION_TERMS = [
@@ -313,6 +319,282 @@ function daysBetweenUtcDates(left: Date, right: Date): number {
     (startOfUtcDate(left).getTime() - startOfUtcDate(right).getTime()) /
       millisecondsPerDay,
   );
+}
+
+function ledgerEntryDate(entry: LedgerEntry): Date {
+  return startOfUtcDate(new Date(entry.time * 1000));
+}
+
+function normalizeRecurringMerchantLabel(
+  entry: LedgerEntry,
+): string | undefined {
+  const label = (entry.merchantName ?? entry.description).trim();
+
+  if (!label) {
+    return undefined;
+  }
+
+  return label;
+}
+
+function normalizeRecurringGroupLabel(value: string): string {
+  return value.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function recurringCandidateId(
+  accountId: string,
+  currencyCode: number,
+  merchantName: string,
+  frequency: RecurringDetectionCandidate["frequency"],
+): string {
+  const label = normalizeRecurringGroupLabel(merchantName)
+    .replace(/[^a-z0-9а-яіїєґ-]+/giu, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `detected-${frequency}-${accountId}-${currencyCode}-${label || "merchant"}`;
+}
+
+function average(values: readonly number[]): number | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function roundToTwoDecimals(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function scoreCadence(
+  gaps: readonly number[],
+  expectedGapDays: number,
+  toleranceDays: number,
+): number {
+  const averageDeviation =
+    average(gaps.map((gap) => Math.abs(gap - expectedGapDays))) ?? 0;
+  const rawScore = 1 - averageDeviation / Math.max(1, toleranceDays * 2);
+
+  return roundToTwoDecimals(Math.max(0.65, Math.min(0.98, rawScore)));
+}
+
+function classifyRecurringFrequency(
+  gaps: readonly number[],
+): Pick<RecurringDetectionCandidate, "frequency" | "confidence"> | undefined {
+  if (gaps.length === 0) {
+    return undefined;
+  }
+
+  if (gaps.every((gap) => gap >= 5 && gap <= 9)) {
+    return {
+      frequency: "weekly",
+      confidence: scoreCadence(gaps, 7, 2),
+    };
+  }
+
+  if (gaps.every((gap) => gap >= 26 && gap <= 35)) {
+    return {
+      frequency: "monthly",
+      confidence: scoreCadence(gaps, 30, 5),
+    };
+  }
+
+  if (gaps.every((gap) => gap >= 355 && gap <= 375)) {
+    return {
+      frequency: "yearly",
+      confidence: scoreCadence(gaps, 365, 15),
+    };
+  }
+
+  if (gaps.length >= 2) {
+    return {
+      frequency: "irregular",
+      confidence: 0.55,
+    };
+  }
+
+  return undefined;
+}
+
+function minimumOccurrencesForFrequency(
+  frequency: RecurringDetectionCandidate["frequency"],
+): number {
+  return frequency === "yearly" ? 2 : 3;
+}
+
+function hasStableRecurringAmount(
+  amounts: readonly number[],
+  frequency: RecurringDetectionCandidate["frequency"],
+): boolean {
+  const minAmount = Math.min(...amounts);
+  const maxAmount = Math.max(...amounts);
+  const varianceRatio = (maxAmount - minAmount) / Math.max(1, maxAmount);
+  const maxVariance = frequency === "irregular" ? 0.5 : 0.25;
+
+  return varianceRatio <= maxVariance;
+}
+
+function buildRecurringDetectionCandidate(
+  profile: string,
+  entries: readonly LedgerEntry[],
+): RecurringDetectionCandidate | undefined {
+  const sortedEntries = [...entries].sort(
+    (left, right) => left.time - right.time,
+  );
+  const firstEntry = sortedEntries[0];
+  const latestEntry = sortedEntries.at(-1);
+
+  if (firstEntry === undefined || latestEntry === undefined) {
+    return undefined;
+  }
+
+  const gaps = sortedEntries.slice(1).map((entry, index) => {
+    const previous = sortedEntries[index];
+
+    return previous === undefined
+      ? 0
+      : daysBetweenUtcDates(ledgerEntryDate(entry), ledgerEntryDate(previous));
+  });
+  const classification = classifyRecurringFrequency(gaps);
+
+  if (
+    classification === undefined ||
+    sortedEntries.length <
+      minimumOccurrencesForFrequency(classification.frequency)
+  ) {
+    return undefined;
+  }
+
+  const amounts = sortedEntries.map((entry) => Math.abs(entry.amount));
+
+  if (!hasStableRecurringAmount(amounts, classification.frequency)) {
+    return undefined;
+  }
+
+  const merchantName = normalizeRecurringMerchantLabel(firstEntry);
+
+  if (merchantName === undefined) {
+    return undefined;
+  }
+
+  const averageGapDays = average(gaps);
+  const expectedAmountMin = Math.min(...amounts);
+  const expectedAmountMax = Math.max(...amounts);
+
+  return {
+    id: recurringCandidateId(
+      firstEntry.accountId,
+      firstEntry.currencyCode,
+      merchantName,
+      classification.frequency,
+    ),
+    profile,
+    accountId: firstEntry.accountId,
+    ...(firstEntry.categoryId === undefined
+      ? {}
+      : { categoryId: firstEntry.categoryId }),
+    merchantName,
+    frequency: classification.frequency,
+    expectedAmountMin,
+    expectedAmountMax,
+    currencyCode: firstEntry.currencyCode,
+    occurrences: sortedEntries.length,
+    confidence: classification.confidence,
+    firstSeenAt: new Date(firstEntry.time * 1000).toISOString(),
+    lastSeenAt: new Date(latestEntry.time * 1000).toISOString(),
+    ...(averageGapDays === undefined
+      ? {}
+      : { averageGapDays: roundToTwoDecimals(averageGapDays) }),
+    latestLedgerEntryId: latestEntry.id,
+  };
+}
+
+async function listLedgerEntriesForRecurringDetection(
+  db: SqliteLedgerDb,
+  profile: string,
+): Promise<readonly LedgerEntry[]> {
+  const entries: LedgerEntry[] = [];
+  let offset = 0;
+
+  while (entries.length < RECURRING_DETECTION_ENTRY_LIMIT) {
+    const page = await db.listLedgerEntries({
+      profile,
+      status: "posted",
+      sortBy: "time",
+      sortDirection: "asc",
+      limit: RECURRING_DETECTION_PAGE_SIZE,
+      offset,
+    });
+
+    entries.push(...page.entries);
+
+    if (
+      page.entries.length === 0 ||
+      entries.length >= page.total ||
+      entries.length >= RECURRING_DETECTION_ENTRY_LIMIT
+    ) {
+      break;
+    }
+
+    offset += page.entries.length;
+  }
+
+  return entries;
+}
+
+async function detectRecurringTransactionsFromLedger(
+  db: SqliteLedgerDb,
+  profile: string,
+): Promise<readonly RecurringDetectionCandidate[]> {
+  const groups = new Map<string, LedgerEntry[]>();
+  const entries = await listLedgerEntriesForRecurringDetection(db, profile);
+
+  for (const entry of entries) {
+    if (
+      entry.amount >= 0 ||
+      entry.hold === true ||
+      entry.categoryId === TRANSFER_CATEGORY_ID
+    ) {
+      continue;
+    }
+
+    const merchantName = normalizeRecurringMerchantLabel(entry);
+
+    if (merchantName === undefined) {
+      continue;
+    }
+
+    const groupKey = [
+      entry.accountId,
+      entry.currencyCode,
+      entry.categoryId ?? "",
+      normalizeRecurringGroupLabel(merchantName),
+    ].join("|");
+    const group = groups.get(groupKey) ?? [];
+
+    group.push(entry);
+    groups.set(groupKey, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => buildRecurringDetectionCandidate(profile, group))
+    .filter((candidate): candidate is RecurringDetectionCandidate => {
+      return candidate !== undefined;
+    })
+    .sort((left, right) => {
+      if (right.confidence !== left.confidence) {
+        return right.confidence - left.confidence;
+      }
+
+      const lastSeenDiff =
+        Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt);
+
+      if (lastSeenDiff !== 0) {
+        return lastSeenDiff;
+      }
+
+      return left.merchantName.localeCompare(right.merchantName);
+    });
 }
 
 function readBudgetMonth(month: string): {
@@ -708,6 +990,12 @@ export function createLedgerQueryService({
     listRecurringItems(profile) {
       return db.listRecurringItems(coerceProfile(profile, defaultProfile));
     },
+    detectRecurringTransactions(profile) {
+      return detectRecurringTransactionsFromLedger(
+        db,
+        coerceProfile(profile, defaultProfile),
+      );
+    },
     listUpcomingRecurringPayments(profile, asOf) {
       return listUpcomingRecurringPayments(
         db,
@@ -763,6 +1051,7 @@ export function createLedgerQueryServices(
     },
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
+      detectRecurringTransactions: query.detectRecurringTransactions,
       listUpcomingRecurringPayments: query.listUpcomingRecurringPayments,
     },
     syncState: {

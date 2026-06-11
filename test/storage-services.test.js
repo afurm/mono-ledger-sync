@@ -1190,6 +1190,210 @@ test("query service projects upcoming recurring payments", async () => {
   });
 });
 
+test("query service detects recurring transaction candidates", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    function timestamp(value) {
+      return Math.floor(Date.parse(value) / 1000);
+    }
+
+    try {
+      await db.migrate();
+
+      const database = new Database(databasePath);
+
+      try {
+        database.pragma("foreign_keys = ON");
+        database.exec(`
+          INSERT OR IGNORE INTO profiles (name, created_at)
+          VALUES ('demo', '2026-01-01T00:00:00.000Z');
+
+          INSERT INTO accounts (
+            profile,
+            id,
+            type,
+            currency_code,
+            balance,
+            credit_limit,
+            masked_pan_json,
+            raw_json,
+            updated_at
+          ) VALUES (
+            'demo',
+            'account-uah',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{}',
+            '2026-05-17T08:00:00.000Z'
+          );
+        `);
+
+        const insertEntry = database.prepare(`
+          INSERT INTO ledger_entries (
+            profile,
+            id,
+            account_id,
+            time,
+            description,
+            amount,
+            currency_code,
+            category_id,
+            category_name,
+            merchant_name,
+            raw_statement_item_id,
+            hold,
+            created_at,
+            updated_at
+          ) VALUES (
+            @profile,
+            @id,
+            @accountId,
+            @time,
+            @description,
+            @amount,
+            @currencyCode,
+            @categoryId,
+            @categoryName,
+            @merchantName,
+            @rawStatementItemId,
+            @hold,
+            @createdAt,
+            @updatedAt
+          )
+        `);
+        const rows = [
+          ["weekly-1", "2026-05-01", "Weekly Stream", -15900],
+          ["weekly-2", "2026-05-08", "Weekly Stream", -15900],
+          ["weekly-3", "2026-05-15", "Weekly Stream", -15900],
+          ["monthly-1", "2026-01-10", "Monthly Internet", -42000],
+          ["monthly-2", "2026-02-10", "Monthly Internet", -43000],
+          ["monthly-3", "2026-03-10", "Monthly Internet", -42000],
+          ["monthly-4", "2026-04-10", "Monthly Internet", -42000],
+          ["yearly-1", "2024-06-01", "Annual Insurance", -120000],
+          ["yearly-2", "2025-06-01", "Annual Insurance", -120000],
+          ["irregular-1", "2026-01-05", "Irregular Storage", -9900],
+          ["irregular-2", "2026-02-20", "Irregular Storage", -10900],
+          ["irregular-3", "2026-05-18", "Irregular Storage", -9900],
+          ["salary-1", "2026-01-31", "Monthly Salary", 850000],
+          ["salary-2", "2026-02-28", "Monthly Salary", 850000],
+          ["salary-3", "2026-03-31", "Monthly Salary", 850000],
+        ];
+
+        for (const [id, date, merchantName, amount] of rows) {
+          insertEntry.run({
+            profile,
+            id,
+            accountId: "account-uah",
+            time: timestamp(`${date}T08:00:00.000Z`),
+            description: merchantName,
+            amount,
+            currencyCode: 980,
+            categoryId: "subscriptions",
+            categoryName: "Subscriptions",
+            merchantName,
+            rawStatementItemId: `raw-${id}`,
+            hold: 0,
+            createdAt: `${date}T08:00:00.000Z`,
+            updatedAt: `${date}T08:00:00.000Z`,
+          });
+        }
+
+        for (const [id, date] of [
+          ["transfer-1", "2026-01-01"],
+          ["transfer-2", "2026-02-01"],
+          ["transfer-3", "2026-03-01"],
+        ]) {
+          insertEntry.run({
+            profile,
+            id,
+            accountId: "account-uah",
+            time: timestamp(`${date}T08:00:00.000Z`),
+            description: "Card Transfer",
+            amount: -50000,
+            currencyCode: 980,
+            categoryId: "transfers",
+            categoryName: "Transfers",
+            merchantName: "Card Transfer",
+            rawStatementItemId: `raw-${id}`,
+            hold: 0,
+            createdAt: `${date}T08:00:00.000Z`,
+            updatedAt: `${date}T08:00:00.000Z`,
+          });
+        }
+
+        for (const [id, date] of [
+          ["hold-1", "2026-01-15"],
+          ["hold-2", "2026-02-15"],
+          ["hold-3", "2026-03-15"],
+        ]) {
+          insertEntry.run({
+            profile,
+            id,
+            accountId: "account-uah",
+            time: timestamp(`${date}T08:00:00.000Z`),
+            description: "Held Subscription",
+            amount: -25000,
+            currencyCode: 980,
+            categoryId: "subscriptions",
+            categoryName: "Subscriptions",
+            merchantName: "Held Subscription",
+            rawStatementItemId: `raw-${id}`,
+            hold: 1,
+            createdAt: `${date}T08:00:00.000Z`,
+            updatedAt: `${date}T08:00:00.000Z`,
+          });
+        }
+      } finally {
+        database.close();
+      }
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const candidates = await queryService.detectRecurringTransactions();
+      const byMerchant = new Map(
+        candidates.map((candidate) => [candidate.merchantName, candidate]),
+      );
+
+      assert.equal(byMerchant.get("Weekly Stream")?.frequency, "weekly");
+      assert.equal(byMerchant.get("Weekly Stream")?.occurrences, 3);
+      assert.equal(byMerchant.get("Weekly Stream")?.expectedAmountMin, 15900);
+      assert.equal(byMerchant.get("Monthly Internet")?.frequency, "monthly");
+      assert.equal(byMerchant.get("Monthly Internet")?.occurrences, 4);
+      assert.equal(
+        byMerchant.get("Monthly Internet")?.expectedAmountMax,
+        43000,
+      );
+      assert.equal(byMerchant.get("Annual Insurance")?.frequency, "yearly");
+      assert.equal(byMerchant.get("Annual Insurance")?.occurrences, 2);
+      assert.equal(byMerchant.get("Irregular Storage")?.frequency, "irregular");
+      assert.equal(byMerchant.get("Irregular Storage")?.occurrences, 3);
+      assert.equal(byMerchant.has("Monthly Salary"), false);
+      assert.equal(byMerchant.has("Card Transfer"), false);
+      assert.equal(byMerchant.has("Held Subscription"), false);
+      assert.deepEqual(
+        await queryServices.recurringItems.detectRecurringTransactions(),
+        candidates,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("write service runs transaction edits inside explicit boundaries", async () => {
   const calls = [];
   const db = {

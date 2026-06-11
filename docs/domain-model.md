@@ -46,8 +46,10 @@ configuration, and direct filesystem behavior.
   overspend warnings.
 - `NetWorthTrend` defines the feature-gated net worth history response that
   remains disabled until manual accounts and assets exist.
-- `RecurringItem` defines the recurring transaction detection contract before
-  recurring calendars and alerts are enabled.
+- `RecurringItem` defines a confirmed or user-managed recurring transaction
+  schedule before recurring calendars and alerts are enabled.
+- `RecurringDetectionCandidate` defines a detected recurring transaction pattern
+  derived from local ledger history before the user confirms it as a schedule.
 - `UpcomingRecurringPayment` defines the projected recurring payment row used by
   local schedule views.
 
