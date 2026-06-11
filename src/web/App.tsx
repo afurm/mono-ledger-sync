@@ -149,6 +149,7 @@ import {
   loadCashflowReport,
   loadLocalAppSnapshot,
   loadLedgerTransactions,
+  loadMerchantTrendReport,
   loadMonthlySpendingReport,
   clearMonobankToken,
   initializeWorkspace,
@@ -4725,6 +4726,181 @@ function CategoryTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
+function MerchantTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
+  const [months, setMonths] = useState(
+    String(snapshot.merchantTrendReport.months),
+  );
+  const [report, setReport] = useState<LocalAppSnapshot["merchantTrendReport"]>(
+    snapshot.merchantTrendReport,
+  );
+  const [status, setStatus] = useState<
+    | { state: "idle" }
+    | { state: "loading" }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
+  const rows = report.merchants.slice(0, 6);
+  const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
+  const singleCurrencyCode =
+    report.currencies.length === 1 ? report.currencies[0] : undefined;
+  const totalLabel =
+    singleCurrencyCode === undefined
+      ? report.currencies.length === 0
+        ? "0"
+        : `${report.currencies.length} currencies`
+      : formatMinorAmount(report.totalExpenses, singleCurrencyCode);
+  const averageLabel =
+    singleCurrencyCode === undefined
+      ? report.transactionCount === 0
+        ? "0"
+        : "Mixed"
+      : formatMinorAmount(
+          Math.round(report.totalExpenses / Math.max(1, report.months)),
+          singleCurrencyCode,
+        );
+
+  useEffect(() => {
+    setMonths(String(snapshot.merchantTrendReport.months));
+    setReport(snapshot.merchantTrendReport);
+    setStatus({ state: "idle" });
+  }, [snapshot.merchantTrendReport]);
+
+  async function refreshReport() {
+    const parsedMonths = Number(months);
+
+    setStatus({ state: "loading" });
+
+    try {
+      setReport(await loadMerchantTrendReport({ months: parsedMonths }));
+      setStatus({ state: "idle" });
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Merchant trend report could not be loaded.",
+      });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Merchant trend report</CardTitle>
+        <CardDescription>
+          {report.from} through {report.to}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="outline">{report.months} months</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void refreshReport();
+          }}
+        >
+          <Input
+            aria-label="Merchant trend months"
+            className="h-9 w-[110px]"
+            max={24}
+            min={1}
+            type="number"
+            value={months}
+            onChange={(event) => setMonths(event.target.value)}
+          />
+          <Button disabled={status.state === "loading"} size="sm" type="submit">
+            <RefreshCwIcon />
+            {status.state === "loading" ? "Loading" : "Load"}
+          </Button>
+        </form>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Spent</p>
+            <p className="mt-1 truncate text-sm font-semibold">{totalLabel}</p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Merchants</p>
+            <p className="mt-1 text-sm font-semibold">
+              {report.merchants.length}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Monthly avg</p>
+            <p className="mt-1 truncate text-sm font-semibold">
+              {averageLabel}
+            </p>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No merchant spending found for this window.
+          </p>
+        ) : (
+          <div className="grid gap-3">
+            {rows.map((row) => {
+              const width =
+                maxAmount > 0 ? Math.max(4, (row.amount / maxAmount) * 100) : 0;
+              const href = buildTransactionFiltersHash({
+                ...defaultTransactionFilters(),
+                dateFrom: report.from,
+                dateTo: report.to,
+                merchantName: row.merchantName,
+                amountMax: "-0.01",
+              });
+
+              return (
+                <a
+                  className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                  href={href}
+                  key={`${row.merchantName}:${row.currencyCode}`}
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {row.merchantName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.transactionCount} transactions · avg{" "}
+                        {formatMinorAmount(
+                          row.averageMonthlyAmount,
+                          row.currencyCode,
+                        )}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold">
+                        {formatMinorAmount(row.amount, row.currencyCode)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {currencyLabel(row.currencyCode)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        )}
+
+        {status.state === "error" ? (
+          <p className="text-sm text-destructive">{status.message}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function recurringPaymentAmountLabel(payment: {
   expectedAmountMin?: number;
   expectedAmountMax?: number;
@@ -5718,6 +5894,7 @@ function OverviewRoute({
           <RecurringCalendarCard snapshot={snapshot} />
           <CashflowReportCard snapshot={snapshot} />
           <CategoryTrendReportCard snapshot={snapshot} />
+          <MerchantTrendReportCard snapshot={snapshot} />
           <MonthlySpendingReportCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />
           <RecentSyncRunsCard

@@ -9,6 +9,9 @@ import type {
   CategoryTrendReport,
   CategoryTrendReportCategory,
   CategoryTrendReportPoint,
+  MerchantTrendReport,
+  MerchantTrendReportMerchant,
+  MerchantTrendReportPoint,
   LedgerAccount,
   LedgerEntry,
   LedgerEntryAnnotationUpdate,
@@ -82,6 +85,10 @@ export interface LedgerReportQueryService {
     profile?: string,
     months?: number,
   ): Promise<CategoryTrendReport>;
+  getMerchantTrendReport(
+    profile?: string,
+    months?: number,
+  ): Promise<MerchantTrendReport>;
   getMonthlySpendingReport(
     profile?: string,
     month?: string,
@@ -827,6 +834,24 @@ function readCategoryTrendReportMonths(months: number | undefined): number {
   return normalizedMonths;
 }
 
+function readMerchantTrendReportMonths(months: number | undefined): number {
+  if (months === undefined) {
+    return DEFAULT_CASHFLOW_REPORT_MONTHS;
+  }
+
+  if (!Number.isFinite(months)) {
+    throw new Error("Merchant trend report months must be a finite number.");
+  }
+
+  const normalizedMonths = Math.trunc(months);
+
+  if (normalizedMonths < 1 || normalizedMonths > MAX_CASHFLOW_REPORT_MONTHS) {
+    throw new Error("Merchant trend report months must be between 1 and 24.");
+  }
+
+  return normalizedMonths;
+}
+
 function isTransferLikeEntry(entry: LedgerEntry): boolean {
   if (entry.categoryId === TRANSFER_CATEGORY_ID) {
     return true;
@@ -1192,6 +1217,121 @@ async function buildCategoryTrendReport(
     transactionCount,
     currencies: [...new Set(sortedCategories.map((row) => row.currencyCode))],
     categories: sortedCategories,
+    points: sortedPoints,
+  };
+}
+
+async function buildMerchantTrendReport(
+  db: SqliteLedgerDb,
+  profile: string,
+  monthsInput: number | undefined,
+): Promise<MerchantTrendReport> {
+  const months = readMerchantTrendReportMonths(monthsInput);
+  const period = await resolveTrailingMonthReportPeriod(db, profile, months);
+  const from = startOfLocalDateEpoch(period.from);
+  const to = endOfLocalDateEpoch(period.to);
+  const merchants = new Map<string, MerchantTrendReportMerchant>();
+  const points = new Map<string, MerchantTrendReportPoint>();
+  let offset = 0;
+  let totalExpenses = 0;
+  let transactionCount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      from,
+      to,
+      amountMax: -1,
+      limit: CASHFLOW_REPORT_TRANSACTION_PAGE_SIZE,
+      offset,
+      sortBy: "time",
+      sortDirection: "asc",
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    for (const entry of page.entries) {
+      const amount = Math.abs(entry.amount);
+      const month = localMonthKey(new Date(entry.time * 1000));
+      const monthPeriod = readReportMonth(month);
+      const merchantName = monthlyReportMerchantName(entry);
+      const normalizedMerchantName = merchantName.toLocaleLowerCase();
+      const merchantKey = `${normalizedMerchantName}:${entry.currencyCode}`;
+      const pointKey = `${month}:${normalizedMerchantName}:${entry.currencyCode}`;
+      const merchantTotal = merchants.get(merchantKey) ?? {
+        merchantName,
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+        averageMonthlyAmount: 0,
+      };
+      const point = points.get(pointKey) ?? {
+        month,
+        from: monthPeriod.periodStart,
+        to: monthPeriod.periodEnd,
+        merchantName,
+        currencyCode: entry.currencyCode,
+        amount: 0,
+        transactionCount: 0,
+      };
+
+      totalExpenses += amount;
+      transactionCount += 1;
+      merchantTotal.amount += amount;
+      merchantTotal.transactionCount += 1;
+      point.amount += amount;
+      point.transactionCount += 1;
+      merchants.set(merchantKey, merchantTotal);
+      points.set(pointKey, point);
+    }
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  const sortedMerchants = [...merchants.values()]
+    .map((row): MerchantTrendReportMerchant => {
+      return {
+        ...row,
+        averageMonthlyAmount: averageMinorAmount(row.amount, months),
+      };
+    })
+    .sort((left, right) => {
+      if (right.amount !== left.amount) {
+        return right.amount - left.amount;
+      }
+
+      return left.merchantName.localeCompare(right.merchantName);
+    });
+  const sortedPoints = [...points.values()].sort((left, right) => {
+    const monthDiff = left.month.localeCompare(right.month);
+
+    if (monthDiff !== 0) {
+      return monthDiff;
+    }
+
+    if (right.amount !== left.amount) {
+      return right.amount - left.amount;
+    }
+
+    return left.merchantName.localeCompare(right.merchantName);
+  });
+
+  return {
+    profile,
+    from: period.from,
+    to: period.to,
+    months,
+    generatedAt: new Date().toISOString(),
+    totalExpenses,
+    transactionCount,
+    currencies: [...new Set(sortedMerchants.map((row) => row.currencyCode))],
+    merchants: sortedMerchants,
     points: sortedPoints,
   };
 }
@@ -2230,6 +2370,13 @@ export function createLedgerQueryService({
         months,
       );
     },
+    getMerchantTrendReport(profile, months) {
+      return buildMerchantTrendReport(
+        db,
+        coerceProfile(profile, defaultProfile),
+        months,
+      );
+    },
     getMonthlySpendingReport(profile, month) {
       return buildMonthlySpendingReport(
         db,
@@ -2324,6 +2471,7 @@ export function createLedgerQueryServices(
     reports: {
       getCashflowReport: query.getCashflowReport,
       getCategoryTrendReport: query.getCategoryTrendReport,
+      getMerchantTrendReport: query.getMerchantTrendReport,
       getMonthlySpendingReport: query.getMonthlySpendingReport,
     },
     recurringItems: {

@@ -72,6 +72,7 @@ import type {
   SavingsGoalProgress,
   LedgerSummary,
   MerchantCleanupRule,
+  MerchantTrendReport,
   MissedRecurringPayment,
   MonthlySpendingReport,
   NetWorthTrend,
@@ -564,6 +565,18 @@ const categoryTrendReportQuerySchema = {
 } as const;
 
 const categoryTrendReportResponseSchema = {
+  type: "object",
+  additionalProperties: true,
+} as const;
+
+const merchantTrendReportQuerySchema = {
+  type: "object",
+  properties: {
+    months: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+const merchantTrendReportResponseSchema = {
   type: "object",
   additionalProperties: true,
 } as const;
@@ -2781,6 +2794,50 @@ function registerLocalApiRoutes(
             error instanceof Error
               ? error.message
               : "Category trend report could not be generated.",
+        };
+      }
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/reports/merchant-trends`,
+    {
+      schema: {
+        querystring: merchantTrendReportQuerySchema,
+        response: {
+          200: merchantTrendReportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | MerchantTrendReport
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const months = readNumberQuery(query.months);
+
+      try {
+        return await services.queryService.getMerchantTrendReport(
+          services.profile,
+          months,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_merchant_trend_report_query",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Merchant trend report could not be generated.",
         };
       }
     },

@@ -76,6 +76,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       const categorySpending = await queryService.listCategorySpending();
       const cashflowReport = await queryService.getCashflowReport();
       const categoryTrendReport = await queryService.getCategoryTrendReport();
+      const merchantTrendReport = await queryService.getMerchantTrendReport();
       const monthlySpendingReport =
         await queryService.getMonthlySpendingReport();
       const budgets = await queryService.listBudgets();
@@ -102,6 +103,8 @@ test("query service defaults profile and wraps storage reads", async () => {
         await queryServices.reports.getCashflowReport();
       const groupedCategoryTrendReport =
         await queryServices.reports.getCategoryTrendReport();
+      const groupedMerchantTrendReport =
+        await queryServices.reports.getMerchantTrendReport();
       const groupedMonthlySpendingReport =
         await queryServices.reports.getMonthlySpendingReport();
       const groupedBudgets = await queryServices.budgets.listBudgets();
@@ -248,6 +251,43 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["2026-04", "transport", 980, 1500, 1],
         ],
       );
+      assert.equal(merchantTrendReport.months, 6);
+      assert.equal(merchantTrendReport.from, "2025-11-01");
+      assert.equal(merchantTrendReport.to, "2026-04-30");
+      assert.equal(merchantTrendReport.totalExpenses, 408650);
+      assert.equal(merchantTrendReport.transactionCount, 5);
+      assert.deepEqual(
+        merchantTrendReport.merchants.map((row) => [
+          row.merchantName,
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+          row.averageMonthlyAmount,
+        ]),
+        [
+          ["Emergency fund top-up", 980, 250000, 1, 41667],
+          ["Fixture Grocery", 980, 84250, 1, 14042],
+          ["Cloud Subscription", 840, 52900, 1, 8817],
+          ["Travel booking", 978, 20000, 1, 3333],
+          ["Kyiv Metro", 980, 1500, 1, 250],
+        ],
+      );
+      assert.deepEqual(
+        merchantTrendReport.points.map((row) => [
+          row.month,
+          row.merchantName,
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+        ]),
+        [
+          ["2026-04", "Emergency fund top-up", 980, 250000, 1],
+          ["2026-04", "Fixture Grocery", 980, 84250, 1],
+          ["2026-04", "Cloud Subscription", 840, 52900, 1],
+          ["2026-04", "Travel booking", 978, 20000, 1],
+          ["2026-04", "Kyiv Metro", 980, 1500, 1],
+        ],
+      );
       assert.equal(monthlySpendingReport.month, "2026-04");
       assert.equal(monthlySpendingReport.from, "2026-04-01");
       assert.equal(monthlySpendingReport.to, "2026-04-30");
@@ -355,6 +395,16 @@ test("query service defaults profile and wraps storage reads", async () => {
         },
         {
           ...categoryTrendReport,
+          generatedAt: "generated",
+        },
+      );
+      assert.deepEqual(
+        {
+          ...groupedMerchantTrendReport,
+          generatedAt: "generated",
+        },
+        {
+          ...merchantTrendReport,
           generatedAt: "generated",
         },
       );
@@ -2533,6 +2583,7 @@ test("ledger services factory returns both query and write surfaces", async () =
       assert.equal(typeof services.query.getNetWorthTrend, "function");
       assert.equal(typeof services.query.getCashflowReport, "function");
       assert.equal(typeof services.query.getCategoryTrendReport, "function");
+      assert.equal(typeof services.query.getMerchantTrendReport, "function");
       assert.equal(typeof services.query.getMonthlySpendingReport, "function");
       assert.equal(
         typeof services.queries.transactions.listLedgerEntries,
@@ -2566,6 +2617,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.reports.getCategoryTrendReport,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.reports.getMerchantTrendReport,
         "function",
       );
       assert.equal(
