@@ -2745,6 +2745,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0016_merchant_cleanup_rules",
         "0017_ledger_entry_manual_overrides",
         "0018_ledger_entry_category_rule_metadata",
+        "0019_recurring_detection_decisions",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -2755,6 +2756,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
       assert.deepEqual(await db.listRecurringItems(profile), []);
+      assert.deepEqual(await db.listRecurringDetectionDecisions(profile), []);
       assert.deepEqual(await db.listTags(profile), []);
 
       const accounts = await db.listAccounts(profile);
@@ -2790,7 +2792,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(afterMigration.syncRuns, 1);
         assert.equal(
           afterMigration.migrations.at(-1),
-          "0018_ledger_entry_category_rule_metadata",
+          "0019_recurring_detection_decisions",
         );
 
         const summary = await db.getLedgerSummary(profile);
@@ -4062,6 +4064,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/recurring-detections",
       });
+      const confirmRecurringDetectionResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/recurring-detections/missing-candidate/confirm",
+      });
+      const ignoreRecurringDetectionResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/recurring-detections/missing-candidate/ignore",
+      });
       const recurringCalendarResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/recurring-calendar?from=2026-04-01&to=2026-04-30",
@@ -4307,6 +4317,16 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       );
       assert.equal(recurringDetectionsResponse.statusCode, 200);
       assert.deepEqual(recurringDetectionsResponse.json(), []);
+      assert.equal(confirmRecurringDetectionResponse.statusCode, 404);
+      assert.equal(
+        confirmRecurringDetectionResponse.json().error,
+        "recurring_detection_not_found",
+      );
+      assert.equal(ignoreRecurringDetectionResponse.statusCode, 404);
+      assert.equal(
+        ignoreRecurringDetectionResponse.json().error,
+        "recurring_detection_not_found",
+      );
       assert.equal(recurringCalendarResponse.statusCode, 200);
       assert.deepEqual(recurringCalendarResponse.json(), []);
       assert.equal(invalidRecurringCalendarResponse.statusCode, 400);

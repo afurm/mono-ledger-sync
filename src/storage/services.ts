@@ -20,6 +20,7 @@ import type {
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
+  RecurringDetectionDecisionResult,
   RecurringItem,
   SavingsGoalProgress,
   StoredWebhookEvent,
@@ -116,6 +117,14 @@ export interface LedgerQueryService
     LedgerSyncStateQueryService {}
 
 export interface LedgerWriteService {
+  confirmRecurringDetection(
+    candidateId: string,
+    profile?: string,
+  ): Promise<RecurringDetectionDecisionResult>;
+  ignoreRecurringDetection(
+    candidateId: string,
+    profile?: string,
+  ): Promise<RecurringDetectionDecisionResult>;
   createMonthlyCategoryBudget(
     input: MonthlyCategoryBudgetInput,
     profile?: string,
@@ -622,7 +631,13 @@ async function detectRecurringTransactionsFromLedger(
   profile: string,
 ): Promise<readonly RecurringDetectionCandidate[]> {
   const groups = new Map<string, LedgerEntry[]>();
-  const entries = await listLedgerEntriesForRecurringDetection(db, profile);
+  const [entries, decisions] = await Promise.all([
+    listLedgerEntriesForRecurringDetection(db, profile),
+    db.listRecurringDetectionDecisions(profile),
+  ]);
+  const decidedCandidateIds = new Set(
+    decisions.map((decision) => decision.candidateId),
+  );
 
   for (const entry of entries) {
     if (
@@ -656,6 +671,7 @@ async function detectRecurringTransactionsFromLedger(
     .filter((candidate): candidate is RecurringDetectionCandidate => {
       return candidate !== undefined;
     })
+    .filter((candidate) => !decidedCandidateIds.has(candidate.id))
     .sort((left, right) => {
       if (right.confidence !== left.confidence) {
         return right.confidence - left.confidence;
@@ -1704,6 +1720,53 @@ export function createLedgerWriteService({
   db,
   defaultProfile,
 }: CreateLedgerServicesOptions): LedgerWriteService {
+  function readRecurringCandidateId(candidateId: string): string {
+    const normalizedCandidateId = candidateId.trim();
+
+    if (!normalizedCandidateId) {
+      throw new Error("Recurring detection candidate ID is required.");
+    }
+
+    return normalizedCandidateId;
+  }
+
+  async function findRecurringDetectionCandidate(
+    profile: string,
+    candidateId: string,
+  ): Promise<RecurringDetectionCandidate> {
+    const candidates = await detectRecurringTransactionsFromLedger(db, profile);
+    const candidate = candidates.find((item) => item.id === candidateId);
+
+    if (candidate === undefined) {
+      throw new Error("Recurring detection candidate was not found.");
+    }
+
+    return candidate;
+  }
+
+  function recurringItemFromCandidate(
+    candidate: RecurringDetectionCandidate,
+    timestamp: string,
+  ): RecurringItem {
+    return {
+      id: candidate.id,
+      profile: candidate.profile,
+      accountId: candidate.accountId,
+      ...(candidate.categoryId === undefined
+        ? {}
+        : { categoryId: candidate.categoryId }),
+      merchantName: candidate.merchantName,
+      frequency: candidate.frequency,
+      expectedAmountMin: candidate.expectedAmountMin,
+      expectedAmountMax: candidate.expectedAmountMax,
+      isActive: true,
+      startedAt: candidate.firstSeenAt,
+      lastSeenAt: candidate.lastSeenAt,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+
   async function withProfileTransaction<T>(
     profile: string | undefined,
     callback: (tx: LedgerDbTransaction, profile: string) => Promise<T>,
@@ -1724,6 +1787,54 @@ export function createLedgerWriteService({
   }
 
   return {
+    async confirmRecurringDetection(candidateId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const normalizedCandidateId = readRecurringCandidateId(candidateId);
+      const candidate = await findRecurringDetectionCandidate(
+        resolvedProfile,
+        normalizedCandidateId,
+      );
+      const timestamp = new Date().toISOString();
+      const recurringItem = await db.upsertRecurringItem(
+        resolvedProfile,
+        recurringItemFromCandidate(candidate, timestamp),
+      );
+      const decision = await db.recordRecurringDetectionDecision(
+        resolvedProfile,
+        normalizedCandidateId,
+        "confirmed",
+        timestamp,
+      );
+
+      return {
+        profile: decision.profile,
+        candidateId: decision.candidateId,
+        action: decision.action,
+        updatedAt: decision.updatedAt,
+        recurringItem,
+      };
+    },
+    async ignoreRecurringDetection(candidateId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const normalizedCandidateId = readRecurringCandidateId(candidateId);
+      await findRecurringDetectionCandidate(
+        resolvedProfile,
+        normalizedCandidateId,
+      );
+
+      const decision = await db.recordRecurringDetectionDecision(
+        resolvedProfile,
+        normalizedCandidateId,
+        "ignored",
+      );
+
+      return {
+        profile: decision.profile,
+        candidateId: decision.candidateId,
+        action: decision.action,
+        updatedAt: decision.updatedAt,
+      };
+    },
     async createMonthlyCategoryBudget(input, profile) {
       const resolvedProfile = coerceProfile(profile, defaultProfile);
       const categoryId = input.categoryId.trim();

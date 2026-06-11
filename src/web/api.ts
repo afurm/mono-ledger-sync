@@ -231,6 +231,36 @@ export interface RecurringDetectionCandidate {
   latestLedgerEntryId: string;
 }
 
+export interface RecurringItem {
+  id: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency:
+    | "daily"
+    | "weekly"
+    | "monthly"
+    | "quarterly"
+    | "yearly"
+    | "irregular";
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  isActive: boolean;
+  startedAt?: string;
+  lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecurringDetectionDecisionResult {
+  profile: string;
+  candidateId: string;
+  action: "confirmed" | "ignored";
+  updatedAt: string;
+  recurringItem?: RecurringItem;
+}
+
 export interface LedgerAccount {
   id: string;
   type: string;
@@ -452,6 +482,7 @@ export interface LocalAppSnapshot {
   upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
   missedRecurringPayments: readonly MissedRecurringPayment[];
   subscriptionIncreaseAlerts: readonly SubscriptionIncreaseAlert[];
+  recurringDetectionCandidates: readonly RecurringDetectionCandidate[];
   recurringCalendar: readonly RecurringCalendarEvent[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
@@ -482,6 +513,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "upcomingRecurringPayments"
   | "missedRecurringPayments"
   | "subscriptionIncreaseAlerts"
+  | "recurringDetectionCandidates"
   | "recurringCalendar"
   | "merchantCleanupRules"
   | "categoryRules"
@@ -494,6 +526,7 @@ type PersistedLocalAppSnapshot = Omit<
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
   missedRecurringPayments?: readonly MissedRecurringPayment[];
   subscriptionIncreaseAlerts?: readonly SubscriptionIncreaseAlert[];
+  recurringDetectionCandidates?: readonly RecurringDetectionCandidate[];
   recurringCalendar?: readonly RecurringCalendarEvent[];
   merchantCleanupRules?: readonly MerchantCleanupRule[];
   categoryRules?: readonly CategoryRule[];
@@ -597,6 +630,7 @@ function normalizeCachedLocalAppSnapshot(
       upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
       missedRecurringPayments: snapshot.missedRecurringPayments ?? [],
       subscriptionIncreaseAlerts: snapshot.subscriptionIncreaseAlerts ?? [],
+      recurringDetectionCandidates: snapshot.recurringDetectionCandidates ?? [],
       recurringCalendar: snapshot.recurringCalendar ?? [],
       merchantCleanupRules: snapshot.merchantCleanupRules ?? [],
       categoryRules: snapshot.categoryRules ?? [],
@@ -1066,6 +1100,28 @@ export async function loadRecurringDetectionCandidates(): Promise<
   );
 }
 
+export async function confirmRecurringDetection(
+  candidateId: string,
+): Promise<RecurringDetectionDecisionResult> {
+  return requestJson<RecurringDetectionDecisionResult>(
+    `/api/ledger/recurring-detections/${encodeURIComponent(candidateId)}/confirm`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function ignoreRecurringDetection(
+  candidateId: string,
+): Promise<RecurringDetectionDecisionResult> {
+  return requestJson<RecurringDetectionDecisionResult>(
+    `/api/ledger/recurring-detections/${encodeURIComponent(candidateId)}/ignore`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export async function loadMissedRecurringPayments(
   options: {
     asOf?: string;
@@ -1146,6 +1202,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       upcomingRecurringPayments,
       missedRecurringPayments,
       subscriptionIncreaseAlerts,
+      recurringDetectionCandidates,
       recurringCalendar,
       transactions,
       syncRuns,
@@ -1173,6 +1230,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       ),
       loadMissedRecurringPayments(),
       loadSubscriptionIncreaseAlerts(),
+      loadRecurringDetectionCandidates(),
       loadRecurringCalendar(),
       loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
@@ -1202,6 +1260,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       upcomingRecurringPayments,
       missedRecurringPayments,
       subscriptionIncreaseAlerts,
+      recurringDetectionCandidates,
       recurringCalendar,
       transactions,
       syncRuns,

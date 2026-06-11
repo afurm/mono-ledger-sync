@@ -77,6 +77,9 @@ test("documents the shared domain model contract", async () => {
     "NetWorthTrend",
     "RecurringItem",
     "RecurringDetectionCandidate",
+    "RecurringDetectionDecisionAction",
+    "RecurringDetectionDecision",
+    "RecurringDetectionDecisionResult",
     "RecurringCalendarEvent",
     "MissedRecurringPayment",
     "SubscriptionIncreaseAlert",
@@ -231,8 +234,14 @@ test("web client caches local snapshots for offline browsing", async () => {
   );
   assert.match(
     apiSource,
+    /recurringDetectionCandidates: snapshot\.recurringDetectionCandidates \?\? \[\]/,
+  );
+  assert.match(
+    apiSource,
     /recurringCalendar: snapshot\.recurringCalendar \?\? \[\]/,
   );
+  assert.match(apiSource, /confirmRecurringDetection/);
+  assert.match(apiSource, /ignoreRecurringDetection/);
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
@@ -250,6 +259,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Spending by category/);
   assert.match(appSource, /Missed recurring payments/);
   assert.match(appSource, /Subscription increase alerts/);
+  assert.match(appSource, /Recurring suggestions/);
   assert.match(appSource, /Upcoming recurring payments/);
   assert.match(appSource, /Recurring calendar/);
 });
