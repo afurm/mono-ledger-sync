@@ -156,6 +156,44 @@ export interface CashflowReport {
   points: readonly CashflowReportPoint[];
 }
 
+export interface SavingsRateReportPoint {
+  month: string;
+  from: string;
+  to: string;
+  currencyCode: number;
+  income: number;
+  expenses: number;
+  savings: number;
+  savingsRate: number;
+  transactionCount: number;
+}
+
+export interface SavingsRateReportCurrencyTotal {
+  currencyCode: number;
+  income: number;
+  expenses: number;
+  savings: number;
+  savingsRate: number;
+  transactionCount: number;
+  averageMonthlySavings: number;
+}
+
+export interface SavingsRateReport {
+  profile: string;
+  from: string;
+  to: string;
+  months: number;
+  generatedAt: string;
+  totalIncome: number;
+  totalExpenses: number;
+  totalSavings: number;
+  savingsRate: number;
+  transactionCount: number;
+  currencies: readonly number[];
+  totals: readonly SavingsRateReportCurrencyTotal[];
+  points: readonly SavingsRateReportPoint[];
+}
+
 export interface CategoryTrendReportPoint {
   month: string;
   from: string;
@@ -616,6 +654,7 @@ export interface LocalAppSnapshot {
   merchantCleanupRules: readonly MerchantCleanupRule[];
   categorySpending: readonly LedgerCategorySpending[];
   cashflowReport: CashflowReport;
+  savingsRateReport: SavingsRateReport;
   categoryTrendReport: CategoryTrendReport;
   merchantTrendReport: MerchantTrendReport;
   monthlySpendingReport: MonthlySpendingReport;
@@ -651,6 +690,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "savingsGoalProgress"
   | "categorySpending"
   | "cashflowReport"
+  | "savingsRateReport"
   | "categoryTrendReport"
   | "merchantTrendReport"
   | "monthlySpendingReport"
@@ -668,6 +708,7 @@ type PersistedLocalAppSnapshot = Omit<
   savingsGoalProgress?: readonly SavingsGoalProgress[];
   categorySpending?: readonly LedgerCategorySpending[];
   cashflowReport?: CashflowReport;
+  savingsRateReport?: SavingsRateReport;
   categoryTrendReport?: CategoryTrendReport;
   merchantTrendReport?: MerchantTrendReport;
   monthlySpendingReport?: MonthlySpendingReport;
@@ -766,6 +807,27 @@ function emptyCashflowReport(
   };
 }
 
+function emptySavingsRateReport(
+  profile: string,
+  monthToDate: LedgerCashflowSummary,
+): SavingsRateReport {
+  return {
+    profile,
+    from: monthToDate.from,
+    to: monthToDate.to,
+    months: 1,
+    generatedAt: new Date().toISOString(),
+    totalIncome: 0,
+    totalExpenses: 0,
+    totalSavings: 0,
+    savingsRate: 0,
+    transactionCount: 0,
+    currencies: [],
+    totals: [],
+    points: [],
+  };
+}
+
 function emptyCategoryTrendReport(
   profile: string,
   monthToDate: LedgerCashflowSummary,
@@ -854,6 +916,9 @@ function normalizeCachedLocalAppSnapshot(
       cashflowReport:
         snapshot.cashflowReport ??
         emptyCashflowReport(snapshot.summary.profile, monthToDate),
+      savingsRateReport:
+        snapshot.savingsRateReport ??
+        emptySavingsRateReport(snapshot.summary.profile, monthToDate),
       categoryTrendReport:
         snapshot.categoryTrendReport ??
         emptyCategoryTrendReport(snapshot.summary.profile, monthToDate),
@@ -1369,6 +1434,22 @@ export async function loadCashflowReport(options?: {
   );
 }
 
+export async function loadSavingsRateReport(options?: {
+  months?: number;
+}): Promise<SavingsRateReport> {
+  const params = new URLSearchParams();
+
+  if (options?.months !== undefined) {
+    params.set("months", String(options.months));
+  }
+
+  const query = params.toString();
+
+  return requestJson<SavingsRateReport>(
+    `/api/ledger/reports/savings-rate${query ? `?${query}` : ""}`,
+  );
+}
+
 export async function loadCategoryTrendReport(options?: {
   months?: number;
 }): Promise<CategoryTrendReport> {
@@ -1500,6 +1581,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       merchantCleanupRules,
       categorySpending,
       cashflowReport,
+      savingsRateReport,
       categoryTrendReport,
       merchantTrendReport,
       monthlySpendingReport,
@@ -1530,6 +1612,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
         "/api/ledger/category-spending",
       ),
       loadCashflowReport(),
+      loadSavingsRateReport(),
       loadCategoryTrendReport(),
       loadMerchantTrendReport(),
       loadMonthlySpendingReport(),
@@ -1566,6 +1649,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       merchantCleanupRules,
       categorySpending,
       cashflowReport,
+      savingsRateReport,
       categoryTrendReport,
       merchantTrendReport,
       monthlySpendingReport,

@@ -50,6 +50,9 @@ configuration, and direct filesystem behavior.
 - `CashflowReport`, `CashflowReportCurrencyTotal`, and `CashflowReportPoint`
   define a local income, expense, and net cashflow report over a bounded monthly
   window.
+- `SavingsRateReport`, `SavingsRateReportCurrencyTotal`, and
+  `SavingsRateReportPoint` define local savings and savings-rate movement over a
+  bounded monthly window.
 - `CategoryTrendReport`, `CategoryTrendReportCategory`, and
   `CategoryTrendReportPoint` define local category spending movement over a
   bounded monthly window.

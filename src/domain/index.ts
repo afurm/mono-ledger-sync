@@ -381,6 +381,44 @@ export interface CashflowReport {
   points: readonly CashflowReportPoint[];
 }
 
+export interface SavingsRateReportPoint {
+  month: string;
+  from: string;
+  to: string;
+  currencyCode: number;
+  income: number;
+  expenses: number;
+  savings: number;
+  savingsRate: number;
+  transactionCount: number;
+}
+
+export interface SavingsRateReportCurrencyTotal {
+  currencyCode: number;
+  income: number;
+  expenses: number;
+  savings: number;
+  savingsRate: number;
+  transactionCount: number;
+  averageMonthlySavings: number;
+}
+
+export interface SavingsRateReport {
+  profile: string;
+  from: string;
+  to: string;
+  months: number;
+  generatedAt: string;
+  totalIncome: number;
+  totalExpenses: number;
+  totalSavings: number;
+  savingsRate: number;
+  transactionCount: number;
+  currencies: readonly number[];
+  totals: readonly SavingsRateReportCurrencyTotal[];
+  points: readonly SavingsRateReportPoint[];
+}
+
 export interface CategoryTrendReportPoint {
   month: string;
   from: string;

@@ -4052,6 +4052,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/reports/cashflow?months=25",
       });
+      const savingsRateReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/savings-rate",
+      });
+      const invalidSavingsRateReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/savings-rate?months=25",
+      });
       const categoryTrendReportResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/reports/category-trends",
@@ -4338,6 +4346,34 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(
         invalidCashflowReportResponse.json().error,
         "invalid_cashflow_report_query",
+      );
+      assert.equal(savingsRateReportResponse.statusCode, 200);
+      assert.equal(savingsRateReportResponse.json().months, 6);
+      assert.equal(savingsRateReportResponse.json().totalIncome, 8520000);
+      assert.equal(savingsRateReportResponse.json().totalExpenses, 408650);
+      assert.equal(savingsRateReportResponse.json().totalSavings, 8111350);
+      assert.equal(savingsRateReportResponse.json().savingsRate, 95.2);
+      assert.deepEqual(
+        savingsRateReportResponse
+          .json()
+          .totals.map((row) => [
+            row.currencyCode,
+            row.income,
+            row.expenses,
+            row.savings,
+            row.savingsRate,
+            row.averageMonthlySavings,
+          ]),
+        [
+          [980, 8500000, 335750, 8164250, 96.05, 1360708],
+          [840, 0, 52900, -52900, 0, -8817],
+          [978, 20000, 20000, 0, 0, 0],
+        ],
+      );
+      assert.equal(invalidSavingsRateReportResponse.statusCode, 400);
+      assert.equal(
+        invalidSavingsRateReportResponse.json().error,
+        "invalid_savings_rate_report_query",
       );
       assert.equal(categoryTrendReportResponse.statusCode, 200);
       assert.equal(categoryTrendReportResponse.json().months, 6);

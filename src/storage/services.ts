@@ -6,6 +6,9 @@ import type {
   CashflowReport,
   CashflowReportCurrencyTotal,
   CashflowReportPoint,
+  SavingsRateReport,
+  SavingsRateReportCurrencyTotal,
+  SavingsRateReportPoint,
   CategoryTrendReport,
   CategoryTrendReportCategory,
   CategoryTrendReportPoint,
@@ -81,6 +84,10 @@ export interface LedgerBudgetQueryService {
 
 export interface LedgerReportQueryService {
   getCashflowReport(profile?: string, months?: number): Promise<CashflowReport>;
+  getSavingsRateReport(
+    profile?: string,
+    months?: number,
+  ): Promise<SavingsRateReport>;
   getCategoryTrendReport(
     profile?: string,
     months?: number,
@@ -816,6 +823,24 @@ function readCashflowReportMonths(months: number | undefined): number {
   return normalizedMonths;
 }
 
+function readSavingsRateReportMonths(months: number | undefined): number {
+  if (months === undefined) {
+    return DEFAULT_CASHFLOW_REPORT_MONTHS;
+  }
+
+  if (!Number.isFinite(months)) {
+    throw new Error("Savings rate report months must be a finite number.");
+  }
+
+  const normalizedMonths = Math.trunc(months);
+
+  if (normalizedMonths < 1 || normalizedMonths > MAX_CASHFLOW_REPORT_MONTHS) {
+    throw new Error("Savings rate report months must be between 1 and 24.");
+  }
+
+  return normalizedMonths;
+}
+
 function readCategoryTrendReportMonths(months: number | undefined): number {
   if (months === undefined) {
     return DEFAULT_CASHFLOW_REPORT_MONTHS;
@@ -930,6 +955,14 @@ function sharePercentage(amount: number, total: number): number {
   }
 
   return Math.round((amount / total) * 10_000) / 100;
+}
+
+function savingsRatePercentage(income: number, savings: number): number {
+  if (income <= 0) {
+    return 0;
+  }
+
+  return Math.round((savings / income) * 10_000) / 100;
 }
 
 async function resolveTrailingMonthReportPeriod(
@@ -1098,6 +1131,155 @@ async function buildCashflowReport(
     totalIncome,
     totalExpenses,
     netCashflow,
+    transactionCount,
+    currencies: sortedTotals.map((row) => row.currencyCode),
+    totals: sortedTotals,
+    points: sortedPoints,
+  };
+}
+
+function applySavingsRateAmount(
+  target: {
+    income: number;
+    expenses: number;
+    savings: number;
+    transactionCount: number;
+  },
+  amount: number,
+): void {
+  if (amount > 0) {
+    target.income += amount;
+  } else if (amount < 0) {
+    target.expenses += Math.abs(amount);
+  }
+
+  target.savings += amount;
+  target.transactionCount += 1;
+}
+
+async function buildSavingsRateReport(
+  db: SqliteLedgerDb,
+  profile: string,
+  monthsInput: number | undefined,
+): Promise<SavingsRateReport> {
+  const months = readSavingsRateReportMonths(monthsInput);
+  const period = await resolveTrailingMonthReportPeriod(db, profile, months);
+  const from = startOfLocalDateEpoch(period.from);
+  const to = endOfLocalDateEpoch(period.to);
+  const totals = new Map<number, SavingsRateReportCurrencyTotal>();
+  const points = new Map<string, SavingsRateReportPoint>();
+  let offset = 0;
+  let totalIncome = 0;
+  let totalExpenses = 0;
+  let totalSavings = 0;
+  let transactionCount = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      from,
+      to,
+      limit: CASHFLOW_REPORT_TRANSACTION_PAGE_SIZE,
+      offset,
+      sortBy: "time",
+      sortDirection: "asc",
+    });
+
+    if (page.entries.length === 0) {
+      break;
+    }
+
+    for (const entry of page.entries) {
+      const month = localMonthKey(new Date(entry.time * 1000));
+      const monthPeriod = readReportMonth(month);
+      const pointKey = `${month}:${entry.currencyCode}`;
+      const point = points.get(pointKey) ?? {
+        month,
+        from: monthPeriod.periodStart,
+        to: monthPeriod.periodEnd,
+        currencyCode: entry.currencyCode,
+        income: 0,
+        expenses: 0,
+        savings: 0,
+        savingsRate: 0,
+        transactionCount: 0,
+      };
+      const currencyTotal = totals.get(entry.currencyCode) ?? {
+        currencyCode: entry.currencyCode,
+        income: 0,
+        expenses: 0,
+        savings: 0,
+        savingsRate: 0,
+        transactionCount: 0,
+        averageMonthlySavings: 0,
+      };
+
+      if (entry.amount > 0) {
+        totalIncome += entry.amount;
+      } else if (entry.amount < 0) {
+        totalExpenses += Math.abs(entry.amount);
+      }
+
+      totalSavings += entry.amount;
+      transactionCount += 1;
+      applySavingsRateAmount(point, entry.amount);
+      applySavingsRateAmount(currencyTotal, entry.amount);
+      points.set(pointKey, point);
+      totals.set(entry.currencyCode, currencyTotal);
+    }
+
+    offset += page.entries.length;
+
+    if (offset >= page.total) {
+      break;
+    }
+  }
+
+  const sortedTotals = [...totals.values()]
+    .map((row): SavingsRateReportCurrencyTotal => {
+      return {
+        ...row,
+        savingsRate: savingsRatePercentage(row.income, row.savings),
+        averageMonthlySavings: averageMinorAmount(row.savings, months),
+      };
+    })
+    .sort((left, right) => {
+      const leftActivity = left.income + left.expenses;
+      const rightActivity = right.income + right.expenses;
+
+      if (rightActivity !== leftActivity) {
+        return rightActivity - leftActivity;
+      }
+
+      return left.currencyCode - right.currencyCode;
+    });
+  const sortedPoints = [...points.values()]
+    .map((row): SavingsRateReportPoint => {
+      return {
+        ...row,
+        savingsRate: savingsRatePercentage(row.income, row.savings),
+      };
+    })
+    .sort((left, right) => {
+      const monthDiff = left.month.localeCompare(right.month);
+
+      if (monthDiff !== 0) {
+        return monthDiff;
+      }
+
+      return left.currencyCode - right.currencyCode;
+    });
+
+  return {
+    profile,
+    from: period.from,
+    to: period.to,
+    months,
+    generatedAt: new Date().toISOString(),
+    totalIncome,
+    totalExpenses,
+    totalSavings,
+    savingsRate: savingsRatePercentage(totalIncome, totalSavings),
     transactionCount,
     currencies: sortedTotals.map((row) => row.currencyCode),
     totals: sortedTotals,
@@ -2363,6 +2545,13 @@ export function createLedgerQueryService({
         months,
       );
     },
+    getSavingsRateReport(profile, months) {
+      return buildSavingsRateReport(
+        db,
+        coerceProfile(profile, defaultProfile),
+        months,
+      );
+    },
     getCategoryTrendReport(profile, months) {
       return buildCategoryTrendReport(
         db,
@@ -2470,6 +2659,7 @@ export function createLedgerQueryServices(
     },
     reports: {
       getCashflowReport: query.getCashflowReport,
+      getSavingsRateReport: query.getSavingsRateReport,
       getCategoryTrendReport: query.getCategoryTrendReport,
       getMerchantTrendReport: query.getMerchantTrendReport,
       getMonthlySpendingReport: query.getMonthlySpendingReport,
