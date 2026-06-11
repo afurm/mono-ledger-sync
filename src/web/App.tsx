@@ -4219,6 +4219,259 @@ function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
+function MonthToDateFinanceSummaryCard({
+  snapshot,
+  monthDetail,
+  monthFilters,
+}: {
+  snapshot: LocalAppSnapshot;
+  monthDetail: string;
+  monthFilters: TransactionFilterFormState;
+}) {
+  const monthToDate = snapshot.summary.monthToDate;
+  const monthHref = buildTransactionFiltersHash(monthFilters);
+  const categoryRows = snapshot.monthlySpendingReport.categories.slice(0, 3);
+  const budgetRows = snapshot.budgetProgress.slice(0, 3);
+  const recurringRows = snapshot.upcomingRecurringPayments.slice(0, 3);
+  const categoryDateFrom =
+    monthFilters.dateFrom || snapshot.monthlySpendingReport.from;
+  const categoryDateTo =
+    monthFilters.dateTo || snapshot.monthlySpendingReport.to;
+  const maxCategoryAmount = Math.max(
+    ...categoryRows.map((row) => row.amount),
+    0,
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Month-to-date finance</CardTitle>
+        <CardDescription>{monthDetail}</CardDescription>
+        <CardAction>
+          <Button asChild size="sm" variant="outline">
+            <a href={monthHref}>
+              Review month cashflow
+              <ChevronRightIcon data-icon="inline-end" />
+            </a>
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Income</p>
+            <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+              {formatMinorAmount(monthToDate.income)}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Expenses</p>
+            <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+              {formatMinorAmount(monthToDate.expenses)}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Net cashflow</p>
+            <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+              {formatMinorAmount(monthToDate.net)}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="grid gap-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-2">
+              <TagsIcon className="size-4 text-primary" />
+              <div>
+                <h3 className="text-sm font-semibold">Top categories</h3>
+                <p className="text-xs text-muted-foreground">
+                  Month-to-date posted expenses.
+                </p>
+              </div>
+            </div>
+            {categoryRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No posted expenses found for this month.
+              </p>
+            ) : (
+              categoryRows.map((row) => {
+                const width =
+                  maxCategoryAmount > 0
+                    ? Math.max(4, (row.amount / maxCategoryAmount) * 100)
+                    : 0;
+                const href = buildTransactionFiltersHash({
+                  ...defaultTransactionFilters(),
+                  dateFrom: categoryDateFrom,
+                  dateTo: categoryDateTo,
+                  categoryId: row.categoryId,
+                  amountMax: "-0.01",
+                });
+
+                return (
+                  <a
+                    className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                    href={href}
+                    key={`${row.categoryId}:${row.currencyCode}`}
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {row.categoryName}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {row.transactionCount} rows · {row.sharePercentage}%
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-sm font-semibold tabular-nums">
+                        {formatMinorAmount(row.amount, row.currencyCode)}
+                      </p>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                  </a>
+                );
+              })
+            )}
+          </section>
+
+          <section className="grid gap-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-2">
+              <WalletCardsIcon className="size-4 text-primary" />
+              <div>
+                <h3 className="text-sm font-semibold">Budget watchlist</h3>
+                <p className="text-xs text-muted-foreground">
+                  Current periods ranked by local risk.
+                </p>
+              </div>
+            </div>
+            {budgetRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No active budget periods found.
+              </p>
+            ) : (
+              budgetRows.map((row) => {
+                const width = Math.min(
+                  Math.max(row.progressPercentage, 2),
+                  100,
+                );
+                const href = buildTransactionFiltersHash({
+                  ...defaultTransactionFilters(),
+                  categoryId: row.categoryId,
+                  dateFrom: row.periodStart,
+                  dateTo: row.periodEnd,
+                });
+
+                return (
+                  <a
+                    className="grid gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                    href={href}
+                    key={row.id}
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {row.categoryName}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatMinorAmount(
+                            row.actualAmount,
+                            row.currencyCode,
+                          )}{" "}
+                          /{" "}
+                          {formatMinorAmount(row.amountLimit, row.currencyCode)}
+                        </p>
+                      </div>
+                      <Badge variant={budgetProgressBadgeVariant(row.status)}>
+                        {budgetProgressStatusLabel(row.status)}
+                      </Badge>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={
+                          row.status === "overspent"
+                            ? "h-full rounded-full bg-destructive"
+                            : "h-full rounded-full bg-primary"
+                        }
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                  </a>
+                );
+              })
+            )}
+          </section>
+
+          <section className="grid gap-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-2">
+              <FileClockIcon className="size-4 text-primary" />
+              <div>
+                <h3 className="text-sm font-semibold">
+                  Next recurring payments
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Active local schedules due soon.
+                </p>
+              </div>
+            </div>
+            {recurringRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No upcoming recurring payments found.
+              </p>
+            ) : (
+              recurringRows.map((payment) => {
+                const href = buildTransactionFiltersHash({
+                  ...defaultTransactionFilters(),
+                  accountId: payment.accountId,
+                  ...(payment.categoryId === undefined
+                    ? {}
+                    : { categoryId: payment.categoryId }),
+                  ...(payment.merchantName === undefined
+                    ? {}
+                    : { merchantName: payment.merchantName }),
+                });
+
+                return (
+                  <a
+                    className="flex items-start justify-between gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                    href={href}
+                    key={payment.id}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {payment.merchantName ?? payment.recurringItemId}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatDate(Date.parse(payment.nextDueAt) / 1000)} ·{" "}
+                        {payment.frequency}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold tabular-nums">
+                        {recurringPaymentAmountLabel(payment)}
+                      </p>
+                      <Badge
+                        variant={
+                          payment.isOverdue ? "destructive" : "secondary"
+                        }
+                      >
+                        {recurringPaymentDueLabel(payment)}
+                      </Badge>
+                    </div>
+                  </a>
+                );
+              })
+            )}
+          </section>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MonthlySpendingReportCard({
   snapshot,
 }: {
@@ -6422,6 +6675,12 @@ function OverviewRoute({
           drillDownLabel="Review month"
         />
       </div>
+
+      <MonthToDateFinanceSummaryCard
+        snapshot={snapshot}
+        monthDetail={monthDetail}
+        monthFilters={monthFilters}
+      />
 
       <SyncHealthChart runs={snapshot.syncRuns} />
 
