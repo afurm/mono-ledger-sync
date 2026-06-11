@@ -65,6 +65,9 @@ const shadcnImplementationPackagePrefixes = ["@radix-ui/"];
 const maxWebStylesheetLines = 260;
 const rawPaletteUtilityPattern =
   /\b(?:bg|text|border|ring|from|to|via)-(?:red|blue|green|yellow|purple|orange|pink|slate|gray|zinc|neutral|stone|amber|emerald|teal|cyan|sky|indigo|violet|fuchsia|rose)-[0-9]{2,3}\b/;
+const rawColorLiteralPattern =
+  /#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\((?!var\(--)[^)]+\)/;
+const themeTokenColorLinePattern = /^\s*--[a-z0-9-]+:\s*#[0-9a-fA-F]{3,8};\s*$/;
 const arbitraryVisualUtilityPattern =
   /\b(?:rounded|text|tracking|leading|font)-\[[^\]]+\]/;
 const customControlSelectorPattern =
@@ -411,6 +414,40 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
   }
 
   assert.doesNotMatch(productUiSource, genericDashboardCopyPattern);
+});
+
+test("routes web colors through shadcn tokens and component variants", async () => {
+  const sourceFiles = (
+    await Promise.all(webUiSourceRoots.map(collectSourceFiles))
+  )
+    .flat()
+    .sort();
+  const stylesSource = await readFile("src/web/styles.css", "utf8");
+  const sourceColorViolations = [];
+  const stylesheetColorViolations = stylesSource
+    .split(/\r?\n/)
+    .map((line, index) => ({ line, lineNumber: index + 1 }))
+    .filter(
+      ({ line }) =>
+        rawColorLiteralPattern.test(line) &&
+        !themeTokenColorLinePattern.test(line),
+    )
+    .map(({ line, lineNumber }) => `src/web/styles.css:${lineNumber}: ${line}`);
+
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(sourceFile, "utf8");
+
+    if (rawPaletteUtilityPattern.test(source)) {
+      sourceColorViolations.push(`${sourceFile}: raw Tailwind palette utility`);
+    }
+
+    if (rawColorLiteralPattern.test(source)) {
+      sourceColorViolations.push(`${sourceFile}: raw color literal`);
+    }
+  }
+
+  assert.deepEqual(sourceColorViolations, []);
+  assert.deepEqual(stylesheetColorViolations, []);
 });
 
 test("keeps screen colors on semantic tokens", async () => {
