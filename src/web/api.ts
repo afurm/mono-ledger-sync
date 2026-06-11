@@ -159,6 +159,31 @@ export interface MissedRecurringPayment {
   lastSeenAt?: string;
 }
 
+export interface SubscriptionIncreaseAlert {
+  id: string;
+  recurringItemId: string;
+  ledgerEntryId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency:
+    | "daily"
+    | "weekly"
+    | "monthly"
+    | "quarterly"
+    | "yearly"
+    | "irregular";
+  expectedAmountMin?: number;
+  expectedAmountMax: number;
+  actualAmount: number;
+  increaseAmount: number;
+  increasePercentage: number;
+  currencyCode: number;
+  occurredAt: string;
+  lastSeenAt?: string;
+}
+
 export interface RecurringCalendarEvent {
   id: string;
   recurringItemId: string;
@@ -426,6 +451,7 @@ export interface LocalAppSnapshot {
   budgetProgress: readonly BudgetProgress[];
   upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
   missedRecurringPayments: readonly MissedRecurringPayment[];
+  subscriptionIncreaseAlerts: readonly SubscriptionIncreaseAlert[];
   recurringCalendar: readonly RecurringCalendarEvent[];
   transactions: LedgerEntryPage;
   syncRuns: readonly SyncRun[];
@@ -455,6 +481,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "budgetProgress"
   | "upcomingRecurringPayments"
   | "missedRecurringPayments"
+  | "subscriptionIncreaseAlerts"
   | "recurringCalendar"
   | "merchantCleanupRules"
   | "categoryRules"
@@ -466,6 +493,7 @@ type PersistedLocalAppSnapshot = Omit<
   budgetProgress?: readonly BudgetProgress[];
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
   missedRecurringPayments?: readonly MissedRecurringPayment[];
+  subscriptionIncreaseAlerts?: readonly SubscriptionIncreaseAlert[];
   recurringCalendar?: readonly RecurringCalendarEvent[];
   merchantCleanupRules?: readonly MerchantCleanupRule[];
   categoryRules?: readonly CategoryRule[];
@@ -568,6 +596,7 @@ function normalizeCachedLocalAppSnapshot(
       budgetProgress: snapshot.budgetProgress ?? [],
       upcomingRecurringPayments: snapshot.upcomingRecurringPayments ?? [],
       missedRecurringPayments: snapshot.missedRecurringPayments ?? [],
+      subscriptionIncreaseAlerts: snapshot.subscriptionIncreaseAlerts ?? [],
       recurringCalendar: snapshot.recurringCalendar ?? [],
       merchantCleanupRules: snapshot.merchantCleanupRules ?? [],
       categoryRules: snapshot.categoryRules ?? [],
@@ -1055,6 +1084,24 @@ export async function loadMissedRecurringPayments(
   );
 }
 
+export async function loadSubscriptionIncreaseAlerts(
+  options: {
+    asOf?: string;
+  } = {},
+): Promise<readonly SubscriptionIncreaseAlert[]> {
+  const params = new URLSearchParams();
+
+  if (options.asOf) {
+    params.set("asOf", options.asOf);
+  }
+
+  const query = params.toString();
+
+  return requestJson<readonly SubscriptionIncreaseAlert[]>(
+    `/api/ledger/subscription-increase-alerts${query ? `?${query}` : ""}`,
+  );
+}
+
 export async function loadRecurringCalendar(
   options: {
     from?: string;
@@ -1098,6 +1145,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       budgetProgress,
       upcomingRecurringPayments,
       missedRecurringPayments,
+      subscriptionIncreaseAlerts,
       recurringCalendar,
       transactions,
       syncRuns,
@@ -1124,6 +1172,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
         "/api/ledger/upcoming-recurring-payments",
       ),
       loadMissedRecurringPayments(),
+      loadSubscriptionIncreaseAlerts(),
       loadRecurringCalendar(),
       loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
@@ -1152,6 +1201,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       budgetProgress,
       upcomingRecurringPayments,
       missedRecurringPayments,
+      subscriptionIncreaseAlerts,
       recurringCalendar,
       transactions,
       syncRuns,

@@ -389,6 +389,25 @@ export interface MissedRecurringPayment {
   lastSeenAt?: string;
 }
 
+export interface SubscriptionIncreaseAlert {
+  id: string;
+  recurringItemId: string;
+  ledgerEntryId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin?: number;
+  expectedAmountMax: number;
+  actualAmount: number;
+  increaseAmount: number;
+  increasePercentage: number;
+  currencyCode: number;
+  occurredAt: string;
+  lastSeenAt?: string;
+}
+
 export interface LedgerJar {
   id: string;
   title: string;

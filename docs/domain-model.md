@@ -54,6 +54,8 @@ configuration, and direct filesystem behavior.
   inside a bounded local calendar window.
 - `MissedRecurringPayment` defines an active recurring schedule occurrence that
   has no matching posted local ledger entry after its due tolerance window.
+- `SubscriptionIncreaseAlert` defines the latest recurring charge that exceeded
+  the schedule's expected amount range.
 - `UpcomingRecurringPayment` defines the projected recurring payment row used by
   local schedule views.
 

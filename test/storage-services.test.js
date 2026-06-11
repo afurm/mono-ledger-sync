@@ -1681,6 +1681,275 @@ test("query service detects missed recurring payments by expected amount range",
   });
 });
 
+test("query service detects subscription increase alerts from latest charges", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    function timestamp(value) {
+      return Math.floor(Date.parse(value) / 1000);
+    }
+
+    try {
+      await db.migrate();
+
+      const database = new Database(databasePath);
+
+      try {
+        database.pragma("foreign_keys = ON");
+        database.exec(`
+          INSERT INTO accounts (
+            profile,
+            id,
+            type,
+            currency_code,
+            balance,
+            credit_limit,
+            masked_pan_json,
+            raw_json,
+            updated_at
+          ) VALUES (
+            'demo',
+            'account-uah',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{}',
+            '2026-06-21T08:00:00.000Z'
+          );
+
+          INSERT INTO recurring_items (
+            profile,
+            id,
+            account_id,
+            category_id,
+            merchant_name,
+            frequency,
+            expected_amount_min,
+            expected_amount_max,
+            is_active,
+            started_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          ) VALUES
+            (
+              'demo',
+              'in-range-stream',
+              'account-uah',
+              'subscriptions',
+              'In Range Stream',
+              'monthly',
+              14000,
+              16000,
+              1,
+              '2026-01-01T00:00:00.000Z',
+              '2026-05-01T08:00:00.000Z',
+              '2026-01-01T00:00:00.000Z',
+              '2026-05-01T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'increased-cloud',
+              'account-uah',
+              'subscriptions',
+              'Raised Cloud',
+              'monthly',
+              30000,
+              32000,
+              1,
+              '2026-01-12T00:00:00.000Z',
+              '2026-05-12T08:00:00.000Z',
+              '2026-01-12T00:00:00.000Z',
+              '2026-05-12T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'returned-plan',
+              'account-uah',
+              'subscriptions',
+              'Returned Plan',
+              'monthly',
+              20000,
+              25000,
+              1,
+              '2026-01-15T00:00:00.000Z',
+              '2026-05-15T08:00:00.000Z',
+              '2026-01-15T00:00:00.000Z',
+              '2026-05-15T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'missing-max',
+              'account-uah',
+              'subscriptions',
+              'No Max Plan',
+              'monthly',
+              10000,
+              NULL,
+              1,
+              '2026-01-20T00:00:00.000Z',
+              '2026-05-20T08:00:00.000Z',
+              '2026-01-20T00:00:00.000Z',
+              '2026-05-20T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'held-increase',
+              'account-uah',
+              'subscriptions',
+              'Held Increase',
+              'monthly',
+              9000,
+              10000,
+              1,
+              '2026-01-25T00:00:00.000Z',
+              '2026-05-25T08:00:00.000Z',
+              '2026-01-25T00:00:00.000Z',
+              '2026-05-25T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'inactive-increase',
+              'account-uah',
+              'subscriptions',
+              'Inactive Increase',
+              'monthly',
+              9000,
+              10000,
+              0,
+              '2026-01-25T00:00:00.000Z',
+              '2026-05-25T08:00:00.000Z',
+              '2026-01-25T00:00:00.000Z',
+              '2026-05-25T08:00:00.000Z'
+            );
+        `);
+
+        const insertEntry = database.prepare(`
+          INSERT INTO ledger_entries (
+            profile,
+            id,
+            account_id,
+            time,
+            description,
+            amount,
+            currency_code,
+            category_id,
+            category_name,
+            merchant_name,
+            raw_statement_item_id,
+            hold,
+            created_at,
+            updated_at
+          ) VALUES (
+            @profile,
+            @id,
+            @accountId,
+            @time,
+            @description,
+            @amount,
+            @currencyCode,
+            @categoryId,
+            @categoryName,
+            @merchantName,
+            @rawStatementItemId,
+            @hold,
+            @createdAt,
+            @updatedAt
+          )
+        `);
+
+        for (const [id, date, merchantName, amount, hold] of [
+          ["stream-june", "2026-06-01", "In Range Stream", -15900, 0],
+          ["raised-cloud-june", "2026-06-12", "Raised Cloud", -39000, 0],
+          ["returned-plan-may", "2026-05-15", "Returned Plan", -30000, 0],
+          ["returned-plan-june", "2026-06-15", "Returned Plan", -24000, 0],
+          ["no-max-plan-june", "2026-06-20", "No Max Plan", -50000, 0],
+          ["held-increase-june", "2026-06-18", "Held Increase", -20000, 1],
+          [
+            "inactive-increase-june",
+            "2026-06-18",
+            "Inactive Increase",
+            -20000,
+            0,
+          ],
+        ]) {
+          insertEntry.run({
+            profile,
+            id,
+            accountId: "account-uah",
+            time: timestamp(`${date}T08:00:00.000Z`),
+            description: merchantName,
+            amount,
+            currencyCode: 980,
+            categoryId: "subscriptions",
+            categoryName: "Subscriptions",
+            merchantName,
+            rawStatementItemId: `raw-${id}`,
+            hold,
+            createdAt: `${date}T08:00:00.000Z`,
+            updatedAt: `${date}T08:00:00.000Z`,
+          });
+        }
+      } finally {
+        database.close();
+      }
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const alerts = await queryService.listSubscriptionIncreaseAlerts(
+        undefined,
+        new Date("2026-06-21T12:00:00.000Z"),
+      );
+
+      assert.deepEqual(
+        alerts.map((alert) => [
+          alert.recurringItemId,
+          alert.ledgerEntryId,
+          alert.expectedAmountMin,
+          alert.expectedAmountMax,
+          alert.actualAmount,
+          alert.increaseAmount,
+          alert.increasePercentage,
+          alert.occurredAt,
+        ]),
+        [
+          [
+            "increased-cloud",
+            "raised-cloud-june",
+            30000,
+            32000,
+            39000,
+            7000,
+            21.88,
+            "2026-06-12T08:00:00.000Z",
+          ],
+        ],
+      );
+      assert.deepEqual(
+        await queryServices.recurringItems.listSubscriptionIncreaseAlerts(
+          undefined,
+          new Date("2026-06-21T12:00:00.000Z"),
+        ),
+        alerts,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("query service detects recurring transaction candidates", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -2046,6 +2315,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.recurringItems.listMissedRecurringPayments,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.recurringItems.listSubscriptionIncreaseAlerts,
         "function",
       );
       assert.equal(typeof services.queries.syncState.listSyncRuns, "function");

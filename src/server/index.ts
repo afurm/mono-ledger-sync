@@ -74,6 +74,7 @@ import type {
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
+  SubscriptionIncreaseAlert,
   UpcomingRecurringPayment,
   StoredWebhookEvent,
   SyncRun,
@@ -556,6 +557,22 @@ const missedRecurringPaymentsQuerySchema = {
 } as const;
 
 const missedRecurringPaymentsResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const subscriptionIncreaseAlertsQuerySchema = {
+  type: "object",
+  properties: {
+    asOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+  },
+  additionalProperties: false,
+} as const;
+
+const subscriptionIncreaseAlertsResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2646,6 +2663,57 @@ function registerLocalApiRoutes(
 
         return {
           error: "invalid_missed_recurring_payments_query",
+          message,
+        };
+      }
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/subscription-increase-alerts`,
+    {
+      schema: {
+        querystring: subscriptionIncreaseAlertsQuerySchema,
+        response: {
+          200: subscriptionIncreaseAlertsResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | readonly SubscriptionIncreaseAlert[]
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const query = request.query as Record<string, string | string[]>;
+
+      try {
+        const asOf = readUtcDateQuery(query.asOf, "asOf");
+        const services = await getServices();
+
+        return await services.queryService.listSubscriptionIncreaseAlerts(
+          services.profile,
+          asOf,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Subscription increase alert query is invalid.";
+
+        if (!/^asOf must /.test(message)) {
+          throw error;
+        }
+
+        reply.code(400);
+
+        return {
+          error: "invalid_subscription_increase_alerts_query",
           message,
         };
       }
