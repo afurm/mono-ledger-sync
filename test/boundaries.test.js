@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import { productArchitecture, version } from "mono-ledger-sync/core";
@@ -17,6 +18,99 @@ import {
   themeTokens,
   uiFramework,
 } from "mono-ledger-sync/ui";
+
+const webUiSourceRoots = ["src/web", "src/components", "src/hooks", "src/lib"];
+const webUiSourceExtensions = new Set([".ts", ".tsx"]);
+const disallowedComponentPackageNames = new Set([
+  "@headlessui/react",
+  "antd",
+  "bootstrap",
+  "daisyui",
+  "evergreen-ui",
+  "flowbite",
+  "flowbite-react",
+  "grommet",
+  "primereact",
+  "react-aria-components",
+  "react-bootstrap",
+  "reactstrap",
+  "rsuite",
+  "semantic-ui-react",
+]);
+const disallowedComponentPackagePrefixes = [
+  "@chakra-ui/",
+  "@mantine/",
+  "@mui/",
+  "@nextui-org/",
+  "@heroui/",
+];
+
+async function readJson(pathname) {
+  return JSON.parse(await readFile(pathname, "utf8"));
+}
+
+async function collectSourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        return collectSourceFiles(entryPath);
+      }
+
+      return webUiSourceExtensions.has(path.extname(entry.name))
+        ? [entryPath]
+        : [];
+    }),
+  );
+
+  return files.flat();
+}
+
+function extractImportSpecifiers(source) {
+  const specifiers = [];
+  const patterns = [
+    /\bimport\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/g,
+    /\bexport\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/g,
+    /\bimport\(\s*["']([^"']+)["']\s*\)/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      specifiers.push(match[1]);
+    }
+  }
+
+  return specifiers;
+}
+
+function isDisallowedComponentPackage(packageName) {
+  return (
+    disallowedComponentPackageNames.has(packageName) ||
+    disallowedComponentPackagePrefixes.some((prefix) =>
+      packageName.startsWith(prefix),
+    )
+  );
+}
+
+function importPackageName(specifier) {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("@/") ||
+    specifier.startsWith("node:")
+  ) {
+    return undefined;
+  }
+
+  if (specifier.startsWith("@")) {
+    const parts = specifier.split("/");
+
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : specifier;
+  }
+
+  return specifier.split("/")[0];
+}
 
 test("exposes the product architecture without loading extra entrypoints", () => {
   assert.deepEqual(productArchitecture, {
@@ -38,6 +132,46 @@ test("defines the local API and UI boundaries", () => {
     "rules-and-mappings",
     "sync-and-webhooks",
   ]);
+});
+
+test("keeps shadcn as the only web component system", async () => {
+  const packageJson = await readJson("package.json");
+  const componentsJson = await readJson("components.json");
+  const dependencyNames = Object.keys({
+    ...packageJson.dependencies,
+    ...packageJson.devDependencies,
+  }).sort();
+
+  assert.equal(componentSystem, "shadcn/ui");
+  assert.equal(componentsJson.$schema, "https://ui.shadcn.com/schema.json");
+  assert.equal(componentsJson.aliases.ui, "@/components/ui");
+  assert.equal(componentsJson.aliases.components, "@/components");
+  assert.equal(componentsJson.iconLibrary, "lucide");
+  assert.deepEqual(dependencyNames.filter(isDisallowedComponentPackage), []);
+
+  const sourceFiles = (
+    await Promise.all(webUiSourceRoots.map(collectSourceFiles))
+  )
+    .flat()
+    .sort();
+  const importViolations = [];
+
+  for (const sourceFile of sourceFiles) {
+    const source = await readFile(sourceFile, "utf8");
+
+    for (const specifier of extractImportSpecifiers(source)) {
+      const packageName = importPackageName(specifier);
+
+      if (
+        packageName !== undefined &&
+        isDisallowedComponentPackage(packageName)
+      ) {
+        importViolations.push(`${sourceFile}: ${specifier}`);
+      }
+    }
+  }
+
+  assert.deepEqual(importViolations, []);
 });
 
 test("documents the minimum local product flow", async () => {
