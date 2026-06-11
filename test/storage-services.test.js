@@ -75,6 +75,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       const categories = await queryService.listCategories();
       const categorySpending = await queryService.listCategorySpending();
       const cashflowReport = await queryService.getCashflowReport();
+      const categoryTrendReport = await queryService.getCategoryTrendReport();
       const monthlySpendingReport =
         await queryService.getMonthlySpendingReport();
       const budgets = await queryService.listBudgets();
@@ -99,6 +100,8 @@ test("query service defaults profile and wraps storage reads", async () => {
         await queryServices.categories.listCategorySpending();
       const groupedCashflowReport =
         await queryServices.reports.getCashflowReport();
+      const groupedCategoryTrendReport =
+        await queryServices.reports.getCategoryTrendReport();
       const groupedMonthlySpendingReport =
         await queryServices.reports.getMonthlySpendingReport();
       const groupedBudgets = await queryServices.budgets.listBudgets();
@@ -208,6 +211,43 @@ test("query service defaults profile and wraps storage reads", async () => {
 
       assert.equal(singleMonthCashflowReport.from, "2026-04-01");
       assert.equal(singleMonthCashflowReport.to, "2026-04-30");
+      assert.equal(categoryTrendReport.months, 6);
+      assert.equal(categoryTrendReport.from, "2025-11-01");
+      assert.equal(categoryTrendReport.to, "2026-04-30");
+      assert.equal(categoryTrendReport.totalExpenses, 408650);
+      assert.equal(categoryTrendReport.transactionCount, 5);
+      assert.deepEqual(
+        categoryTrendReport.categories.map((row) => [
+          row.categoryId,
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+          row.averageMonthlyAmount,
+        ]),
+        [
+          ["transfers", 980, 250000, 1, 41667],
+          ["groceries", 980, 84250, 1, 14042],
+          ["subscriptions", 840, 52900, 1, 8817],
+          ["travel", 978, 20000, 1, 3333],
+          ["transport", 980, 1500, 1, 250],
+        ],
+      );
+      assert.deepEqual(
+        categoryTrendReport.points.map((row) => [
+          row.month,
+          row.categoryId,
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+        ]),
+        [
+          ["2026-04", "transfers", 980, 250000, 1],
+          ["2026-04", "groceries", 980, 84250, 1],
+          ["2026-04", "subscriptions", 840, 52900, 1],
+          ["2026-04", "travel", 978, 20000, 1],
+          ["2026-04", "transport", 980, 1500, 1],
+        ],
+      );
       assert.equal(monthlySpendingReport.month, "2026-04");
       assert.equal(monthlySpendingReport.from, "2026-04-01");
       assert.equal(monthlySpendingReport.to, "2026-04-30");
@@ -305,6 +345,16 @@ test("query service defaults profile and wraps storage reads", async () => {
         },
         {
           ...cashflowReport,
+          generatedAt: "generated",
+        },
+      );
+      assert.deepEqual(
+        {
+          ...groupedCategoryTrendReport,
+          generatedAt: "generated",
+        },
+        {
+          ...categoryTrendReport,
           generatedAt: "generated",
         },
       );
@@ -2482,6 +2532,7 @@ test("ledger services factory returns both query and write surfaces", async () =
       assert.equal(typeof services.query.getLedgerSummary, "function");
       assert.equal(typeof services.query.getNetWorthTrend, "function");
       assert.equal(typeof services.query.getCashflowReport, "function");
+      assert.equal(typeof services.query.getCategoryTrendReport, "function");
       assert.equal(typeof services.query.getMonthlySpendingReport, "function");
       assert.equal(
         typeof services.queries.transactions.listLedgerEntries,
@@ -2511,6 +2562,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.reports.getCashflowReport,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.reports.getCategoryTrendReport,
         "function",
       );
       assert.equal(

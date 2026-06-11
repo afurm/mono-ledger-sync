@@ -56,6 +56,7 @@ import {
 import type {
   Category,
   CategoryRule,
+  CategoryTrendReport,
   BudgetProgress,
   CashflowReport,
   LedgerAccount,
@@ -551,6 +552,18 @@ const cashflowReportQuerySchema = {
 } as const;
 
 const cashflowReportResponseSchema = {
+  type: "object",
+  additionalProperties: true,
+} as const;
+
+const categoryTrendReportQuerySchema = {
+  type: "object",
+  properties: {
+    months: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+const categoryTrendReportResponseSchema = {
   type: "object",
   additionalProperties: true,
 } as const;
@@ -2724,6 +2737,50 @@ function registerLocalApiRoutes(
             error instanceof Error
               ? error.message
               : "Cashflow report could not be generated.",
+        };
+      }
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/reports/category-trends`,
+    {
+      schema: {
+        querystring: categoryTrendReportQuerySchema,
+        response: {
+          200: categoryTrendReportResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | CategoryTrendReport
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await getServices();
+      const query = request.query as Record<string, string | string[]>;
+      const months = readNumberQuery(query.months);
+
+      try {
+        return await services.queryService.getCategoryTrendReport(
+          services.profile,
+          months,
+        );
+      } catch (error) {
+        reply.code(400);
+
+        return {
+          error: "invalid_category_trend_report_query",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Category trend report could not be generated.",
         };
       }
     },

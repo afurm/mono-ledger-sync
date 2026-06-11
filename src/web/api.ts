@@ -156,6 +156,39 @@ export interface CashflowReport {
   points: readonly CashflowReportPoint[];
 }
 
+export interface CategoryTrendReportPoint {
+  month: string;
+  from: string;
+  to: string;
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+}
+
+export interface CategoryTrendReportCategory {
+  categoryId: string;
+  categoryName: string;
+  currencyCode: number;
+  amount: number;
+  transactionCount: number;
+  averageMonthlyAmount: number;
+}
+
+export interface CategoryTrendReport {
+  profile: string;
+  from: string;
+  to: string;
+  months: number;
+  generatedAt: string;
+  totalExpenses: number;
+  transactionCount: number;
+  currencies: readonly number[];
+  categories: readonly CategoryTrendReportCategory[];
+  points: readonly CategoryTrendReportPoint[];
+}
+
 export interface BudgetProgress {
   id: string;
   budgetId: string;
@@ -552,6 +585,7 @@ export interface LocalAppSnapshot {
   merchantCleanupRules: readonly MerchantCleanupRule[];
   categorySpending: readonly LedgerCategorySpending[];
   cashflowReport: CashflowReport;
+  categoryTrendReport: CategoryTrendReport;
   monthlySpendingReport: MonthlySpendingReport;
   budgetProgress: readonly BudgetProgress[];
   upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
@@ -585,6 +619,7 @@ type PersistedLocalAppSnapshot = Omit<
   | "savingsGoalProgress"
   | "categorySpending"
   | "cashflowReport"
+  | "categoryTrendReport"
   | "monthlySpendingReport"
   | "budgetProgress"
   | "upcomingRecurringPayments"
@@ -600,6 +635,7 @@ type PersistedLocalAppSnapshot = Omit<
   savingsGoalProgress?: readonly SavingsGoalProgress[];
   categorySpending?: readonly LedgerCategorySpending[];
   cashflowReport?: CashflowReport;
+  categoryTrendReport?: CategoryTrendReport;
   monthlySpendingReport?: MonthlySpendingReport;
   budgetProgress?: readonly BudgetProgress[];
   upcomingRecurringPayments?: readonly UpcomingRecurringPayment[];
@@ -696,6 +732,24 @@ function emptyCashflowReport(
   };
 }
 
+function emptyCategoryTrendReport(
+  profile: string,
+  monthToDate: LedgerCashflowSummary,
+): CategoryTrendReport {
+  return {
+    profile,
+    from: monthToDate.from,
+    to: monthToDate.to,
+    months: 1,
+    generatedAt: new Date().toISOString(),
+    totalExpenses: 0,
+    transactionCount: 0,
+    currencies: [],
+    categories: [],
+    points: [],
+  };
+}
+
 function emptyMonthlySpendingReport(
   profile: string,
   monthToDate: LedgerCashflowSummary,
@@ -748,6 +802,9 @@ function normalizeCachedLocalAppSnapshot(
       cashflowReport:
         snapshot.cashflowReport ??
         emptyCashflowReport(snapshot.summary.profile, monthToDate),
+      categoryTrendReport:
+        snapshot.categoryTrendReport ??
+        emptyCategoryTrendReport(snapshot.summary.profile, monthToDate),
       monthlySpendingReport:
         snapshot.monthlySpendingReport ??
         emptyMonthlySpendingReport(snapshot.summary.profile, monthToDate),
@@ -1257,6 +1314,22 @@ export async function loadCashflowReport(options?: {
   );
 }
 
+export async function loadCategoryTrendReport(options?: {
+  months?: number;
+}): Promise<CategoryTrendReport> {
+  const params = new URLSearchParams();
+
+  if (options?.months !== undefined) {
+    params.set("months", String(options.months));
+  }
+
+  const query = params.toString();
+
+  return requestJson<CategoryTrendReport>(
+    `/api/ledger/reports/category-trends${query ? `?${query}` : ""}`,
+  );
+}
+
 export async function confirmRecurringDetection(
   candidateId: string,
 ): Promise<RecurringDetectionDecisionResult> {
@@ -1356,6 +1429,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       merchantCleanupRules,
       categorySpending,
       cashflowReport,
+      categoryTrendReport,
       monthlySpendingReport,
       budgetProgress,
       upcomingRecurringPayments,
@@ -1384,6 +1458,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
         "/api/ledger/category-spending",
       ),
       loadCashflowReport(),
+      loadCategoryTrendReport(),
       loadMonthlySpendingReport(),
       requestJson<readonly BudgetProgress[]>("/api/ledger/budget-progress"),
       requestJson<readonly UpcomingRecurringPayment[]>(
@@ -1418,6 +1493,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       merchantCleanupRules,
       categorySpending,
       cashflowReport,
+      categoryTrendReport,
       monthlySpendingReport,
       budgetProgress,
       upcomingRecurringPayments,

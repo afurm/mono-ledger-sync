@@ -50,6 +50,9 @@ configuration, and direct filesystem behavior.
 - `CashflowReport`, `CashflowReportCurrencyTotal`, and `CashflowReportPoint`
   define a local income, expense, and net cashflow report over a bounded monthly
   window.
+- `CategoryTrendReport`, `CategoryTrendReportCategory`, and
+  `CategoryTrendReportPoint` define local category spending movement over a
+  bounded monthly window.
 - `NetWorthTrend` defines the feature-gated net worth history response that
   remains disabled until manual accounts and assets exist.
 - `RecurringItem` defines a confirmed or user-managed recurring transaction
