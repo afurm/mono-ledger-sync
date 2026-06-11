@@ -58,6 +58,8 @@ For stricter local privacy, place the data directory on an encrypted volume or e
 
 Backups and exports are ordinary local files. Store them in the same encrypted location if they contain sensitive transaction history.
 
+For step-by-step instructions — the exact commands to create the encrypted volume, mount it, point the app at it, and verify the app is reading from the encrypted path — see [`docs/database-encryption.md`](database-encryption.md).
+
 ## Personas
 
 - Solo user

@@ -100,7 +100,11 @@ account metadata, and category/rule data.
 **Residual risk.** Once a SQLite file leaves the machine, the project
 cannot reach back to redact it. Future work should add optional
 database-directory encryption guidance and a documented rotation
-flow.
+flow. Volume-level encryption guidance lives in
+[`docs/database-encryption.md`](../database-encryption.md) (macOS sparsebundle,
+Linux LUKS, Windows BitLocker + VHD), with the
+`MONO_LEDGER_SYNC_DATA_DIR` env-var override and the
+`GET /api/app/diagnostics` endpoint as the verification path.
 
 ### 3. Malicious webhook traffic
 
