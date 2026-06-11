@@ -1496,7 +1496,7 @@ function SyncHealthMetric({
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-xl font-semibold">{value}</p>
+      <p className="text-xl font-semibold tabular-nums">{value}</p>
       <p className="text-xs text-muted-foreground">{detail}</p>
     </div>
   );
@@ -2632,7 +2632,7 @@ function MetricCard({
     <Card>
       <CardHeader>
         <CardDescription>{title}</CardDescription>
-        <CardTitle className="text-2xl">{value}</CardTitle>
+        <CardTitle className="text-xl tabular-nums">{value}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">{description}</p>
@@ -3510,7 +3510,7 @@ function TransactionDetailDrawer({
                 <span className="text-xs font-medium text-muted-foreground">
                   Amount
                 </span>
-                <span className="text-2xl font-semibold text-foreground">
+                <span className="text-xl font-semibold tabular-nums text-foreground">
                   {formatMinorAmount(entry.amount, entry.currencyCode)}
                 </span>
               </div>

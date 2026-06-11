@@ -70,6 +70,7 @@ const rawColorLiteralPattern =
 const themeTokenColorLinePattern = /^\s*--[a-z0-9-]+:\s*#[0-9a-fA-F]{3,8};\s*$/;
 const arbitraryVisualUtilityPattern =
   /\b(?:rounded|text|tracking|leading|font)-\[[^\]]+\]/;
+const largeScreenTypographyPattern = /\btext-(?:xl|[2-9]xl)\b/;
 const customControlSelectorPattern =
   /\.(?:button|btn|card|table|tabs|sidebar|drawer|dialog|toast|skeleton|badge|input|select|textarea|checkbox|switch|pagination|menu)(?=$|[\s.#:{>,\[])/;
 const genericDashboardCopyPattern =
@@ -428,6 +429,26 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
   }
 
   assert.doesNotMatch(productUiSource, genericDashboardCopyPattern);
+});
+
+test("keeps finance workspace typography compact", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const largeTypographyLines = appSource
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => largeScreenTypographyPattern.test(line));
+
+  assert.deepEqual(largeTypographyLines, [
+    '<p className="text-xl font-semibold tabular-nums">{value}</p>',
+    '<CardTitle className="text-xl tabular-nums">{value}</CardTitle>',
+    '<span className="text-xl font-semibold tabular-nums text-foreground">',
+  ]);
+  assert.match(appSource, /<h1 className="truncate text-lg font-semibold">/);
+  assert.doesNotMatch(appSource, /\btext-[2-9]xl\b/);
+  assert.doesNotMatch(
+    appSource,
+    /\btracking-(?:tight|tighter|wide|wider|widest)\b/,
+  );
 });
 
 test("routes web colors through shadcn tokens and component variants", async () => {
