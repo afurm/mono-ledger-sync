@@ -44,6 +44,9 @@ configuration, and direct filesystem behavior.
   and reopen workflows are enabled.
 - `BudgetProgress` defines the current budget-period progress row used for
   overspend warnings.
+- `MonthlySpendingReport`, `MonthlySpendingCurrencyTotal`,
+  `MonthlySpendingCategory`, and `MonthlySpendingMerchant` define a month-scoped
+  local spending report with category, merchant, and currency breakdowns.
 - `NetWorthTrend` defines the feature-gated net worth history response that
   remains disabled until manual accounts and assets exist.
 - `RecurringItem` defines a confirmed or user-managed recurring transaction

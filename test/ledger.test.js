@@ -4036,6 +4036,18 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/category-spending",
       });
+      const monthlySpendingReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/monthly-spending",
+      });
+      const emptyMonthlySpendingReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/monthly-spending?month=2026-05",
+      });
+      const invalidMonthlySpendingReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/monthly-spending?month=2026-13",
+      });
       const budgetProgressResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/budget-progress",
@@ -4265,6 +4277,35 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           ["travel", 978, 20000],
           ["transport", 980, 1500],
         ],
+      );
+      assert.equal(monthlySpendingReportResponse.statusCode, 200);
+      assert.equal(monthlySpendingReportResponse.json().month, "2026-04");
+      assert.equal(monthlySpendingReportResponse.json().totalExpenses, 408650);
+      assert.equal(monthlySpendingReportResponse.json().transactionCount, 5);
+      assert.deepEqual(
+        monthlySpendingReportResponse
+          .json()
+          .currencyTotals.map((row) => [
+            row.currencyCode,
+            row.amount,
+            row.transactionCount,
+          ]),
+        [
+          [980, 335750, 3],
+          [840, 52900, 1],
+          [978, 20000, 1],
+        ],
+      );
+      assert.equal(emptyMonthlySpendingReportResponse.statusCode, 200);
+      assert.equal(emptyMonthlySpendingReportResponse.json().month, "2026-05");
+      assert.deepEqual(
+        emptyMonthlySpendingReportResponse.json().categories,
+        [],
+      );
+      assert.equal(invalidMonthlySpendingReportResponse.statusCode, 400);
+      assert.equal(
+        invalidMonthlySpendingReportResponse.json().error,
+        "invalid_monthly_spending_report_query",
       );
       assert.equal(budgetProgressResponse.statusCode, 200);
       assert.deepEqual(budgetProgressResponse.json(), []);

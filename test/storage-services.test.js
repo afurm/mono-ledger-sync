@@ -74,6 +74,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       });
       const categories = await queryService.listCategories();
       const categorySpending = await queryService.listCategorySpending();
+      const monthlySpendingReport =
+        await queryService.getMonthlySpendingReport();
       const budgets = await queryService.listBudgets();
       const budgetPeriods = await queryService.listBudgetPeriods();
       const budgetProgress = await queryService.listBudgetProgress();
@@ -94,6 +96,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       const groupedCategories = await queryServices.categories.listCategories();
       const groupedCategorySpending =
         await queryServices.categories.listCategorySpending();
+      const groupedMonthlySpendingReport =
+        await queryServices.reports.getMonthlySpendingReport();
       const groupedBudgets = await queryServices.budgets.listBudgets();
       const groupedBudgetPeriods =
         await queryServices.budgets.listBudgetPeriods();
@@ -158,6 +162,79 @@ test("query service defaults profile and wraps storage reads", async () => {
           ["transport", 980, 1500],
         ],
       );
+      assert.equal(monthlySpendingReport.month, "2026-04");
+      assert.equal(monthlySpendingReport.from, "2026-04-01");
+      assert.equal(monthlySpendingReport.to, "2026-04-30");
+      assert.equal(monthlySpendingReport.totalExpenses, 408650);
+      assert.equal(monthlySpendingReport.transactionCount, 5);
+      assert.equal(monthlySpendingReport.averageTransactionAmount, 81730);
+      assert.deepEqual(
+        monthlySpendingReport.currencyTotals.map((row) => [
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+          row.averageTransactionAmount,
+        ]),
+        [
+          [980, 335750, 3, 111917],
+          [840, 52900, 1, 52900],
+          [978, 20000, 1, 20000],
+        ],
+      );
+      assert.deepEqual(
+        monthlySpendingReport.categories.map((row) => [
+          row.categoryId,
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+          row.sharePercentage,
+        ]),
+        [
+          ["transfers", 980, 250000, 1, 74.46],
+          ["groceries", 980, 84250, 1, 25.09],
+          ["subscriptions", 840, 52900, 1, 100],
+          ["travel", 978, 20000, 1, 100],
+          ["transport", 980, 1500, 1, 0.45],
+        ],
+      );
+      assert.deepEqual(
+        monthlySpendingReport.merchants.map((row) => [
+          row.merchantName,
+          row.currencyCode,
+          row.amount,
+          row.transactionCount,
+        ]),
+        [
+          ["Emergency fund top-up", 980, 250000, 1],
+          ["Fixture Grocery", 980, 84250, 1],
+          ["Cloud Subscription", 840, 52900, 1],
+          ["Travel booking", 978, 20000, 1],
+          ["Kyiv Metro", 980, 1500, 1],
+        ],
+      );
+      const emptyMonthlySpendingReport =
+        await queryService.getMonthlySpendingReport(undefined, "2026-05");
+
+      assert.deepEqual(
+        {
+          ...emptyMonthlySpendingReport,
+          generatedAt: "generated",
+        },
+        {
+          profile,
+          month: "2026-05",
+          from: "2026-05-01",
+          to: "2026-05-31",
+          generatedAt: "generated",
+          totalExpenses: 0,
+          transactionCount: 0,
+          averageTransactionAmount: 0,
+          currencies: [],
+          currencyTotals: [],
+          categories: [],
+          merchants: [],
+        },
+      );
       assert.deepEqual(budgets, []);
       assert.deepEqual(budgetPeriods, []);
       assert.deepEqual(budgetProgress, []);
@@ -175,6 +252,16 @@ test("query service defaults profile and wraps storage reads", async () => {
         categoryIds,
       );
       assert.deepEqual(groupedCategorySpending, categorySpending);
+      assert.deepEqual(
+        {
+          ...groupedMonthlySpendingReport,
+          generatedAt: "generated",
+        },
+        {
+          ...monthlySpendingReport,
+          generatedAt: "generated",
+        },
+      );
       assert.deepEqual(groupedBudgets, []);
       assert.deepEqual(groupedBudgetPeriods, []);
       assert.deepEqual(groupedBudgetProgress, []);
@@ -2338,6 +2425,7 @@ test("ledger services factory returns both query and write surfaces", async () =
     try {
       assert.equal(typeof services.query.getLedgerSummary, "function");
       assert.equal(typeof services.query.getNetWorthTrend, "function");
+      assert.equal(typeof services.query.getMonthlySpendingReport, "function");
       assert.equal(
         typeof services.queries.transactions.listLedgerEntries,
         "function",
@@ -2358,6 +2446,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.budgets.listBudgetProgress,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.reports.getMonthlySpendingReport,
         "function",
       );
       assert.equal(
