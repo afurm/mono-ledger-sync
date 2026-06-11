@@ -255,17 +255,31 @@ test("keeps standard visual controls on shadcn primitives", async () => {
   assert.doesNotMatch(appSource, /type="checkbox"/);
 });
 
-test("keeps screen status colors on semantic tokens", async () => {
+test("keeps screen colors on semantic tokens", async () => {
   const appSource = await readFile("src/web/App.tsx", "utf8");
   const stylesSource = await readFile("src/web/styles.css", "utf8");
   const alertSource = await readFile("src/components/ui/alert.tsx", "utf8");
   const badgeSource = await readFile("src/components/ui/badge.tsx", "utf8");
+  const buttonSource = await readFile("src/components/ui/button.tsx", "utf8");
+  const requiredScreenTokenPatterns = [
+    /\bbg-background(?:\b|\/)/,
+    /\btext-muted-foreground\b/,
+    /\bborder-border\b/,
+    /\bbg-primary(?:\b|\/)/,
+    /\btext-primary-foreground\b/,
+  ];
 
   assert.doesNotMatch(appSource, rawPaletteUtilityPattern);
   assert.doesNotMatch(appSource, arbitraryVisualUtilityPattern);
+  for (const tokenPattern of requiredScreenTokenPatterns) {
+    assert.match(appSource, tokenPattern);
+  }
+  assert.match(stylesSource, /@apply border-border/);
+  assert.match(stylesSource, /@apply bg-background text-foreground/);
   assert.match(stylesSource, /--color-success:/);
   assert.match(stylesSource, /--color-warning:/);
   assert.match(stylesSource, /--color-info:/);
+  assert.match(buttonSource, /bg-primary text-primary-foreground/);
   assert.match(alertSource, /warning:/);
   assert.match(alertSource, /info:/);
   assert.match(badgeSource, /success:/);
