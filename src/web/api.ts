@@ -1073,6 +1073,15 @@ export async function clearMonobankToken(): Promise<LocalApiMonobankTokenStatus>
   });
 }
 
+export async function recheckMonobankConnection(): Promise<LocalApiMonobankTokenStatus> {
+  return requestJson<LocalApiMonobankTokenStatus>(
+    "/api/app/token/recheck",
+    {
+      method: "POST",
+    },
+  );
+}
+
 export async function initializeWorkspace(): Promise<
   LocalAppSnapshot["config"]
 > {
