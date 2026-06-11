@@ -3040,6 +3040,18 @@ function convertedReportTotalLabel(
     : formatMinorAmount(value, convertedTotals.baseCurrencyCode);
 }
 
+function amountSemanticTextClassName(amount: number): string {
+  if (amount > 0) {
+    return "text-income-foreground";
+  }
+
+  if (amount < 0) {
+    return "text-expense-foreground";
+  }
+
+  return "text-foreground";
+}
+
 function transactionCategoryLabel(entry: LedgerEntry): string {
   return entry.categoryName ?? entry.categoryId ?? "Uncategorized";
 }
@@ -3520,7 +3532,9 @@ function TransactionDetailDrawer({
                 <span className="text-xs font-medium text-muted-foreground">
                   Amount
                 </span>
-                <span className="text-xl font-semibold tabular-nums text-foreground">
+                <span
+                  className={`text-xl font-semibold tabular-nums ${amountSemanticTextClassName(entry.amount)}`}
+                >
                   {formatMinorAmount(entry.amount, entry.currencyCode)}
                 </span>
               </div>
@@ -4040,7 +4054,9 @@ function TransactionTable({
                 {entry.hold ? "Hold" : "Posted"}
               </Badge>
             </TableCell>
-            <TableCell className="text-right font-medium">
+            <TableCell
+              className={`text-right font-medium tabular-nums ${amountSemanticTextClassName(entry.amount)}`}
+            >
               {formatMinorAmount(entry.amount, entry.currencyCode)}
             </TableCell>
             {onViewDetails && (
@@ -4254,7 +4270,7 @@ function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-primary"
+                    className="h-full rounded-full bg-expense"
                     style={{ width: `${width}%` }}
                   />
                 </div>
@@ -4308,19 +4324,21 @@ function MonthToDateFinanceSummaryCard({
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded-md border border-border p-3">
             <p className="text-xs text-muted-foreground">Income</p>
-            <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+            <p className="mt-1 truncate text-sm font-semibold tabular-nums text-income-foreground">
               {formatMinorAmount(monthToDate.income)}
             </p>
           </div>
           <div className="rounded-md border border-border p-3">
             <p className="text-xs text-muted-foreground">Expenses</p>
-            <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+            <p className="mt-1 truncate text-sm font-semibold tabular-nums text-expense-foreground">
               {formatMinorAmount(monthToDate.expenses)}
             </p>
           </div>
           <div className="rounded-md border border-border p-3">
             <p className="text-xs text-muted-foreground">Net cashflow</p>
-            <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+            <p
+              className={`mt-1 truncate text-sm font-semibold tabular-nums ${amountSemanticTextClassName(monthToDate.net)}`}
+            >
               {formatMinorAmount(monthToDate.net)}
             </p>
           </div>
@@ -4376,7 +4394,7 @@ function MonthToDateFinanceSummaryCard({
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-primary"
+                        className="h-full rounded-full bg-expense"
                         style={{ width: `${width}%` }}
                       />
                     </div>
@@ -4442,7 +4460,7 @@ function MonthToDateFinanceSummaryCard({
                         className={
                           row.status === "overspent"
                             ? "h-full rounded-full bg-destructive"
-                            : "h-full rounded-full bg-primary"
+                            : "h-full rounded-full bg-expense"
                         }
                         style={{ width: `${width}%` }}
                       />
@@ -4704,7 +4722,7 @@ function MonthlySpendingReportCard({
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-primary"
+                      className="h-full rounded-full bg-expense"
                       style={{ width: `${width}%` }}
                     />
                   </div>
@@ -4876,10 +4894,10 @@ function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                  <span>
+                  <span className="text-income-foreground">
                     +{formatMinorAmount(total.income, total.currencyCode)}
                   </span>
-                  <span className="text-right">
+                  <span className="text-right text-expense-foreground">
                     -{formatMinorAmount(total.expenses, total.currencyCode)}
                   </span>
                 </div>
@@ -4939,13 +4957,13 @@ function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   <div className="grid gap-1">
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-success"
+                        className="h-full rounded-full bg-income"
                         style={{ width: `${incomeWidth}%` }}
                       />
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-destructive"
+                        className="h-full rounded-full bg-expense"
                         style={{ width: `${expenseWidth}%` }}
                       />
                     </div>
@@ -5111,10 +5129,10 @@ function SavingsRateReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                  <span>
+                  <span className="text-income-foreground">
                     +{formatMinorAmount(total.income, total.currencyCode)}
                   </span>
-                  <span className="text-right">
+                  <span className="text-right text-expense-foreground">
                     -{formatMinorAmount(total.expenses, total.currencyCode)}
                   </span>
                 </div>
@@ -5175,13 +5193,13 @@ function SavingsRateReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   <div className="grid gap-1">
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-success"
+                        className="h-full rounded-full bg-income"
                         style={{ width: `${incomeWidth}%` }}
                       />
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-warning"
+                        className="h-full rounded-full bg-expense"
                         style={{ width: `${expenseWidth}%` }}
                       />
                     </div>
@@ -5413,7 +5431,7 @@ function BalanceProjectionReportCard({
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-primary"
+                      className="h-full rounded-full bg-expense"
                       style={{ width: `${width}%` }}
                     />
                   </div>
@@ -5615,7 +5633,7 @@ function CategoryTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-primary"
+                      className="h-full rounded-full bg-expense"
                       style={{ width: `${width}%` }}
                     />
                   </div>
@@ -5794,7 +5812,7 @@ function MerchantTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-primary"
+                      className="h-full rounded-full bg-expense"
                       style={{ width: `${width}%` }}
                     />
                   </div>
@@ -6539,7 +6557,7 @@ function BudgetProgressCard({
                     className={
                       row.status === "overspent"
                         ? "h-full rounded-full bg-destructive"
-                        : "h-full rounded-full bg-primary"
+                        : "h-full rounded-full bg-expense"
                     }
                     style={{ width: `${width}%` }}
                   />
@@ -9579,7 +9597,10 @@ function RuleHistoricalPreviewPanel({
                       {entry.description}
                     </div>
                   </div>
-                  <Badge variant="outline">
+                  <Badge
+                    className={amountSemanticTextClassName(entry.amount)}
+                    variant="outline"
+                  >
                     {formatMinorAmount(entry.amount, entry.currencyCode)}
                   </Badge>
                 </div>
@@ -9698,7 +9719,10 @@ function RuleConflictDetectionPanel({
                       {entry.description}
                     </div>
                   </div>
-                  <Badge variant="outline">
+                  <Badge
+                    className={amountSemanticTextClassName(entry.amount)}
+                    variant="outline"
+                  >
                     {formatMinorAmount(entry.amount, entry.currencyCode)}
                   </Badge>
                 </div>
