@@ -78,6 +78,7 @@ test("documents the shared domain model contract", async () => {
     "RecurringItem",
     "RecurringDetectionCandidate",
     "RecurringCalendarEvent",
+    "MissedRecurringPayment",
     "UpcomingRecurringPayment",
     "DomainError",
     "LocalActivityEvent",
@@ -221,6 +222,10 @@ test("web client caches local snapshots for offline browsing", async () => {
   );
   assert.match(
     apiSource,
+    /missedRecurringPayments: snapshot\.missedRecurringPayments \?\? \[\]/,
+  );
+  assert.match(
+    apiSource,
     /recurringCalendar: snapshot\.recurringCalendar \?\? \[\]/,
   );
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
@@ -238,6 +243,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Budget progress/);
   assert.match(appSource, /Net worth trend/);
   assert.match(appSource, /Spending by category/);
+  assert.match(appSource, /Missed recurring payments/);
   assert.match(appSource, /Upcoming recurring payments/);
   assert.match(appSource, /Recurring calendar/);
 });

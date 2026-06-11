@@ -4117,9 +4117,11 @@ function CategorySpendingCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
 }
 
-function recurringPaymentAmountLabel(
-  payment: LocalAppSnapshot["upcomingRecurringPayments"][number],
-): string {
+function recurringPaymentAmountLabel(payment: {
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+}): string {
   if (
     payment.expectedAmountMin !== undefined &&
     payment.expectedAmountMax !== undefined &&
@@ -4136,6 +4138,80 @@ function recurringPaymentAmountLabel(
   return amount === undefined
     ? currencyLabel(payment.currencyCode)
     : formatMinorAmount(amount, payment.currencyCode);
+}
+
+function missedRecurringPaymentLabel(
+  payment: LocalAppSnapshot["missedRecurringPayments"][number],
+): string {
+  return `${payment.daysOverdue}d missed`;
+}
+
+function MissedRecurringPaymentsCard({
+  snapshot,
+}: {
+  snapshot: LocalAppSnapshot;
+}) {
+  const rows = snapshot.missedRecurringPayments.slice(0, 6);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Missed recurring payments</CardTitle>
+        <CardDescription>
+          Expected charges not found in local posted transactions.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No missed recurring payments found in the current ledger.
+          </p>
+        ) : (
+          rows.map((payment) => {
+            const href = buildTransactionFiltersHash({
+              ...defaultTransactionFilters(),
+              accountId: payment.accountId,
+              ...(payment.categoryId === undefined
+                ? {}
+                : { categoryId: payment.categoryId }),
+              ...(payment.merchantName === undefined
+                ? {}
+                : { merchantName: payment.merchantName }),
+            });
+
+            return (
+              <a
+                className="flex items-start justify-between gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/60"
+                href={href}
+                key={payment.id}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <AlertCircleIcon className="size-4 shrink-0 text-destructive" />
+                    <p className="truncate text-sm font-medium">
+                      {payment.merchantName ?? payment.recurringItemId}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatDate(Date.parse(payment.expectedDueAt) / 1000)} ·{" "}
+                    {payment.frequency}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold">
+                    {recurringPaymentAmountLabel(payment)}
+                  </p>
+                  <Badge variant="destructive">
+                    {missedRecurringPaymentLabel(payment)}
+                  </Badge>
+                </div>
+              </a>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function recurringPaymentDueLabel(
@@ -4818,6 +4894,7 @@ function OverviewRoute({
             onRouteChange={onRouteChange}
           />
           <BudgetProgressCard snapshot={snapshot} onRefresh={onRefresh} />
+          <MissedRecurringPaymentsCard snapshot={snapshot} />
           <UpcomingRecurringPaymentsCard snapshot={snapshot} />
           <RecurringCalendarCard snapshot={snapshot} />
           <CategorySpendingCard snapshot={snapshot} />

@@ -70,6 +70,7 @@ import type {
   SavingsGoalProgress,
   LedgerSummary,
   MerchantCleanupRule,
+  MissedRecurringPayment,
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
@@ -539,6 +540,22 @@ const ledgerCategorySpendingResponseSchema = {
 } as const;
 
 const upcomingRecurringPaymentsResponseSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+} as const;
+
+const missedRecurringPaymentsQuerySchema = {
+  type: "object",
+  properties: {
+    asOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+  },
+  additionalProperties: false,
+} as const;
+
+const missedRecurringPaymentsResponseSchema = {
   type: "array",
   items: {
     type: "object",
@@ -2581,6 +2598,57 @@ function registerLocalApiRoutes(
       return services.queryService.listUpcomingRecurringPayments(
         services.profile,
       );
+    },
+  );
+
+  app.get(
+    `${localApiRoutePrefix}/ledger/missed-recurring-payments`,
+    {
+      schema: {
+        querystring: missedRecurringPaymentsQuerySchema,
+        response: {
+          200: missedRecurringPaymentsResponseSchema,
+          400: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | readonly MissedRecurringPayment[]
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const query = request.query as Record<string, string | string[]>;
+
+      try {
+        const asOf = readUtcDateQuery(query.asOf, "asOf");
+        const services = await getServices();
+
+        return await services.queryService.listMissedRecurringPayments(
+          services.profile,
+          asOf,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Missed recurring payment query is invalid.";
+
+        if (!/^asOf must /.test(message)) {
+          throw error;
+        }
+
+        reply.code(400);
+
+        return {
+          error: "invalid_missed_recurring_payments_query",
+          message,
+        };
+      }
     },
   );
 

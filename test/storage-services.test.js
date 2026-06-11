@@ -1420,6 +1420,267 @@ test("query service projects a bounded recurring calendar", async () => {
   });
 });
 
+test("query service detects missed recurring payments by expected amount range", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    function timestamp(value) {
+      return Math.floor(Date.parse(value) / 1000);
+    }
+
+    try {
+      await db.migrate();
+
+      const database = new Database(databasePath);
+
+      try {
+        database.pragma("foreign_keys = ON");
+        database.exec(`
+          INSERT INTO accounts (
+            profile,
+            id,
+            type,
+            currency_code,
+            balance,
+            credit_limit,
+            masked_pan_json,
+            raw_json,
+            updated_at
+          ) VALUES (
+            'demo',
+            'account-uah',
+            'black',
+            980,
+            100000,
+            0,
+            NULL,
+            '{}',
+            '2026-06-21T08:00:00.000Z'
+          );
+
+          INSERT INTO recurring_items (
+            profile,
+            id,
+            account_id,
+            category_id,
+            merchant_name,
+            frequency,
+            expected_amount_min,
+            expected_amount_max,
+            is_active,
+            started_at,
+            last_seen_at,
+            created_at,
+            updated_at
+          ) VALUES
+            (
+              'demo',
+              'monthly-paid',
+              'account-uah',
+              'subscriptions',
+              'Paid Internet',
+              'monthly',
+              42000,
+              46000,
+              1,
+              '2026-01-10T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z',
+              '2026-01-10T00:00:00.000Z',
+              '2026-05-10T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'monthly-missed',
+              'account-uah',
+              'subscriptions',
+              'Missed Storage',
+              'monthly',
+              15000,
+              17000,
+              1,
+              '2026-01-05T00:00:00.000Z',
+              '2026-05-05T08:00:00.000Z',
+              '2026-01-05T00:00:00.000Z',
+              '2026-05-05T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'monthly-increased',
+              'account-uah',
+              'subscriptions',
+              'Raised Cloud',
+              'monthly',
+              30000,
+              32000,
+              1,
+              '2026-01-12T00:00:00.000Z',
+              '2026-05-12T08:00:00.000Z',
+              '2026-01-12T00:00:00.000Z',
+              '2026-05-12T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'weekly-grace',
+              'account-uah',
+              'subscriptions',
+              'Grace Weekly',
+              'weekly',
+              9000,
+              9000,
+              1,
+              '2026-06-13T00:00:00.000Z',
+              '2026-06-13T08:00:00.000Z',
+              '2026-06-13T00:00:00.000Z',
+              '2026-06-13T08:00:00.000Z'
+            ),
+            (
+              'demo',
+              'inactive-missed',
+              'account-uah',
+              'subscriptions',
+              'Inactive Missed',
+              'monthly',
+              1000,
+              1000,
+              0,
+              '2026-01-01T00:00:00.000Z',
+              '2026-05-01T08:00:00.000Z',
+              '2026-01-01T00:00:00.000Z',
+              '2026-05-01T08:00:00.000Z'
+            );
+        `);
+
+        const insertEntry = database.prepare(`
+          INSERT INTO ledger_entries (
+            profile,
+            id,
+            account_id,
+            time,
+            description,
+            amount,
+            currency_code,
+            category_id,
+            category_name,
+            merchant_name,
+            raw_statement_item_id,
+            hold,
+            created_at,
+            updated_at
+          ) VALUES (
+            @profile,
+            @id,
+            @accountId,
+            @time,
+            @description,
+            @amount,
+            @currencyCode,
+            @categoryId,
+            @categoryName,
+            @merchantName,
+            @rawStatementItemId,
+            @hold,
+            @createdAt,
+            @updatedAt
+          )
+        `);
+
+        for (const [id, date, merchantName, amount] of [
+          ["paid-internet-june", "2026-06-11", "Paid Internet", -43000],
+          ["raised-cloud-june", "2026-06-12", "Raised Cloud", -39000],
+        ]) {
+          insertEntry.run({
+            profile,
+            id,
+            accountId: "account-uah",
+            time: timestamp(`${date}T08:00:00.000Z`),
+            description: merchantName,
+            amount,
+            currencyCode: 980,
+            categoryId: "subscriptions",
+            categoryName: "Subscriptions",
+            merchantName,
+            rawStatementItemId: `raw-${id}`,
+            hold: 0,
+            createdAt: `${date}T08:00:00.000Z`,
+            updatedAt: `${date}T08:00:00.000Z`,
+          });
+        }
+      } finally {
+        database.close();
+      }
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const queryServices = createLedgerQueryServices({
+        db,
+        defaultProfile: profile,
+      });
+      const missedPayments = await queryService.listMissedRecurringPayments(
+        undefined,
+        new Date("2026-06-21T12:00:00.000Z"),
+      );
+
+      assert.deepEqual(
+        missedPayments.map((payment) => [
+          payment.recurringItemId,
+          payment.expectedDate,
+          payment.daysOverdue,
+          payment.expectedAmountMin,
+          payment.expectedAmountMax,
+          payment.matchWindowStart.slice(0, 10),
+          payment.matchWindowEnd.slice(0, 10),
+        ]),
+        [
+          [
+            "monthly-missed",
+            "2026-06-05",
+            16,
+            15000,
+            17000,
+            "2026-06-02",
+            "2026-06-08",
+          ],
+          [
+            "monthly-increased",
+            "2026-06-12",
+            9,
+            30000,
+            32000,
+            "2026-06-09",
+            "2026-06-15",
+          ],
+        ],
+      );
+      assert.deepEqual(
+        missedPayments.map((payment) => [
+          payment.currencyCode,
+          payment.frequency,
+          payment.lastSeenAt,
+        ]),
+        [
+          [980, "monthly", "2026-05-05T08:00:00.000Z"],
+          [980, "monthly", "2026-05-12T08:00:00.000Z"],
+        ],
+      );
+      assert.deepEqual(
+        await queryServices.recurringItems.listMissedRecurringPayments(
+          undefined,
+          new Date("2026-06-21T12:00:00.000Z"),
+        ),
+        missedPayments,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("query service detects recurring transaction candidates", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -1781,6 +2042,10 @@ test("ledger services factory returns both query and write surfaces", async () =
       );
       assert.equal(
         typeof services.queries.recurringItems.listRecurringItems,
+        "function",
+      );
+      assert.equal(
+        typeof services.queries.recurringItems.listMissedRecurringPayments,
         "function",
       );
       assert.equal(typeof services.queries.syncState.listSyncRuns, "function");
