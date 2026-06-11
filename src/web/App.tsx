@@ -62,6 +62,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -117,6 +118,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -3570,8 +3572,8 @@ function TransactionDetailDrawer({
                 <span className="text-xs font-medium text-muted-foreground">
                   Note
                 </span>
-                <textarea
-                  className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                <Textarea
+                  className="min-h-24 resize-y"
                   maxLength={2000}
                   placeholder="Local review note"
                   value={note}
@@ -7896,12 +7898,13 @@ function SettingsRoute({
             </label>
 
             <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 accent-primary"
+              <Checkbox
+                className="mt-0.5"
                 checked={acknowledgedLocalToken}
-                onChange={(event) => {
-                  setAcknowledgedLocalToken(event.target.checked);
+                onCheckedChange={(checked) => {
+                  const isChecked = checked === true;
+
+                  setAcknowledgedLocalToken(isChecked);
                   setTokenError(
                     tokenInput ? validateTokenInput(tokenInput) : undefined,
                   );
@@ -7915,13 +7918,12 @@ function SettingsRoute({
 
             {snapshot.config.token.hasToken && (
               <label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-destructive"
+                <Checkbox
+                  className="mt-0.5 border-destructive/50 data-checked:border-destructive data-checked:bg-destructive data-checked:text-destructive-foreground"
                   checked={confirmedTokenRemoval}
                   disabled={isBusy}
-                  onChange={(event) => {
-                    setConfirmedTokenRemoval(event.target.checked);
+                  onCheckedChange={(checked) => {
+                    setConfirmedTokenRemoval(checked === true);
                     setTokenActionError(undefined);
                     setTokenActionMessage(undefined);
                   }}
