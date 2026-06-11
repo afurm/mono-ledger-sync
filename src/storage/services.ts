@@ -16,6 +16,7 @@ import type {
   CategoryRule,
   LedgerSummary,
   MerchantCleanupRule,
+  MissedRecurringPayment,
   NetWorthTrend,
   RecurringCalendarEvent,
   RecurringDetectionCandidate,
@@ -68,6 +69,10 @@ export interface LedgerRecurringItemQueryService {
   detectRecurringTransactions(
     profile?: string,
   ): Promise<readonly RecurringDetectionCandidate[]>;
+  listMissedRecurringPayments(
+    profile?: string,
+    asOf?: Date,
+  ): Promise<readonly MissedRecurringPayment[]>;
   listRecurringCalendar(
     profile?: string,
     from?: Date,
@@ -170,6 +175,7 @@ interface CreateLedgerServicesOptions {
 
 const DEFAULT_SYNC_LIST_LIMIT = 20;
 const UPCOMING_RECURRING_PAYMENT_LIMIT = 8;
+const MISSED_RECURRING_PAYMENT_PAGE_SIZE = 100;
 const RECURRING_DETECTION_PAGE_SIZE = 500;
 const RECURRING_DETECTION_ENTRY_LIMIT = 2_000;
 const RECURRING_CALENDAR_DEFAULT_DAYS = 90;
@@ -273,6 +279,16 @@ function addUtcDays(value: Date, days: number): Date {
   return next;
 }
 
+function startOfUtcDateEpoch(value: Date): number {
+  return Math.floor(startOfUtcDate(value).getTime() / 1000);
+}
+
+function endOfUtcDateEpoch(value: Date): number {
+  return Math.floor(
+    (addUtcDays(startOfUtcDate(value), 1).getTime() - 1) / 1000,
+  );
+}
+
 function addRecurringFrequency(
   value: Date,
   frequency: RecurringItem["frequency"],
@@ -326,6 +342,42 @@ function resolveNextRecurringDate(
   }
 
   return nextDueAt;
+}
+
+function resolvePreviousRecurringDate(
+  item: RecurringItem,
+  asOf: Date,
+): Date | undefined {
+  const anchor = item.lastSeenAt ?? item.startedAt ?? item.createdAt;
+  const parsedAnchor = Date.parse(anchor);
+
+  if (!Number.isFinite(parsedAnchor)) {
+    return undefined;
+  }
+
+  let previousDueAt = startOfUtcDate(new Date(parsedAnchor));
+  const asOfDate = startOfUtcDate(asOf);
+
+  if (previousDueAt >= asOfDate) {
+    return undefined;
+  }
+
+  if (item.frequency === "irregular") {
+    return previousDueAt;
+  }
+
+  while (true) {
+    const nextDueAt = addRecurringFrequency(previousDueAt, item.frequency);
+
+    if (
+      nextDueAt.getTime() === previousDueAt.getTime() ||
+      nextDueAt >= asOfDate
+    ) {
+      return previousDueAt;
+    }
+
+    previousDueAt = nextDueAt;
+  }
 }
 
 function daysBetweenUtcDates(left: Date, right: Date): number {
@@ -773,6 +825,246 @@ async function calculateBudgetActualAmount(
   return Math.max(0, totalActualAmount);
 }
 
+function recurringMissedPaymentToleranceDays(
+  frequency: RecurringItem["frequency"],
+): number {
+  switch (frequency) {
+    case "daily":
+    case "irregular":
+      return 0;
+    case "weekly":
+      return 1;
+    case "monthly":
+      return 3;
+    case "quarterly":
+      return 5;
+    case "yearly":
+      return 7;
+  }
+}
+
+function recurringPaymentAmountMatches(
+  item: RecurringItem,
+  entry: LedgerEntry,
+): boolean {
+  const amount = Math.abs(entry.amount);
+
+  if (
+    item.expectedAmountMin !== undefined &&
+    item.expectedAmountMax !== undefined
+  ) {
+    const lower = Math.min(item.expectedAmountMin, item.expectedAmountMax);
+    const upper = Math.max(item.expectedAmountMin, item.expectedAmountMax);
+
+    return amount >= lower && amount <= upper;
+  }
+
+  if (item.expectedAmountMin !== undefined) {
+    return amount >= item.expectedAmountMin;
+  }
+
+  if (item.expectedAmountMax !== undefined) {
+    return amount <= item.expectedAmountMax;
+  }
+
+  return true;
+}
+
+function recurringPaymentMerchantMatches(
+  item: RecurringItem,
+  entry: LedgerEntry,
+): boolean {
+  if (item.merchantName === undefined || item.merchantName.trim() === "") {
+    return true;
+  }
+
+  const entryLabel = normalizeRecurringMerchantLabel(entry);
+
+  if (entryLabel === undefined) {
+    return false;
+  }
+
+  const expected = normalizeRecurringGroupLabel(item.merchantName);
+  const actual = normalizeRecurringGroupLabel(entryLabel);
+
+  return actual === expected || actual.includes(expected);
+}
+
+function recurringPaymentEntryMatches(
+  item: RecurringItem,
+  currencyCode: number,
+  entry: LedgerEntry,
+): boolean {
+  if (
+    entry.amount >= 0 ||
+    entry.hold === true ||
+    entry.categoryId === TRANSFER_CATEGORY_ID ||
+    entry.accountId !== item.accountId ||
+    entry.currencyCode !== currencyCode
+  ) {
+    return false;
+  }
+
+  if (item.categoryId !== undefined && entry.categoryId !== item.categoryId) {
+    return false;
+  }
+
+  return (
+    recurringPaymentMerchantMatches(item, entry) &&
+    recurringPaymentAmountMatches(item, entry)
+  );
+}
+
+async function hasMatchingRecurringLedgerEntry(
+  db: SqliteLedgerDb,
+  profile: string,
+  item: RecurringItem,
+  currencyCode: number,
+  from: Date,
+  to: Date,
+): Promise<boolean> {
+  let offset = 0;
+
+  while (true) {
+    const page = await db.listLedgerEntries({
+      profile,
+      accountId: item.accountId,
+      ...(item.categoryId === undefined ? {} : { categoryId: item.categoryId }),
+      status: "posted",
+      from: startOfUtcDateEpoch(from),
+      to: endOfUtcDateEpoch(to),
+      sortBy: "time",
+      sortDirection: "asc",
+      limit: MISSED_RECURRING_PAYMENT_PAGE_SIZE,
+      offset,
+    });
+
+    if (
+      page.entries.some((entry) =>
+        recurringPaymentEntryMatches(item, currencyCode, entry),
+      )
+    ) {
+      return true;
+    }
+
+    offset += page.entries.length;
+
+    if (page.entries.length === 0 || offset >= page.total) {
+      return false;
+    }
+  }
+}
+
+function buildMissedRecurringPayment(
+  item: RecurringItem,
+  currencyCode: number,
+  expectedDueAt: Date,
+  asOfDate: Date,
+  matchWindowStart: Date,
+  matchWindowEnd: Date,
+): MissedRecurringPayment {
+  const expectedDueAtIso = expectedDueAt.toISOString();
+
+  return {
+    id: `${item.id}:${expectedDueAtIso.slice(0, 10)}:missed`,
+    recurringItemId: item.id,
+    profile: item.profile,
+    accountId: item.accountId,
+    ...(item.categoryId === undefined ? {} : { categoryId: item.categoryId }),
+    ...(item.merchantName === undefined
+      ? {}
+      : { merchantName: item.merchantName }),
+    frequency: item.frequency,
+    ...(item.expectedAmountMin === undefined
+      ? {}
+      : { expectedAmountMin: item.expectedAmountMin }),
+    ...(item.expectedAmountMax === undefined
+      ? {}
+      : { expectedAmountMax: item.expectedAmountMax }),
+    currencyCode,
+    expectedDate: expectedDueAtIso.slice(0, 10),
+    expectedDueAt: expectedDueAtIso,
+    daysOverdue: daysBetweenUtcDates(asOfDate, expectedDueAt),
+    matchWindowStart: matchWindowStart.toISOString(),
+    matchWindowEnd: matchWindowEnd.toISOString(),
+    ...(item.lastSeenAt === undefined ? {} : { lastSeenAt: item.lastSeenAt }),
+  };
+}
+
+async function listMissedRecurringPayments(
+  db: SqliteLedgerDb,
+  profile: string,
+  asOf = new Date(),
+): Promise<readonly MissedRecurringPayment[]> {
+  const [items, accounts] = await Promise.all([
+    db.listRecurringItems(profile),
+    db.listAccounts(profile),
+  ]);
+  const accountCurrencyCodes = new Map(
+    accounts.map((account) => [account.id, account.currencyCode]),
+  );
+  const asOfDate = startOfUtcDate(asOf);
+  const missedPayments: MissedRecurringPayment[] = [];
+
+  for (const item of items) {
+    if (!item.isActive) {
+      continue;
+    }
+
+    const currencyCode = accountCurrencyCodes.get(item.accountId);
+    const expectedDueAt = resolvePreviousRecurringDate(item, asOfDate);
+
+    if (currencyCode === undefined || expectedDueAt === undefined) {
+      continue;
+    }
+
+    const toleranceDays = recurringMissedPaymentToleranceDays(item.frequency);
+    const matchWindowStart = addUtcDays(expectedDueAt, -toleranceDays);
+    const matchWindowEnd = addUtcDays(expectedDueAt, toleranceDays);
+
+    if (matchWindowEnd >= asOfDate) {
+      continue;
+    }
+
+    const hasMatch = await hasMatchingRecurringLedgerEntry(
+      db,
+      profile,
+      item,
+      currencyCode,
+      matchWindowStart,
+      matchWindowEnd,
+    );
+
+    if (hasMatch) {
+      continue;
+    }
+
+    missedPayments.push(
+      buildMissedRecurringPayment(
+        item,
+        currencyCode,
+        expectedDueAt,
+        asOfDate,
+        matchWindowStart,
+        matchWindowEnd,
+      ),
+    );
+  }
+
+  return missedPayments.sort((left, right) => {
+    const dueDiff =
+      Date.parse(left.expectedDueAt) - Date.parse(right.expectedDueAt);
+
+    if (dueDiff !== 0) {
+      return dueDiff;
+    }
+
+    return (left.merchantName ?? left.recurringItemId).localeCompare(
+      right.merchantName ?? right.recurringItemId,
+    );
+  });
+}
+
 async function listUpcomingRecurringPayments(
   db: SqliteLedgerDb,
   profile: string,
@@ -1154,6 +1446,13 @@ export function createLedgerQueryService({
         coerceProfile(profile, defaultProfile),
       );
     },
+    listMissedRecurringPayments(profile, asOf) {
+      return listMissedRecurringPayments(
+        db,
+        coerceProfile(profile, defaultProfile),
+        asOf,
+      );
+    },
     listRecurringCalendar(profile, from, to) {
       return listRecurringCalendar(
         db,
@@ -1218,6 +1517,7 @@ export function createLedgerQueryServices(
     recurringItems: {
       listRecurringItems: query.listRecurringItems,
       detectRecurringTransactions: query.detectRecurringTransactions,
+      listMissedRecurringPayments: query.listMissedRecurringPayments,
       listRecurringCalendar: query.listRecurringCalendar,
       listUpcomingRecurringPayments: query.listUpcomingRecurringPayments,
     },

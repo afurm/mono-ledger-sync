@@ -52,6 +52,8 @@ configuration, and direct filesystem behavior.
   derived from local ledger history before the user confirms it as a schedule.
 - `RecurringCalendarEvent` defines a projected recurring payment occurrence
   inside a bounded local calendar window.
+- `MissedRecurringPayment` defines an active recurring schedule occurrence that
+  has no matching posted local ledger entry after its due tolerance window.
 - `UpcomingRecurringPayment` defines the projected recurring payment row used by
   local schedule views.
 

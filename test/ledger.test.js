@@ -4042,6 +4042,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/upcoming-recurring-payments",
       });
+      const missedRecurringPaymentsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/missed-recurring-payments?asOf=2026-04-30",
+      });
+      const invalidMissedRecurringPaymentsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/missed-recurring-payments?asOf=2026-02-30",
+      });
       const recurringDetectionsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/recurring-detections",
@@ -4275,6 +4283,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(missingCloseBudgetResponse.json().error, "budget_not_found");
       assert.equal(upcomingRecurringPaymentsResponse.statusCode, 200);
       assert.deepEqual(upcomingRecurringPaymentsResponse.json(), []);
+      assert.equal(missedRecurringPaymentsResponse.statusCode, 200);
+      assert.deepEqual(missedRecurringPaymentsResponse.json(), []);
+      assert.equal(invalidMissedRecurringPaymentsResponse.statusCode, 400);
+      assert.equal(
+        invalidMissedRecurringPaymentsResponse.json().error,
+        "invalid_missed_recurring_payments_query",
+      );
       assert.equal(recurringDetectionsResponse.statusCode, 200);
       assert.deepEqual(recurringDetectionsResponse.json(), []);
       assert.equal(recurringCalendarResponse.statusCode, 200);

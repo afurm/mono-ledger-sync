@@ -370,6 +370,25 @@ export interface RecurringCalendarEvent {
   isPast: boolean;
 }
 
+export interface MissedRecurringPayment {
+  id: string;
+  recurringItemId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+  expectedDate: string;
+  expectedDueAt: string;
+  daysOverdue: number;
+  matchWindowStart: string;
+  matchWindowEnd: string;
+  lastSeenAt?: string;
+}
+
 export interface LedgerJar {
   id: string;
   title: string;
