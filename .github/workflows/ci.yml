@@ -26,6 +26,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
+      - name: Static check for unsafe logging patterns
+        run: node scripts/check-unsafe-logging.mjs
       - run: npm run typecheck
       - run: npm test
       - name: Live Monobank adapter smoke

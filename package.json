@@ -68,6 +68,7 @@
     "dev": "npm run build && node dist/server/dev.js",
     "format": "prettier --check .",
     "lint": "npm run typecheck",
+    "lint:logging": "node scripts/check-unsafe-logging.mjs",
     "prepublishOnly": "npm run typecheck && npm test",
     "test": "npm run build && node --test test/*.test.js",
     "test:live-monobank": "npm run build:lib && node --test test/live-monobank.test.js",
