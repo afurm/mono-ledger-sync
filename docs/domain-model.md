@@ -53,6 +53,10 @@ configuration, and direct filesystem behavior.
 - `SavingsRateReport`, `SavingsRateReportCurrencyTotal`, and
   `SavingsRateReportPoint` define local savings and savings-rate movement over a
   bounded monthly window.
+- `BalanceProjectionReport`, `BalanceProjectionCurrencyTotal`,
+  `BalanceProjectionPoint`, and `BalanceProjectionEvent` define projected
+  balance movement from current account balances and upcoming recurring
+  payments.
 - `CategoryTrendReport`, `CategoryTrendReportCategory`, and
   `CategoryTrendReportPoint` define local category spending movement over a
   bounded monthly window.

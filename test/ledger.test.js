@@ -4060,6 +4060,14 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/reports/savings-rate?months=25",
       });
+      const balanceProjectionReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/balance-projection",
+      });
+      const invalidBalanceProjectionReportResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/reports/balance-projection?days=181",
+      });
       const categoryTrendReportResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/reports/category-trends",
@@ -4374,6 +4382,22 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(
         invalidSavingsRateReportResponse.json().error,
         "invalid_savings_rate_report_query",
+      );
+      assert.equal(balanceProjectionReportResponse.statusCode, 200);
+      assert.equal(balanceProjectionReportResponse.json().days, 30);
+      assert.equal(
+        balanceProjectionReportResponse.json().totalProjectedOutflows,
+        0,
+      );
+      assert.equal(
+        balanceProjectionReportResponse.json().totalCurrentBalance,
+        balanceProjectionReportResponse.json().totalProjectedBalance,
+      );
+      assert.deepEqual(balanceProjectionReportResponse.json().events, []);
+      assert.equal(invalidBalanceProjectionReportResponse.statusCode, 400);
+      assert.equal(
+        invalidBalanceProjectionReportResponse.json().error,
+        "invalid_balance_projection_report_query",
       );
       assert.equal(categoryTrendReportResponse.statusCode, 200);
       assert.equal(categoryTrendReportResponse.json().months, 6);

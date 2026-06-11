@@ -419,6 +419,51 @@ export interface SavingsRateReport {
   points: readonly SavingsRateReportPoint[];
 }
 
+export interface BalanceProjectionPoint {
+  date: string;
+  currencyCode: number;
+  startingBalance: number;
+  projectedOutflows: number;
+  projectedBalance: number;
+  eventCount: number;
+}
+
+export interface BalanceProjectionCurrencyTotal {
+  currencyCode: number;
+  currentBalance: number;
+  projectedOutflows: number;
+  projectedBalance: number;
+  eventCount: number;
+}
+
+export interface BalanceProjectionEvent {
+  id: string;
+  recurringItemId: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  currencyCode: number;
+  date: string;
+  dueAt: string;
+  projectedAmount: number;
+}
+
+export interface BalanceProjectionReport {
+  profile: string;
+  from: string;
+  to: string;
+  days: number;
+  generatedAt: string;
+  totalCurrentBalance: number;
+  totalProjectedOutflows: number;
+  totalProjectedBalance: number;
+  currencies: readonly number[];
+  totals: readonly BalanceProjectionCurrencyTotal[];
+  points: readonly BalanceProjectionPoint[];
+  events: readonly BalanceProjectionEvent[];
+}
+
 export interface CategoryTrendReportPoint {
   month: string;
   from: string;
