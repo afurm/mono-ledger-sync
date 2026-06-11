@@ -266,6 +266,12 @@ type TransactionPageState =
   | { status: "ready"; data: LedgerEntryPage; error?: undefined }
   | { status: "error"; data?: LedgerEntryPage; error: string };
 
+type TransactionBulkEditState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "saved"; message: string }
+  | { status: "error"; message: string };
+
 type TransactionFilterPresetId =
   | "monthly-review"
   | "uncategorized"
@@ -3889,6 +3895,9 @@ function TransactionTable({
   sortDirection,
   onSortChange,
   onViewDetails,
+  selectedEntryIds,
+  onSelectionChange,
+  onSelectVisible,
   emptyTitle = "No local transactions yet",
   emptyDescription = "Run fixture sync to populate the local SQLite ledger before reviewing transactions.",
 }: {
@@ -3897,6 +3906,9 @@ function TransactionTable({
   sortDirection?: LedgerTransactionSortDirection;
   onSortChange?: (field: LedgerTransactionSortField) => void;
   onViewDetails?: (entry: LedgerEntry) => void;
+  selectedEntryIds?: ReadonlySet<string>;
+  onSelectionChange?: (entryId: string, selected: boolean) => void;
+  onSelectVisible?: (selected: boolean) => void;
   emptyTitle?: string;
   emptyDescription?: string;
 }) {
@@ -3910,10 +3922,33 @@ function TransactionTable({
     );
   }
 
+  const selectionEnabled =
+    selectedEntryIds !== undefined &&
+    onSelectionChange !== undefined &&
+    onSelectVisible !== undefined;
+  const selectedVisibleCount = selectionEnabled
+    ? entries.filter((entry) => selectedEntryIds.has(entry.id)).length
+    : 0;
+  const visibleSelectionState =
+    selectedVisibleCount === 0
+      ? false
+      : selectedVisibleCount === entries.length
+        ? true
+        : "indeterminate";
+
   return (
     <Table>
       <TableHeader>
         <TableRow>
+          {selectionEnabled ? (
+            <TableHead className="w-10">
+              <Checkbox
+                aria-label="Select all visible transactions"
+                checked={visibleSelectionState}
+                onCheckedChange={(checked) => onSelectVisible(checked === true)}
+              />
+            </TableHead>
+          ) : null}
           <SortableTableHead
             field="time"
             label="Date"
@@ -3969,6 +4004,19 @@ function TransactionTable({
       <TableBody>
         {entries.map((entry) => (
           <TableRow key={entry.id}>
+            {selectionEnabled ? (
+              <TableCell>
+                <Checkbox
+                  aria-label={`Select transaction ${
+                    entry.merchantName ?? entry.description
+                  }`}
+                  checked={selectedEntryIds.has(entry.id)}
+                  onCheckedChange={(checked) =>
+                    onSelectionChange(entry.id, checked === true)
+                  }
+                />
+              </TableCell>
+            ) : null}
             <TableCell>{formatDate(entry.time)}</TableCell>
             <TableCell className="max-w-[8.5rem] sm:max-w-none">
               <div className="flex min-w-0 flex-col gap-1">
@@ -6873,6 +6921,14 @@ function TransactionsRoute({
   const [selectedTransaction, setSelectedTransaction] = useState<
     LedgerEntry | undefined
   >();
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkMerchantName, setBulkMerchantName] = useState("");
+  const [bulkEditState, setBulkEditState] = useState<TransactionBulkEditState>({
+    status: "idle",
+  });
   const [transactionsReloadToken, setTransactionsReloadToken] = useState(0);
 
   useEffect(() => {
@@ -6923,6 +6979,28 @@ function TransactionsRoute({
     snapshot?.transactions,
     transactionsReloadToken,
   ]);
+
+  useEffect(() => {
+    setSelectedTransactionIds(new Set());
+    setBulkEditState({ status: "idle" });
+  }, [filters]);
+
+  useEffect(() => {
+    setSelectedTransactionIds((current) => {
+      if (!pageState.data) {
+        return current;
+      }
+
+      const visibleIds = new Set(
+        pageState.data.entries.map((entry) => entry.id),
+      );
+      const next = new Set(
+        [...current].filter((entryId) => visibleIds.has(entryId)),
+      );
+
+      return next.size === current.size ? current : next;
+    });
+  }, [pageState.data]);
 
   const categoryOptions = useMemo(() => {
     const categories = new Map<string, string>();
@@ -7039,6 +7117,19 @@ function TransactionsRoute({
         transactions.total,
       )
     : 0;
+  const selectedTransactions =
+    transactions?.entries.filter((entry) =>
+      selectedTransactionIds.has(entry.id),
+    ) ?? [];
+  const selectedTransactionCount = selectedTransactions.length;
+  const trimmedBulkMerchantName = bulkMerchantName.trim();
+  const hasBulkEditPayload =
+    bulkCategoryId !== "" || trimmedBulkMerchantName !== "";
+  const canApplyBulkEdit =
+    selectedTransactionCount > 0 &&
+    hasBulkEditPayload &&
+    bulkEditState.status !== "saving" &&
+    !loading;
 
   function applyFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -7123,6 +7214,111 @@ function TransactionsRoute({
         },
       };
     });
+  }
+
+  function setTransactionSelected(entryId: string, selected: boolean): void {
+    setSelectedTransactionIds((current) => {
+      const next = new Set(current);
+
+      if (selected) {
+        next.add(entryId);
+      } else {
+        next.delete(entryId);
+      }
+
+      return next;
+    });
+    setBulkEditState({ status: "idle" });
+  }
+
+  function setVisibleTransactionsSelected(selected: boolean): void {
+    if (!transactions) {
+      return;
+    }
+
+    setSelectedTransactionIds((current) => {
+      const next = new Set(current);
+
+      for (const entry of transactions.entries) {
+        if (selected) {
+          next.add(entry.id);
+        } else {
+          next.delete(entry.id);
+        }
+      }
+
+      return next;
+    });
+    setBulkEditState({ status: "idle" });
+  }
+
+  function clearBulkEditControls(): void {
+    setSelectedTransactionIds(new Set());
+    setBulkCategoryId("");
+    setBulkMerchantName("");
+    setBulkEditState({ status: "idle" });
+  }
+
+  async function applyBulkEdit(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+
+    if (!canApplyBulkEdit) {
+      return;
+    }
+
+    const ids = selectedTransactions.map((entry) => entry.id);
+
+    setBulkEditState({ status: "saving" });
+
+    try {
+      const updatedEntries = await updateLedgerTransactionsBulk({
+        ids,
+        ...(bulkCategoryId === "" ? {} : { categoryId: bulkCategoryId }),
+        ...(trimmedBulkMerchantName === ""
+          ? {}
+          : { merchantName: trimmedBulkMerchantName }),
+      });
+      const updatedEntriesById = new Map(
+        updatedEntries.map((entry) => [entry.id, entry]),
+      );
+
+      setPageState((current) => {
+        if (!current.data) {
+          return current;
+        }
+
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            entries: current.data.entries.map(
+              (entry) => updatedEntriesById.get(entry.id) ?? entry,
+            ),
+          },
+        };
+      });
+      setSelectedTransaction((current) =>
+        current ? (updatedEntriesById.get(current.id) ?? current) : current,
+      );
+      setTransactionsReloadToken((current) => current + 1);
+      setSelectedTransactionIds(new Set());
+      setBulkCategoryId("");
+      setBulkMerchantName("");
+      setBulkEditState({
+        status: "saved",
+        message: `Updated ${updatedEntries.length} transactions.`,
+      });
+    } catch (error) {
+      setBulkEditState({
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Bulk transaction edit could not be saved.",
+      });
+    }
   }
 
   return (
@@ -7407,6 +7603,93 @@ function TransactionsRoute({
           </div>
         )}
 
+        <form
+          className="grid gap-3 rounded-md border border-border p-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]"
+          onSubmit={(event) => {
+            void applyBulkEdit(event);
+          }}
+        >
+          <div className="grid gap-1">
+            <p className="text-sm font-medium">
+              Bulk edit selected transactions
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {selectedTransactionCount > 0
+                ? `${selectedTransactionCount} selected on this page`
+                : "Select rows in the table to update category or merchant."}
+            </p>
+          </div>
+          <Label className="grid gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Category
+            </span>
+            <Select
+              value={bulkCategoryId || "no-change"}
+              onValueChange={(value) => {
+                setBulkCategoryId(value === "no-change" ? "" : value);
+                setBulkEditState({ status: "idle" });
+              }}
+              disabled={bulkEditState.status === "saving"}
+            >
+              <SelectTrigger className="w-full" aria-label="Bulk category edit">
+                <SelectValue placeholder="No category change" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="no-change">No category change</SelectItem>
+                  {categoryOptions.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Label>
+          <Label className="grid gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Merchant
+            </span>
+            <Input
+              placeholder="Merchant override"
+              value={bulkMerchantName}
+              disabled={bulkEditState.status === "saving"}
+              onChange={(event) => {
+                setBulkMerchantName(event.target.value);
+                setBulkEditState({ status: "idle" });
+              }}
+            />
+          </Label>
+          <div className="flex items-end gap-2">
+            <Button type="submit" disabled={!canApplyBulkEdit}>
+              <CheckCheckIcon data-icon="inline-start" />
+              {bulkEditState.status === "saving" ? "Saving" : "Apply"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                selectedTransactionCount === 0 &&
+                !hasBulkEditPayload &&
+                bulkEditState.status === "idle"
+              }
+              onClick={clearBulkEditControls}
+            >
+              <FilterXIcon data-icon="inline-start" />
+              Clear
+            </Button>
+          </div>
+          {bulkEditState.status === "saved" ? (
+            <p className="text-xs text-muted-foreground lg:col-span-full">
+              {bulkEditState.message}
+            </p>
+          ) : bulkEditState.status === "error" ? (
+            <p className="text-xs text-destructive lg:col-span-full">
+              {bulkEditState.message}
+            </p>
+          ) : null}
+        </form>
+
         {pageState.status === "error" && (
           <Alert variant="destructive">
             <AlertCircleIcon />
@@ -7428,6 +7711,9 @@ function TransactionsRoute({
             sortDirection={filters.sortDirection}
             onSortChange={setSort}
             onViewDetails={setSelectedTransaction}
+            selectedEntryIds={selectedTransactionIds}
+            onSelectionChange={setTransactionSelected}
+            onSelectVisible={setVisibleTransactionsSelected}
             emptyTitle={
               hasFilters
                 ? "No matching transactions"

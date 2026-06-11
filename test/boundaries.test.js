@@ -898,6 +898,27 @@ test("surfaces month-to-date finance summary on overview", async () => {
   assert.match(appSource, /recurringPaymentDueLabel\(payment\)/);
 });
 
+test("transactions route exposes selected-row bulk category and merchant edits", async () => {
+  const appSource = await readFile("src/web/App.tsx", "utf8");
+
+  assert.match(appSource, /type TransactionBulkEditState/);
+  assert.match(appSource, /selectedTransactionIds/);
+  assert.match(appSource, /function setTransactionSelected/);
+  assert.match(appSource, /function setVisibleTransactionsSelected/);
+  assert.match(appSource, /Select all visible transactions/);
+  assert.match(appSource, /Bulk edit selected transactions/);
+  assert.match(appSource, /Bulk category edit/);
+  assert.match(appSource, /Merchant override/);
+  assert.match(appSource, /updateLedgerTransactionsBulk\(\{/);
+  assert.match(appSource, /ids,/);
+  assert.match(appSource, /categoryId: bulkCategoryId/);
+  assert.match(appSource, /merchantName: trimmedBulkMerchantName/);
+  assert.match(appSource, /selectedEntryIds=\{selectedTransactionIds\}/);
+  assert.match(appSource, /onSelectionChange=\{setTransactionSelected\}/);
+  assert.match(appSource, /onSelectVisible=\{setVisibleTransactionsSelected\}/);
+  assert.match(appSource, /setSelectedTransactionIds\(new Set\(\)\)/);
+});
+
 test("serves local API health through Fastify", async () => {
   const server = createLocalApiServer();
 
