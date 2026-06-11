@@ -353,6 +353,23 @@ export interface UpcomingRecurringPayment {
   isOverdue: boolean;
 }
 
+export interface RecurringCalendarEvent {
+  id: string;
+  recurringItemId: string;
+  profile: string;
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  currencyCode: number;
+  date: string;
+  month: string;
+  dueAt: string;
+  isPast: boolean;
+}
+
 export interface LedgerJar {
   id: string;
   title: string;

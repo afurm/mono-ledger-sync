@@ -50,6 +50,8 @@ configuration, and direct filesystem behavior.
   schedule before recurring calendars and alerts are enabled.
 - `RecurringDetectionCandidate` defines a detected recurring transaction pattern
   derived from local ledger history before the user confirms it as a schedule.
+- `RecurringCalendarEvent` defines a projected recurring payment occurrence
+  inside a bounded local calendar window.
 - `UpcomingRecurringPayment` defines the projected recurring payment row used by
   local schedule views.
 

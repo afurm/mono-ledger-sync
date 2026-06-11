@@ -77,6 +77,7 @@ test("documents the shared domain model contract", async () => {
     "NetWorthTrend",
     "RecurringItem",
     "RecurringDetectionCandidate",
+    "RecurringCalendarEvent",
     "UpcomingRecurringPayment",
     "DomainError",
     "LocalActivityEvent",
@@ -218,6 +219,10 @@ test("web client caches local snapshots for offline browsing", async () => {
     apiSource,
     /upcomingRecurringPayments: snapshot\.upcomingRecurringPayments \?\? \[\]/,
   );
+  assert.match(
+    apiSource,
+    /recurringCalendar: snapshot\.recurringCalendar \?\? \[\]/,
+  );
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
@@ -234,6 +239,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Net worth trend/);
   assert.match(appSource, /Spending by category/);
   assert.match(appSource, /Upcoming recurring payments/);
+  assert.match(appSource, /Recurring calendar/);
 });
 
 test("serves local API health through Fastify", async () => {
