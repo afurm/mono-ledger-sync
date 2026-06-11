@@ -5,8 +5,10 @@ import test from "node:test";
 import { productArchitecture, version } from "mono-ledger-sync/core";
 import {
   createLocalApiServer,
+  defaultLocalApiHost,
   localApiRoutePrefix,
   localApiServerFramework,
+  resolveLocalApiHost,
 } from "mono-ledger-sync/server";
 import {
   appNavigation,
@@ -361,6 +363,45 @@ test("serves local API health through Fastify", async () => {
   }
 });
 
+test("local API binding defaults to loopback and rejects public hosts", async () => {
+  assert.equal(defaultLocalApiHost, "127.0.0.1");
+  assert.equal(resolveLocalApiHost(undefined), "127.0.0.1");
+  assert.equal(resolveLocalApiHost(" localhost "), "localhost");
+  assert.throws(
+    () => resolveLocalApiHost("0.0.0.0"),
+    /Local API host must be 127\.0\.0\.1 or localhost/,
+  );
+  assert.throws(
+    () => createLocalApiServer({ host: "0.0.0.0" }),
+    /external binding is protected by authentication/,
+  );
+
+  const server = createLocalApiServer({
+    port: 0,
+  });
+
+  try {
+    const url = await server.listen();
+
+    assert.match(url, /^http:\/\/127\.0\.0\.1:\d+$/);
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/app/config",
+    });
+    const body = response.json();
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(body.access, {
+      localOnly: true,
+      host: "127.0.0.1",
+    });
+    assert.equal(body.webhook.host, "127.0.0.1");
+  } finally {
+    await server.close();
+  }
+});
+
 test("exposes local webhook settings in app config", async () => {
   const server = createLocalApiServer({
     profile: "demo",
@@ -377,6 +418,10 @@ test("exposes local webhook settings in app config", async () => {
     const body = response.json();
 
     assert.equal(response.statusCode, 200);
+    assert.deepEqual(body.access, {
+      localOnly: true,
+      host: "127.0.0.1",
+    });
     assert.equal(body.webhook.enabled, true);
     assert.match(body.webhook.path, /^\/api\/webhooks\/monobank-[a-f0-9]{32}$/);
     assert.equal(body.webhook.host, "127.0.0.1");

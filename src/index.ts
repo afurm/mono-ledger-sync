@@ -168,9 +168,13 @@ export {
 } from "./sync/index.js";
 export {
   createLocalApiServer,
+  defaultLocalApiHost,
   localApiRoutePrefix,
   localApiServerFramework,
+  resolveLocalApiHost,
   resolveLocalLedgerDatabasePath,
+  type LocalApiAccessBinding,
+  type LocalApiHost,
   type LocalApiServer,
   type LocalApiServerOptions,
 } from "./server/index.js";

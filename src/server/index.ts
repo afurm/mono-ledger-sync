@@ -99,7 +99,9 @@ import {
 
 export const localApiServerFramework = "fastify";
 export const localApiRoutePrefix = "/api";
-const defaultWebhookHost = "127.0.0.1";
+export const defaultLocalApiHost = "127.0.0.1";
+const localApiLocalHosts = [defaultLocalApiHost, "localhost"] as const;
+export type LocalApiHost = (typeof localApiLocalHosts)[number];
 const defaultWebhookPathEntropyBytes = 16;
 const webhookRouteIdPrefix = `${localApiRoutePrefix}/webhooks/monobank-`;
 type LocalWebhookRoutePath =
@@ -113,12 +115,31 @@ function createWebhookRoutePath(): LocalWebhookRoutePath {
   return `${webhookRouteIdPrefix}${pathId}`;
 }
 
+function isLocalApiHost(host: string): host is LocalApiHost {
+  return localApiLocalHosts.includes(host as LocalApiHost);
+}
+
+export function resolveLocalApiHost(host: string | undefined): LocalApiHost {
+  const normalizedHost = host?.trim() || defaultLocalApiHost;
+
+  if (isLocalApiHost(normalizedHost)) {
+    return normalizedHost;
+  }
+
+  throw new DomainError(
+    "Local API host must be 127.0.0.1 or localhost until external binding is protected by authentication.",
+    "config_invalid",
+    "config",
+    { field: "host", host: normalizedHost, localOnly: true },
+  );
+}
+
 const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
 const localWebBuildDir = path.resolve(serverModuleDir, "../web");
 const localWebAssetsDir = path.join(localWebBuildDir, "assets");
 
 export interface LocalApiServerOptions {
-  host?: "127.0.0.1" | "localhost";
+  host?: string;
   port?: number;
   profile?: string;
   source?: LedgerSource;
@@ -180,6 +201,11 @@ export interface LocalApiWebhookSettings {
   url: string;
 }
 
+export interface LocalApiAccessBinding {
+  localOnly: true;
+  host: LocalApiHost;
+}
+
 interface LocalApiMonobankTokenStatus {
   profile: string;
   hasToken: boolean;
@@ -208,6 +234,7 @@ export interface LocalApiAppConfig {
   dataDir: string;
   databasePath: string;
   localOnly: true;
+  access: LocalApiAccessBinding;
   webhook: LocalApiWebhookSettings;
   token: LocalApiMonobankTokenStatus;
   sync: LocalApiAppConfigSyncState;
@@ -356,6 +383,7 @@ const appConfigResponseSchema = {
     "dataDir",
     "databasePath",
     "localOnly",
+    "access",
     "webhook",
     "token",
     "sync",
@@ -366,6 +394,15 @@ const appConfigResponseSchema = {
     dataDir: { type: "string" },
     databasePath: { type: "string" },
     localOnly: { const: true },
+    access: {
+      type: "object",
+      required: ["localOnly", "host"],
+      additionalProperties: false,
+      properties: {
+        localOnly: { const: true },
+        host: { enum: ["127.0.0.1", "localhost"] },
+      },
+    },
     webhook: {
       type: "object",
       required: ["enabled", "path", "host", "port", "url"],
@@ -2147,6 +2184,7 @@ async function readBuiltWebAsset(
 function registerLocalApiRoutes(
   app: FastifyInstance,
   options: LocalApiServerOptions,
+  localApiHost: LocalApiHost,
   getServices: () => Promise<LocalAppServices>,
   getMonobankToken: () => string | undefined,
   saveMonobankToken: (
@@ -2297,6 +2335,10 @@ function registerLocalApiRoutes(
       dataDir: services.dataDir,
       databasePath: services.databasePath,
       localOnly: true,
+      access: {
+        localOnly: true,
+        host: localApiHost,
+      },
       token: {
         profile: services.profile,
         hasToken: monobankToken !== undefined,
@@ -4051,6 +4093,7 @@ function registerLocalApiRoutes(
 export function createLocalApiServer(
   options: LocalApiServerOptions = {},
 ): LocalApiServer {
+  const localApiHost = resolveLocalApiHost(options.host);
   const app = Fastify({
     logger: false,
   });
@@ -4073,8 +4116,7 @@ export function createLocalApiServer(
   let storedSettingsLoadPromise: Promise<void> | undefined;
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
-  let webhookHost: NonNullable<LocalApiServerOptions["host"]> =
-    options.host ?? defaultWebhookHost;
+  let webhookHost: LocalApiHost = localApiHost;
 
   function resolveWebhookSettings(): Omit<
     LocalApiWebhookSettings,
@@ -4098,7 +4140,7 @@ export function createLocalApiServer(
       parsedUrl.hostname === "127.0.0.1" ||
       parsedUrl.hostname === "localhost"
     ) {
-      webhookHost = parsedUrl.hostname;
+      webhookHost = resolveLocalApiHost(parsedUrl.hostname);
     }
 
     return {
@@ -4514,6 +4556,7 @@ export function createLocalApiServer(
   registerLocalApiRoutes(
     app,
     options,
+    localApiHost,
     getServices,
     getMonobankToken,
     saveMonobankToken,
@@ -4533,7 +4576,7 @@ export function createLocalApiServer(
     apiPrefix: localApiRoutePrefix,
     async listen() {
       url = await app.listen({
-        host: options.host ?? defaultWebhookHost,
+        host: localApiHost,
         port: options.port ?? 0,
       });
 
