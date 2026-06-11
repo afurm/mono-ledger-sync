@@ -74,6 +74,8 @@ test("documents the shared domain model contract", async () => {
     "Category",
     "Budget",
     "BudgetProgress",
+    "ReportCurrencyConversionRate",
+    "ConvertedReportTotals",
     "CashflowReportPoint",
     "CashflowReportCurrencyTotal",
     "CashflowReport",
@@ -289,6 +291,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(apiSource, /loadBalanceProjectionReport/);
   assert.match(apiSource, /loadCategoryTrendReport/);
   assert.match(apiSource, /loadMerchantTrendReport/);
+  assert.match(apiSource, /convertedTotals\?: ConvertedReportTotals/);
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
@@ -308,6 +311,7 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(appSource, /Balance projection/);
   assert.match(appSource, /Category trend report/);
   assert.match(appSource, /Merchant trend report/);
+  assert.match(appSource, /convertedReportTotalLabel/);
   assert.match(appSource, /Monthly spending report/);
   assert.match(appSource, /Spending by category/);
   assert.match(appSource, /Missed recurring payments/);

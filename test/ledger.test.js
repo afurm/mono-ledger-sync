@@ -4326,6 +4326,10 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(monthlySpendingReportResponse.json().month, "2026-04");
       assert.equal(monthlySpendingReportResponse.json().totalExpenses, 408650);
       assert.equal(monthlySpendingReportResponse.json().transactionCount, 5);
+      assert.equal(
+        monthlySpendingReportResponse.json().convertedTotals.totalExpenses,
+        3304815,
+      );
       assert.equal(cashflowReportResponse.statusCode, 200);
       assert.equal(cashflowReportResponse.json().months, 6);
       assert.equal(cashflowReportResponse.json().from, "2025-11-01");
@@ -4348,6 +4352,27 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           [978, 20000, 20000, 0],
         ],
       );
+      assert.deepEqual(cashflowReportResponse.json().convertedTotals, {
+        baseCurrencyCode: 980,
+        totalIncome: 9361000,
+        totalExpenses: 3304815,
+        netCashflow: 6056185,
+        missingCurrencyCodes: [],
+        rates: [
+          {
+            currencyCode: 840,
+            baseCurrencyCode: 980,
+            rate: 39.85,
+            date: 1775001600,
+          },
+          {
+            currencyCode: 978,
+            baseCurrencyCode: 980,
+            rate: 43.05,
+            date: 1775001600,
+          },
+        ],
+      });
       assert.equal(oneMonthCashflowReportResponse.statusCode, 200);
       assert.equal(oneMonthCashflowReportResponse.json().from, "2026-04-01");
       assert.equal(invalidCashflowReportResponse.statusCode, 400);

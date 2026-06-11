@@ -44,6 +44,9 @@ configuration, and direct filesystem behavior.
   and reopen workflows are enabled.
 - `BudgetProgress` defines the current budget-period progress row used for
   overspend warnings.
+- `ReportCurrencyConversionRate` and `ConvertedReportTotals` define optional
+  UAH report totals derived from cached Monobank rates while preserving the
+  original-currency report rows and exposing missing conversion rates.
 - `MonthlySpendingReport`, `MonthlySpendingCurrencyTotal`,
   `MonthlySpendingCategory`, and `MonthlySpendingMerchant` define a month-scoped
   local spending report with category, merchant, and currency breakdowns.

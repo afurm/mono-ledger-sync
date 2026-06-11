@@ -2946,6 +2946,38 @@ function formatPercentage(value: number): string {
   return `${value.toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
+type ConvertedReportTotalField =
+  | "totalIncome"
+  | "totalExpenses"
+  | "netCashflow"
+  | "totalSavings"
+  | "totalCurrentBalance"
+  | "totalProjectedOutflows"
+  | "totalProjectedBalance";
+
+function convertedReportTotalLabel(
+  convertedTotals:
+    | ({
+        baseCurrencyCode: number;
+        missingCurrencyCodes: readonly number[];
+      } & Partial<Record<ConvertedReportTotalField, number>>)
+    | undefined,
+  field: ConvertedReportTotalField,
+): string | undefined {
+  if (
+    convertedTotals === undefined ||
+    convertedTotals.missingCurrencyCodes.length > 0
+  ) {
+    return undefined;
+  }
+
+  const value = convertedTotals[field];
+
+  return value === undefined
+    ? undefined
+    : formatMinorAmount(value, convertedTotals.baseCurrencyCode);
+}
+
 function transactionCategoryLabel(entry: LedgerEntry): string {
   return entry.categoryName ?? entry.categoryId ?? "Uncategorized";
 }
@@ -4149,11 +4181,15 @@ function MonthlySpendingReportCard({
   const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
   const singleCurrencyTotal =
     report.currencyTotals.length === 1 ? report.currencyTotals[0] : undefined;
+  const convertedTotalLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalExpenses",
+  );
   const totalLabel =
     singleCurrencyTotal === undefined
       ? report.currencyTotals.length === 0
         ? "0"
-        : `${report.currencyTotals.length} currencies`
+        : (convertedTotalLabel ?? `${report.currencyTotals.length} currencies`)
       : formatMinorAmount(
           singleCurrencyTotal.amount,
           singleCurrencyTotal.currencyCode,
@@ -4344,11 +4380,23 @@ function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
   const singleCurrencyTotal =
     report.totals.length === 1 ? report.totals[0] : undefined;
+  const convertedIncomeLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalIncome",
+  );
+  const convertedExpenseLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalExpenses",
+  );
+  const convertedNetLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "netCashflow",
+  );
   const incomeLabel =
     singleCurrencyTotal === undefined
       ? report.totals.length === 0
         ? "0"
-        : `${report.totals.length} currencies`
+        : (convertedIncomeLabel ?? `${report.totals.length} currencies`)
       : formatMinorAmount(
           singleCurrencyTotal.income,
           singleCurrencyTotal.currencyCode,
@@ -4357,7 +4405,7 @@ function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
     singleCurrencyTotal === undefined
       ? report.totals.length === 0
         ? "0"
-        : `${report.totals.length} currencies`
+        : (convertedExpenseLabel ?? `${report.totals.length} currencies`)
       : formatMinorAmount(
           singleCurrencyTotal.expenses,
           singleCurrencyTotal.currencyCode,
@@ -4366,7 +4414,7 @@ function CashflowReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
     singleCurrencyTotal === undefined
       ? report.totals.length === 0
         ? "0"
-        : "Mixed"
+        : (convertedNetLabel ?? "Mixed")
       : formatMinorAmount(
           singleCurrencyTotal.net,
           singleCurrencyTotal.currencyCode,
@@ -4576,11 +4624,15 @@ function SavingsRateReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   );
   const singleCurrencyTotal =
     report.totals.length === 1 ? report.totals[0] : undefined;
+  const convertedSavingsLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalSavings",
+  );
   const savingsLabel =
     singleCurrencyTotal === undefined
       ? report.totals.length === 0
         ? "0"
-        : "Mixed"
+        : (convertedSavingsLabel ?? "Mixed")
       : formatMinorAmount(
           singleCurrencyTotal.savings,
           singleCurrencyTotal.currencyCode,
@@ -4810,11 +4862,19 @@ function BalanceProjectionReportCard({
   const maxOutflow = Math.max(...rows.map((row) => row.projectedOutflows), 0);
   const singleCurrencyTotal =
     report.totals.length === 1 ? report.totals[0] : undefined;
+  const convertedProjectedLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalProjectedBalance",
+  );
+  const convertedOutflowsLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalProjectedOutflows",
+  );
   const projectedLabel =
     singleCurrencyTotal === undefined
       ? report.totals.length === 0
         ? "0"
-        : "Mixed"
+        : (convertedProjectedLabel ?? "Mixed")
       : formatMinorAmount(
           singleCurrencyTotal.projectedBalance,
           singleCurrencyTotal.currencyCode,
@@ -4823,7 +4883,7 @@ function BalanceProjectionReportCard({
     singleCurrencyTotal === undefined
       ? report.totals.length === 0
         ? "0"
-        : `${report.totals.length} currencies`
+        : (convertedOutflowsLabel ?? `${report.totals.length} currencies`)
       : formatMinorAmount(
           singleCurrencyTotal.projectedOutflows,
           singleCurrencyTotal.currencyCode,
@@ -5051,11 +5111,15 @@ function CategoryTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
   const singleCurrencyCode =
     report.currencies.length === 1 ? report.currencies[0] : undefined;
+  const convertedTotalLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalExpenses",
+  );
   const totalLabel =
     singleCurrencyCode === undefined
       ? report.currencies.length === 0
         ? "0"
-        : `${report.currencies.length} currencies`
+        : (convertedTotalLabel ?? `${report.currencies.length} currencies`)
       : formatMinorAmount(report.totalExpenses, singleCurrencyCode);
   const averageLabel =
     singleCurrencyCode === undefined
@@ -5226,11 +5290,15 @@ function MerchantTrendReportCard({ snapshot }: { snapshot: LocalAppSnapshot }) {
   const maxAmount = Math.max(...rows.map((row) => row.amount), 0);
   const singleCurrencyCode =
     report.currencies.length === 1 ? report.currencies[0] : undefined;
+  const convertedTotalLabel = convertedReportTotalLabel(
+    report.convertedTotals,
+    "totalExpenses",
+  );
   const totalLabel =
     singleCurrencyCode === undefined
       ? report.currencies.length === 0
         ? "0"
-        : `${report.currencies.length} currencies`
+        : (convertedTotalLabel ?? `${report.currencies.length} currencies`)
       : formatMinorAmount(report.totalExpenses, singleCurrencyCode);
   const averageLabel =
     singleCurrencyCode === undefined

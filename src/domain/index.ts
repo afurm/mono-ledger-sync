@@ -332,6 +332,26 @@ export interface MonthlySpendingMerchant {
   sharePercentage: number;
 }
 
+export interface ReportCurrencyConversionRate {
+  currencyCode: number;
+  baseCurrencyCode: number;
+  rate: number;
+  date: number;
+}
+
+export interface ConvertedReportTotals {
+  baseCurrencyCode: number;
+  totalIncome?: number;
+  totalExpenses?: number;
+  netCashflow?: number;
+  totalSavings?: number;
+  totalCurrentBalance?: number;
+  totalProjectedOutflows?: number;
+  totalProjectedBalance?: number;
+  missingCurrencyCodes: readonly number[];
+  rates: readonly ReportCurrencyConversionRate[];
+}
+
 export interface MonthlySpendingReport {
   profile: string;
   month: string;
@@ -345,6 +365,7 @@ export interface MonthlySpendingReport {
   currencyTotals: readonly MonthlySpendingCurrencyTotal[];
   categories: readonly MonthlySpendingCategory[];
   merchants: readonly MonthlySpendingMerchant[];
+  convertedTotals?: ConvertedReportTotals;
 }
 
 export interface CashflowReportPoint {
@@ -379,6 +400,7 @@ export interface CashflowReport {
   currencies: readonly number[];
   totals: readonly CashflowReportCurrencyTotal[];
   points: readonly CashflowReportPoint[];
+  convertedTotals?: ConvertedReportTotals;
 }
 
 export interface SavingsRateReportPoint {
@@ -417,6 +439,7 @@ export interface SavingsRateReport {
   currencies: readonly number[];
   totals: readonly SavingsRateReportCurrencyTotal[];
   points: readonly SavingsRateReportPoint[];
+  convertedTotals?: ConvertedReportTotals;
 }
 
 export interface BalanceProjectionPoint {
@@ -462,6 +485,7 @@ export interface BalanceProjectionReport {
   totals: readonly BalanceProjectionCurrencyTotal[];
   points: readonly BalanceProjectionPoint[];
   events: readonly BalanceProjectionEvent[];
+  convertedTotals?: ConvertedReportTotals;
 }
 
 export interface CategoryTrendReportPoint {
@@ -495,6 +519,7 @@ export interface CategoryTrendReport {
   currencies: readonly number[];
   categories: readonly CategoryTrendReportCategory[];
   points: readonly CategoryTrendReportPoint[];
+  convertedTotals?: ConvertedReportTotals;
 }
 
 export interface MerchantTrendReportPoint {
@@ -526,6 +551,7 @@ export interface MerchantTrendReport {
   currencies: readonly number[];
   merchants: readonly MerchantTrendReportMerchant[];
   points: readonly MerchantTrendReportPoint[];
+  convertedTotals?: ConvertedReportTotals;
 }
 
 export interface BudgetProgress {
