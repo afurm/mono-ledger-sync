@@ -2128,6 +2128,11 @@ function WebhookSettingsPanel({
       mono: false,
     },
     {
+      label: "Local API host",
+      value: config?.access?.host ?? webhook?.host ?? "Unknown",
+      mono: true,
+    },
+    {
       label: "Port",
       value: webhook ? String(webhook.port) : "Unknown",
       mono: true,
@@ -2162,7 +2167,7 @@ function WebhookSettingsPanel({
             pulls before relying on ledger changes.
           </AlertDescription>
         </Alert>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {settings.map((setting) => (
             <div
               className="rounded-md border border-border bg-muted/30 px-3 py-2"
@@ -2292,7 +2297,9 @@ function LocalOnlyIndicator({
       ? "Checking local"
       : "Local unavailable";
   const detail = snapshot
-    ? `${snapshot.health.status} API / ${snapshot.config.source} source`
+    ? `${snapshot.health.status} API on ${
+        snapshot.config.access?.host ?? snapshot.config.webhook.host
+      } / ${snapshot.config.source} source`
     : "Waiting for the local Fastify API";
   const variant = snapshot?.config.localOnly
     ? "secondary"
@@ -2317,6 +2324,8 @@ function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const profile = snapshot?.config.profile ?? "Loading";
   const source = snapshot?.config.source ?? "fixture";
   const databasePath = snapshot?.config.databasePath ?? "Waiting for local API";
+  const accessHost =
+    snapshot?.config.access?.host ?? snapshot?.config.webhook.host;
 
   return (
     <DropdownMenu>
@@ -2347,6 +2356,10 @@ function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
           <DropdownMenuItem disabled>
             <FileClockIcon data-icon="inline-start" />
             <span className="truncate">{databasePath}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            <ShieldCheckIcon data-icon="inline-start" />
+            {accessHost ? `${accessHost} bind` : "local bind"}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>

@@ -139,6 +139,8 @@ API token is saved in the in-app sign-in flow. Sanitized fixture endpoints
 remain available for development; pass `MONO_LEDGER_SYNC_SOURCE=fixture npm
 run dev` to skip live calls.
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
+The local API binds to `127.0.0.1` by default and rejects public host binds
+until external access has authentication.
 Use `npm run web:dev` when working on the Vite UI; it starts the same local API
 server and proxies browser requests through `http://127.0.0.1:5173`.
 

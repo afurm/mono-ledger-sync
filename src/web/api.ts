@@ -26,6 +26,11 @@ export interface LocalApiWebhookSettings {
   url: string;
 }
 
+export interface LocalApiAccessBinding {
+  localOnly: true;
+  host: "127.0.0.1" | "localhost";
+}
+
 export interface LocalApiMonobankClientInfoSummary {
   clientId: string;
   name: string;
@@ -49,6 +54,7 @@ export interface LocalApiAppConfig {
   dataDir: string;
   databasePath: string;
   localOnly: true;
+  access: LocalApiAccessBinding;
   webhook: LocalApiWebhookSettings;
   token: LocalApiMonobankTokenStatus;
 }

@@ -1,19 +1,20 @@
 import { isLedgerSource, type LedgerSource } from "../core/index.js";
-import { createLocalApiServer, type LocalApiServerOptions } from "./index.js";
+import {
+  createLocalApiServer,
+  resolveLocalApiHost,
+  type LocalApiHost,
+  type LocalApiServerOptions,
+} from "./index.js";
 import { logStructured } from "../logging/index.js";
 
-function readHost(): "127.0.0.1" | "localhost" | undefined {
+function readHost(): LocalApiHost | undefined {
   const host = process.env.MONO_LEDGER_SYNC_HOST ?? process.env.HOST;
 
   if (host === undefined || host === "") {
     return undefined;
   }
 
-  if (host !== "127.0.0.1" && host !== "localhost") {
-    throw new Error("MONO_LEDGER_SYNC_HOST must be 127.0.0.1 or localhost");
-  }
-
-  return host;
+  return resolveLocalApiHost(host);
 }
 
 function readPort(): number | undefined {
