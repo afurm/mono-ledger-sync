@@ -35,9 +35,9 @@ jobs:
       - run: npm test
 
       - name: Pack the project tarball
-        id: pack
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pack"
           npm pack --pack-destination "$RUNNER_TEMP/pack"
           ls -la "$RUNNER_TEMP/pack"
 
