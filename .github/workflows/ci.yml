@@ -28,8 +28,15 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - name: Static check for unsafe logging patterns
         run: node scripts/check-unsafe-logging.mjs
+      - name: Seed roadmap labels
+        if: ${{ github.event_name == 'push' }}
+        run: bash scripts/seed-labels.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run typecheck
       - run: npm test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Live Monobank adapter smoke
         if: ${{ github.event_name == 'push' }}
         run: npm run test:live-monobank
@@ -37,4 +44,6 @@ jobs:
           MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS: "1"
           MONOBANK_TOKEN: ${{ secrets.MONOBANK_TOKEN }}
       - run: npm run coverage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run format
