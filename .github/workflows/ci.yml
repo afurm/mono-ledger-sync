@@ -44,4 +44,6 @@ jobs:
           MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS: "1"
           MONOBANK_TOKEN: ${{ secrets.MONOBANK_TOKEN }}
       - run: npm run coverage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run format
