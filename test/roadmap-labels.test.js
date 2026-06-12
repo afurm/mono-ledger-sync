@@ -21,28 +21,42 @@ function ghOrThrow(args) {
   return result.stdout;
 }
 
-test("roadmap labels exist on the repository", { skip: !hasGhAuth() }, async () => {
-  // The script that creates these labels runs in CI on push; this test
-  // asserts the labels actually exist by reading the live label list.
-  const stdout = ghOrThrow(["label", "list", "--limit", "200", "--json", "name"]);
-  const labels = JSON.parse(stdout);
-  const names = new Set(labels.map((label) => label.name));
+test(
+  "roadmap labels exist on the repository",
+  { skip: !hasGhAuth() },
+  async () => {
+    // The script that creates these labels runs in CI on push; this test
+    // asserts the labels actually exist by reading the live label list.
+    const stdout = ghOrThrow([
+      "label",
+      "list",
+      "--limit",
+      "200",
+      "--json",
+      "name",
+    ]);
+    const labels = JSON.parse(stdout);
+    const names = new Set(labels.map((label) => label.name));
 
-  for (const required of [
-    "area:ui",
-    "area:server",
-    "area:storage",
-    "provider",
-    "acquiring",
-    "blocked",
-    "wontfix-proper",
-    "roadmap",
-    "milestone-10",
-    "milestone-16",
-  ]) {
-    assert.ok(names.has(required), `expected label ${required} to exist on the repository`);
-  }
-});
+    for (const required of [
+      "area:ui",
+      "area:server",
+      "area:storage",
+      "provider",
+      "acquiring",
+      "blocked",
+      "wontfix-proper",
+      "roadmap",
+      "milestone-10",
+      "milestone-16",
+    ]) {
+      assert.ok(
+        names.has(required),
+        `expected label ${required} to exist on the repository`,
+      );
+    }
+  },
+);
 
 test(
   "three good-first-issue starter issues exist with the right label",
