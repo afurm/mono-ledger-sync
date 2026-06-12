@@ -54,7 +54,6 @@
   "files": [
     "dist",
     "examples/sample-workflows",
-    "fixtures/monobank",
     "README.md",
     "LICENSE",
     "SECURITY.md"

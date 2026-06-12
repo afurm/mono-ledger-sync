@@ -27,9 +27,18 @@ function token(overrides) {
  *   profile?: string,
  *   source?: "fixture" | "monobank",
  *   hasToken?: boolean,
+ *   accounts?: number,
+ *   ledgerEntries?: number,
+ *   jars?: number,
+ *   savingsGoalProgress?: number,
  * }} overrides
  */
 function snapshot(overrides) {
+  const accountCount = overrides.accounts ?? 0;
+  const ledgerEntryCount = overrides.ledgerEntries ?? 0;
+  const jarCount = overrides.jars ?? 0;
+  const savingsGoalProgressCount = overrides.savingsGoalProgress ?? 0;
+
   return {
     config: {
       profile: overrides.profile ?? "default",
@@ -49,10 +58,19 @@ function snapshot(overrides) {
         hasToken: overrides.hasToken,
       }),
     },
-    summary: { accounts: 0, ledgerEntries: 0 },
-    accounts: [],
-    jars: [],
-    savingsGoalProgress: [],
+    summary: { accounts: accountCount, ledgerEntries: ledgerEntryCount },
+    accounts: Array.from({ length: accountCount }, (_, index) => ({
+      id: `account-${index}`,
+    })),
+    jars: Array.from({ length: jarCount }, (_, index) => ({
+      id: `jar-${index}`,
+    })),
+    savingsGoalProgress: Array.from(
+      { length: savingsGoalProgressCount },
+      (_, index) => ({
+        id: `goal-${index}`,
+      }),
+    ),
     categories: [],
     categoryRules: [],
     merchantCleanupRules: [],
@@ -60,10 +78,12 @@ function snapshot(overrides) {
     budgetProgress: [],
     upcomingRecurringPayments: [],
     transactions: {
-      items: [],
-      total: 0,
-      page: 1,
-      pageSize: 25,
+      entries: Array.from({ length: ledgerEntryCount }, (_, index) => ({
+        id: `entry-${index}`,
+      })),
+      total: ledgerEntryCount,
+      limit: 25,
+      offset: 0,
     },
     syncRuns: [],
     webhookEvents: [],
@@ -71,7 +91,7 @@ function snapshot(overrides) {
   };
 }
 
-test("shows prompt on Overview when no token is saved and source is monobank", () => {
+test("shows prompt on Overview when no token is saved, source is monobank, and no local ledger data exists", () => {
   assert.equal(shouldShowFirstRunSignInPrompt("overview", snapshot({})), true);
 });
 
@@ -101,6 +121,24 @@ test("does NOT show prompt on Settings, Logs, or Help routes (gated routes only)
       shouldShowFirstRunSignInPrompt(route, snapshot({})),
       false,
       `expected ${route} to NOT show prompt`,
+    );
+  }
+});
+
+test("does NOT show prompt when local ledger data already exists", () => {
+  for (const seededSnapshot of [
+    snapshot({ accounts: 1 }),
+    snapshot({ ledgerEntries: 1 }),
+    snapshot({ jars: 1 }),
+    snapshot({ savingsGoalProgress: 1 }),
+  ]) {
+    assert.equal(
+      shouldShowFirstRunSignInPrompt("overview", seededSnapshot),
+      false,
+    );
+    assert.equal(
+      shouldShowFirstRunSignInPrompt("transactions", seededSnapshot),
+      false,
     );
   }
 });
@@ -148,7 +186,6 @@ test("buildFirstRunEmptyStateView exposes the developer portal link", () => {
   assert.equal(view.profile, "personal");
   assert.equal(view.routeId, "transactions");
   assert.match(view.openSettingsLabel, /Settings/);
-  assert.match(view.fixtureHint, /fixture/);
 });
 
 test("empty state view never leaks token value or header names", () => {

@@ -742,13 +742,6 @@ const seededCategoryRules: readonly SeedCategoryRule[] = [
 
 const seededMerchantCleanupRules: readonly SeedMerchantCleanupRule[] = [
   {
-    id: "fixture-grocery-cleanup",
-    name: "Fixture Grocery cleanup",
-    priority: 100,
-    merchantContains: "fixture grocery",
-    canonicalName: "Fixture Grocery",
-  },
-  {
     id: "kyiv-metro-cleanup",
     name: "Kyiv Metro cleanup",
     priority: 200,
@@ -1253,6 +1246,15 @@ const migrations: readonly SqliteMigration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_recurring_detection_decisions_profile_action
         ON recurring_detection_decisions(profile, action, updated_at DESC);
+    `,
+  },
+  {
+    id: "0020_remove_fixture_merchant_cleanup_seed",
+    description: "Remove fixture merchant cleanup seed",
+    sql: `
+      DELETE FROM merchant_cleanup_rules
+      WHERE id = 'fixture-grocery-cleanup'
+        AND is_system = 1;
     `,
   },
 ];

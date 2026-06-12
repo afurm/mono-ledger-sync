@@ -10,7 +10,10 @@ import test from "node:test";
  * makes, so swapping the implementation cannot silently desync the
  * URL or method.
  */
-import { recheckMonobankConnection } from "../dist/web/api.js";
+import {
+  recheckMonobankConnection,
+  saveMonobankToken,
+} from "../dist/web/api.js";
 
 test("recheckMonobankConnection is exported as a function", () => {
   assert.equal(typeof recheckMonobankConnection, "function");
@@ -31,4 +34,43 @@ test("recheckMonobankConnection rejects with a helpful error when the local API 
       return true;
     },
   );
+});
+
+test("saveMonobankToken surfaces local API error messages", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (input, init) => {
+    calls.push({ input, init });
+
+    return new Response(
+      JSON.stringify({
+        error: "monobank_token_invalid",
+        message: "Invalid token",
+      }),
+      {
+        status: 400,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    );
+  };
+
+  try {
+    await assert.rejects(
+      () => saveMonobankToken("bad-token", "default"),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.message, "Invalid token");
+        return true;
+      },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].input, "/api/app/token");
+    assert.equal(calls[0].init.method, "POST");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -159,6 +159,73 @@ test("POST /api/app/token probes live client-info, stores the token, and auto-pr
   });
 });
 
+test('POST /api/app/token succeeds when client-info returns webHookUrl:"" (empty webhook is a real Monobank response, not an error)', async () => {
+  // Regression: Monobank returns "webHookUrl": "" for tokens whose owner has
+  // never registered a webhook. The local validator used to treat that as
+  // "monobank:/personal/client-info.webHookUrl must be a non-empty string"
+  // and reject the token save, leaving the user stuck at "Token update failed".
+  const clientInfoNoWebhook = {
+    ...okClientInfo(),
+    webHookUrl: "",
+    permissions: "",
+  };
+
+  const handler = createMonobankMockHttpHandler({
+    clientInfo: clientInfoNoWebhook,
+    currencyRates: [],
+    statementByAccount: {},
+  });
+
+  await withMockMonobankServer(handler, async (mockBaseUrl) => {
+    await withTempLedger(async ({ tempRoot }) => {
+      const monobankTokenStore = createSessionMonobankTokenStore();
+      const server = createLocalApiServer({
+        profile: "demo",
+        source: "fixture",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55703,
+        monobankTokenStore,
+        monobankBaseUrl: mockBaseUrl,
+        validateMonobankTokenOnSave: true,
+        monobankTokenProbeAdapter: createMonobankHttpAdapter({
+          token: "live-good-token-no-webhook",
+          baseUrl: mockBaseUrl,
+          maxRetries: 0,
+          timeoutMs: 5000,
+        }),
+      });
+
+      try {
+        const saveResponse = await server.inject({
+          method: "POST",
+          url: "/api/app/token",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profile: "demo",
+            token: "live-good-token-no-webhook",
+          }),
+        });
+
+        assert.equal(
+          saveResponse.statusCode,
+          200,
+          `expected 200, got ${saveResponse.statusCode} ${saveResponse.body}`,
+        );
+        const body = saveResponse.json();
+        assert.equal(body.hasToken, true);
+        assert.equal(body.clientInfo.clientId, "client-abc-123");
+        assert.equal(
+          await monobankTokenStore.getToken("demo"),
+          "live-good-token-no-webhook",
+        );
+      } finally {
+        await server.close();
+      }
+    });
+  });
+});
+
 test("POST /api/app/token rejects an invalid token, surfaces upstream error, and does NOT store it", async () => {
   const handler = createMonobankMockHttpHandler({
     clientInfo: okClientInfo(),
@@ -511,7 +578,7 @@ test("POST /api/app/token masks sensitive fields in the masked clientInfo summar
   });
 });
 
-test("DELETE /api/app/token auto-demotes source monobank→fixture so a tokenless workspace never references a missing token", async () => {
+test("DELETE /api/app/token keeps monobank source so tokenless workspaces show sign-in instead of fixture data", async () => {
   const handler = createMonobankMockHttpHandler({
     clientInfo: okClientInfo(),
     currencyRates: [],
@@ -558,7 +625,7 @@ test("DELETE /api/app/token auto-demotes source monobank→fixture so a tokenles
           method: "GET",
           url: "/api/app/config",
         });
-        assert.equal(afterConfig.json().source, "fixture");
+        assert.equal(afterConfig.json().source, "monobank");
         assert.equal(afterConfig.json().token.hasToken, false);
       } finally {
         await server.close();
@@ -632,7 +699,7 @@ test("POST /api/app/token on a failed probe does NOT change the source", async (
   }
 });
 
-test("explicit POST /api/app/source is respected; later token save keeps the explicit source", async () => {
+test("POST /api/app/source rejects fixture mode outside explicit development configuration", async () => {
   const handler = createMonobankMockHttpHandler({
     clientInfo: okClientInfo(),
     currencyRates: [],
@@ -679,23 +746,20 @@ test("explicit POST /api/app/source is respected; later token save keeps the exp
         assert.equal(afterConfig.json().source, "monobank");
         assert.equal(afterConfig.json().token.hasToken, true);
 
-        // An explicit source switch to fixture demotes without
-        // touching the saved token — the user might want to keep
-        // the token for later while browsing fixture data.
         const switchResponse = await server.inject({
           method: "POST",
           url: "/api/app/source",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ source: "fixture" }),
         });
-        assert.equal(switchResponse.statusCode, 200);
-        assert.equal(switchResponse.json().source, "fixture");
+        assert.equal(switchResponse.statusCode, 400);
+        assert.equal(switchResponse.json().error, "config_invalid");
 
         const stillTokenConfig = await server.inject({
           method: "GET",
           url: "/api/app/config",
         });
-        assert.equal(stillTokenConfig.json().source, "fixture");
+        assert.equal(stillTokenConfig.json().source, "monobank");
         // Token is still saved — only an explicit DELETE should
         // remove it.
         assert.equal(stillTokenConfig.json().token.hasToken, true);

@@ -131,7 +131,6 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -185,8 +184,7 @@ import {
   recheckMonobankConnection,
   saveMonobankToken,
   restoreLedgerTransactionCategories,
-  runFixtureSync,
-  setMonobankSource,
+  runLedgerSync,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
   updateLedgerTransactionsBulk,
@@ -2050,7 +2048,8 @@ function RecentSyncRunsCard({
             <AlertCircleIcon />
             <AlertTitle>No sync runs recorded</AlertTitle>
             <AlertDescription>
-              Run fixture sync from the top bar to create the first local run.
+              Save a Monobank token, then run sync from the top bar to create
+              the first local run.
             </AlertDescription>
           </Alert>
         ) : (
@@ -2085,7 +2084,8 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
         <AlertCircleIcon />
         <AlertTitle>No sync runs recorded</AlertTitle>
         <AlertDescription>
-          Run fixture sync from the top bar to create the first local run.
+          Save a Monobank token, then run sync from the top bar to create the
+          first local run.
         </AlertDescription>
       </Alert>
     );
@@ -2261,16 +2261,42 @@ function StaleDataBanner({
     return null;
   }
 
+  const needsMonobankToken =
+    snapshot?.config.source === "monobank" &&
+    snapshot.config.token.hasToken === false;
+  const title = needsMonobankToken
+    ? "Monobank token needed to refresh"
+    : warning.title;
+  const description = needsMonobankToken
+    ? `${warning.description} Save a Monobank token before running sync again.`
+    : warning.description;
+
   return (
     <Alert variant="warning">
       <AlertCircleIcon />
-      <AlertTitle>{warning.title}</AlertTitle>
-      <AlertDescription>{warning.description}</AlertDescription>
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
       <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
-        <Button size="sm" type="button" disabled={syncing} onClick={onRunSync}>
-          <RefreshCwIcon data-icon="inline-start" />
-          {syncing ? "Syncing" : "Run Sync"}
-        </Button>
+        {needsMonobankToken ? (
+          <Button
+            size="sm"
+            type="button"
+            onClick={() => onRouteChange("settings")}
+          >
+            <KeyRoundIcon data-icon="inline-start" />
+            Open token settings
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            type="button"
+            disabled={syncing}
+            onClick={onRunSync}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            {syncing ? "Syncing" : "Run Sync"}
+          </Button>
+        )}
         <Button
           size="sm"
           type="button"
@@ -2369,7 +2395,7 @@ function LocalOnlyIndicator({
 
 function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
   const profile = snapshot?.config.profile ?? "Loading";
-  const source = snapshot?.config.source ?? "fixture";
+  const source = snapshot?.config.source ?? "monobank";
   const databasePath = snapshot?.config.databasePath ?? "Waiting for local API";
   const accessHost =
     snapshot?.config.access?.host ?? snapshot?.config.webhook.host;
@@ -3353,7 +3379,7 @@ function syncSourceLabel(
 ) {
   switch (source) {
     case "fixture":
-      return "Fixture sync";
+      return "Development sync";
     case "monobank":
       return "Monobank personal API sync";
     default:
@@ -4043,7 +4069,7 @@ function TransactionTable({
   onSelectionChange,
   onSelectVisible,
   emptyTitle = "No local transactions yet",
-  emptyDescription = "Run fixture sync to populate the local SQLite ledger before reviewing transactions.",
+  emptyDescription = "Save a Monobank token, then run sync to populate the local SQLite ledger before reviewing transactions.",
 }: {
   entries: readonly LedgerEntry[];
   sortBy?: LedgerTransactionSortField;
@@ -6815,7 +6841,7 @@ function OverviewRoute({
       ? "Cached snapshot totals"
       : `${monthToDate.from} through ${monthToDate.to}`;
   const freshness = dataFreshnessLabel(snapshot.summary.lastSyncedAt);
-  const webhookHints = snapshot.fixtures?.webhookEvents ?? 0;
+  const webhookHints = snapshot.webhookEvents.length;
   const databaseHealth = snapshot.health.status;
   const showPrivacyOnboarding =
     snapshot.summary.accounts === 0 && snapshot.summary.ledgerEntries === 0;
@@ -6930,7 +6956,7 @@ function OverviewRoute({
           <CardHeader>
             <CardTitle>Recent transactions</CardTitle>
             <CardDescription>
-              Local ledger rows from the latest fixture-backed sync.
+              Local ledger rows from the latest Monobank sync.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -7870,7 +7896,7 @@ function TransactionsRoute({
             emptyDescription={
               hasFilters
                 ? "Adjust or reset the filters to review local ledger entries."
-                : "Run fixture sync to populate the local SQLite ledger before reviewing transactions."
+                : "Save a Monobank token, then run sync to populate the local SQLite ledger before reviewing transactions."
             }
           />
         )}
@@ -8152,7 +8178,6 @@ function FirstRunEmptyStatePrompt({
             {view.openSettingsLabel}
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">{view.fixtureHint}</p>
       </CardContent>
     </Card>
   );
@@ -8321,13 +8346,6 @@ function SettingsRoute({
   const [acknowledgedLocalToken, setAcknowledgedLocalToken] = useState(false);
   const [confirmedTokenRemoval, setConfirmedTokenRemoval] = useState(false);
   const [tokenRemovalDialogOpen, setTokenRemovalDialogOpen] = useState(false);
-  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
-  const [sourceActionError, setSourceActionError] = useState<
-    string | undefined
-  >();
-  const [sourceActionMessage, setSourceActionMessage] = useState<
-    string | undefined
-  >();
   const [isInitializingWorkspace, setIsInitializingWorkspace] = useState(false);
   const [workspaceActionError, setWorkspaceActionError] = useState<
     string | undefined
@@ -8358,8 +8376,6 @@ function SettingsRoute({
     tokenValidationMessage === undefined &&
     acknowledgedLocalToken;
   const maskedTokenPreview = maskTokenPreview(tokenInput);
-  const isMonobankSource = snapshot.config.source === "monobank";
-  const isConfigBusy = isSavingToken || isDeletingToken || isSwitchingSource;
   const activeProfile = snapshot.config.profile;
 
   async function saveToken(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -8428,28 +8444,6 @@ function SettingsRoute({
       );
     } finally {
       setIsDeletingToken(false);
-    }
-  }
-
-  async function setSource(
-    nextSource: LocalAppSnapshot["config"]["source"],
-  ): Promise<void> {
-    setIsSwitchingSource(true);
-    setSourceActionError(undefined);
-    setSourceActionMessage(undefined);
-
-    try {
-      await setMonobankSource(nextSource);
-      setSourceActionMessage(
-        `Source switched to ${nextSource} mode for the local API session.`,
-      );
-      await onRefresh();
-    } catch (error) {
-      setSourceActionError(
-        error instanceof Error ? error.message : "Unable to switch source.",
-      );
-    } finally {
-      setIsSwitchingSource(false);
     }
   }
 
@@ -8565,11 +8559,7 @@ function SettingsRoute({
               <Input
                 type={showToken ? "text" : "password"}
                 value={tokenInput}
-                placeholder={
-                  isMonobankSource
-                    ? "Paste token from Monobank"
-                    : "Enter token for Monobank when switching source"
-                }
+                placeholder="Paste token from Monobank"
                 autoComplete="new-password"
                 inputMode="text"
                 onChange={(event) => {
@@ -8782,40 +8772,22 @@ function SettingsRoute({
             </AlertDescription>
           </Alert>
 
-          <p className="text-muted-foreground">
-            Source:{" "}
-            <span className="font-medium">{snapshot.config.source}</span>
-          </p>
           <div className="grid gap-2">
             <span className="text-xs font-medium text-muted-foreground">
               Data source
             </span>
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
-              <Label htmlFor="monobank-source-switch" className="grid gap-1">
-                <span className="text-sm font-medium">Monobank API source</span>
-                <span className="text-xs font-normal text-muted-foreground">
-                  {isMonobankSource
-                    ? "Live Monobank API requests are enabled for local sync."
-                    : "Fixture mode keeps local review fully offline."}
-                </span>
-              </Label>
-              <Switch
-                id="monobank-source-switch"
-                checked={isMonobankSource}
-                disabled={isConfigBusy}
-                aria-label="Use Monobank API source"
-                onCheckedChange={(checked) =>
-                  void setSource(checked ? "monobank" : "fixture")
-                }
-              />
+            <div className="grid gap-1 rounded-md border border-border p-3">
+              <span className="text-sm font-medium">
+                {snapshot.config.source === "monobank"
+                  ? "Monobank API"
+                  : "Development source"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {snapshot.config.source === "monobank"
+                  ? "Local sync uses the saved Monobank token and writes normalized data to SQLite."
+                  : "Development source is active for offline local workflows."}
+              </span>
             </div>
-            <span className="text-xs text-muted-foreground">
-              {isConfigBusy
-                ? "Updating source..."
-                : isMonobankSource
-                  ? "Monobank API source selected"
-                  : "Fixture source selected"}
-            </span>
           </div>
           <p className="text-muted-foreground">
             Data directory:{" "}
@@ -8831,21 +8803,6 @@ function SettingsRoute({
           </p>
         </CardContent>
       </Card>
-      {sourceActionError && (
-        <Alert variant="destructive">
-          <AlertCircleIcon />
-          <AlertTitle>Source update failed</AlertTitle>
-          <AlertDescription>{sourceActionError}</AlertDescription>
-        </Alert>
-      )}
-
-      {sourceActionMessage && (
-        <Alert>
-          <CheckCircle2Icon />
-          <AlertTitle>Source updated</AlertTitle>
-          <AlertDescription>{sourceActionMessage}</AlertDescription>
-        </Alert>
-      )}
     </div>
   );
 }
@@ -9012,7 +8969,8 @@ function AccountsRoute({
           <AlertCircleIcon />
           <AlertTitle>No accounts synced</AlertTitle>
           <AlertDescription>
-            Run fixture sync from the top bar to populate local account cards.
+            Save a Monobank token, then run sync from the top bar to populate
+            local account cards.
           </AlertDescription>
         </Alert>
       ) : (
@@ -9166,21 +9124,24 @@ function textMatchesRuleConstraint(value: string, text: string): boolean {
 function createRuleTestSample(
   rule: CategoryRuleSummary,
   account: LedgerAccount | undefined,
+  entry: LedgerEntry | undefined,
 ): RuleTestSample {
   const transactionType = rule.editor.transactionType;
   const amount =
-    transactionType === "Income"
-      ? 250_000
+    entry?.amount ??
+    (transactionType === "Income"
+      ? 1
       : transactionType === "Transfer"
-        ? -150_000
-        : -42_000;
+        ? -1
+        : -1);
+  const entryMerchant = entry?.merchantName ?? entry?.description;
   const merchantName = firstRuleConstraintTerm(
     rule.editor.merchantContains,
-    transactionType === "Income" ? "salary payout" : "sample merchant",
+    entryMerchant ?? "No local merchant",
   );
   const description = firstRuleConstraintTerm(
     rule.editor.descriptionContains,
-    transactionType === "Income" ? "salary payout" : merchantName,
+    entry?.description ?? merchantName,
   );
 
   return {
@@ -9189,8 +9150,8 @@ function createRuleTestSample(
     mcc: rule.editor.mcc === "Not required" ? "N/A" : rule.editor.mcc,
     amount,
     transactionType,
-    account: account?.id ?? rule.editor.account,
-    currencyCode: account?.currencyCode ?? 980,
+    account: account?.id ?? entry?.accountId ?? rule.editor.account,
+    currencyCode: account?.currencyCode ?? entry?.currencyCode ?? 980,
   };
 }
 
@@ -9281,12 +9242,14 @@ function RuleTestCheckRow({ check }: { check: RuleTestCheck }) {
 
 function RuleTestPanel({
   account,
+  entry,
   rule,
 }: {
   account: LedgerAccount | undefined;
+  entry: LedgerEntry | undefined;
   rule: CategoryRuleSummary;
 }) {
-  const sample = createRuleTestSample(rule, account);
+  const sample = createRuleTestSample(rule, account, entry);
   const checks = createRuleTestChecks(rule, sample);
   const matchedChecks = checks.filter((check) => check.matched).length;
 
@@ -9981,6 +9944,18 @@ function RulesRoute({
     "Raw transaction archive",
   ];
   const ruleTestAccount = snapshot?.accounts[0];
+  const ruleTestEntry =
+    entries.find((entry) => {
+      if (selectedRule.editor.transactionType === "Income") {
+        return entry.amount > 0;
+      }
+
+      if (selectedRule.editor.transactionType === "Expense") {
+        return entry.amount < 0;
+      }
+
+      return true;
+    }) ?? entries[0];
   const merchantCleanupRules = snapshot?.merchantCleanupRules ?? [];
 
   useEffect(() => {
@@ -10278,7 +10253,11 @@ function RulesRoute({
                   </Button>
                 </CardFooter>
               </Card>
-              <RuleTestPanel account={ruleTestAccount} rule={selectedRule} />
+              <RuleTestPanel
+                account={ruleTestAccount}
+                entry={ruleTestEntry}
+                rule={selectedRule}
+              />
               <RuleHistoricalPreviewPanel
                 entries={entries}
                 onApplied={onRefresh}
@@ -10512,9 +10491,9 @@ function ExportShortcutsCard() {
           </a>
         </Button>
         <Button asChild variant="outline">
-          <a href="/api/exports/ledger?format=sqlite">
-            <DatabaseIcon data-icon="inline-start" />
-            SQLite
+          <a href="/api/exports/ledger?format=journal-csv">
+            <DownloadIcon data-icon="inline-start" />
+            Journal CSV
           </a>
         </Button>
       </CardContent>
@@ -10657,8 +10636,8 @@ function HelpRoute({
   const sourceLabel =
     snapshot?.config.source === "monobank"
       ? "Monobank API"
-      : snapshot?.config.source === "fixture"
-        ? "Fixture source"
+      : snapshot
+        ? "Development source"
         : "Checking source";
   const accessLabel = snapshot
     ? snapshot.config.access.localOnly
@@ -10694,7 +10673,7 @@ function HelpRoute({
             <HelpStatusRow
               label="Data source"
               value={sourceLabel}
-              detail="Fixture mode is offline; Monobank mode uses the saved token."
+              detail="Local sync uses the saved Monobank token when the API source is active."
             />
             <HelpStatusRow
               label="Database"
@@ -10768,7 +10747,7 @@ function HelpRoute({
         <CardContent className="grid gap-3 text-sm">
           <HelpStatusRow
             label="Backup recipe"
-            value="Download the SQLite snapshot before moving or replacing the local database file."
+            value="Back up the SQLite database file from the path shown above before moving or replacing local data."
             detail="Stop the local server before restoring a database file on disk."
           />
           <HelpStatusRow
@@ -10983,7 +10962,7 @@ export default function App() {
     setSyncing(true);
 
     try {
-      await runFixtureSync();
+      await runLedgerSync();
       await refresh();
       toast.success("Local sync complete", {
         description: "SQLite ledger data refreshed from the configured source.",

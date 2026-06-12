@@ -32,7 +32,7 @@ function readSource(): LedgerSource | undefined {
   const source = process.env.MONO_LEDGER_SYNC_SOURCE;
 
   if (source === undefined || source === "") {
-    return "fixture";
+    return undefined;
   }
 
   if (!isLedgerSource(source)) {

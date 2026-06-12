@@ -433,7 +433,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         ]),
         [
           ["Emergency fund top-up", 980, 250000, 1, 41667],
-          ["Fixture Grocery", 980, 84250, 1, 14042],
+          ["Fixture Grocery LLC", 980, 84250, 1, 14042],
           ["Cloud Subscription", 840, 52900, 1, 8817],
           ["Travel booking", 978, 20000, 1, 3333],
           ["Kyiv Metro", 980, 1500, 1, 250],
@@ -449,7 +449,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         ]),
         [
           ["2026-04", "Emergency fund top-up", 980, 250000, 1],
-          ["2026-04", "Fixture Grocery", 980, 84250, 1],
+          ["2026-04", "Fixture Grocery LLC", 980, 84250, 1],
           ["2026-04", "Cloud Subscription", 840, 52900, 1],
           ["2026-04", "Travel booking", 978, 20000, 1],
           ["2026-04", "Kyiv Metro", 980, 1500, 1],
@@ -503,7 +503,7 @@ test("query service defaults profile and wraps storage reads", async () => {
         ]),
         [
           ["Emergency fund top-up", 980, 250000, 1],
-          ["Fixture Grocery", 980, 84250, 1],
+          ["Fixture Grocery LLC", 980, 84250, 1],
           ["Cloud Subscription", 840, 52900, 1],
           ["Travel booking", 978, 20000, 1],
           ["Kyiv Metro", 980, 1500, 1],

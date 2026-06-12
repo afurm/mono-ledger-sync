@@ -705,18 +705,6 @@ export interface WebhookEvent {
   processedAt?: string;
 }
 
-export interface LocalApiFixtureSummary {
-  source: "fixture";
-  profile: string;
-  accounts: number;
-  jars: number;
-  currencyRates: number;
-  statementAccounts: number;
-  statementItems: number;
-  webhookEvents: number;
-  errorStates: number;
-}
-
 export type LocalActivityEventType = DomainLocalActivityEventType;
 
 export type LocalActivityEventSeverity = DomainLocalActivityEventSeverity;
@@ -756,7 +744,6 @@ export interface LocalAppSnapshot {
   syncRuns: readonly SyncRun[];
   webhookEvents: readonly WebhookEvent[];
   activityEvents: readonly LocalActivityEvent[];
-  fixtures?: LocalApiFixtureSummary;
   offline?: OfflineSnapshotMetadata;
 }
 
@@ -1157,7 +1144,7 @@ function syncRunSummary(run: SyncRun): string {
 function syncRunSourceLabel(source: SyncRun["source"]): string {
   switch (source) {
     case "fixture":
-      return "Fixture sync";
+      return "Development sync";
     case "monobank":
       return "Monobank sync";
     default:
@@ -1382,10 +1369,31 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`${path} returned ${response.status}`);
+    throw new Error(await responseErrorMessage(path, response));
   }
 
   return (await response.json()) as T;
+}
+
+async function responseErrorMessage(
+  path: string,
+  response: Response,
+): Promise<string> {
+  try {
+    const payload = (await response.json()) as unknown;
+
+    if (payload && typeof payload === "object") {
+      const message = (payload as { message?: unknown }).message;
+
+      if (typeof message === "string" && message.trim().length > 0) {
+        return message;
+      }
+    }
+  } catch {
+    // Fall through to the transport-level status message.
+  }
+
+  return `${path} returned ${response.status}`;
 }
 
 function transactionQueryString(filters: LedgerTransactionFilters): string {
@@ -1777,11 +1785,6 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
 
     const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
 
-    const fixtures =
-      config.source === "fixture"
-        ? await requestJson<LocalApiFixtureSummary>("/api/fixtures/summary")
-        : undefined;
-
     const snapshot = {
       health,
       config,
@@ -1810,7 +1813,6 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       syncRuns,
       webhookEvents,
       activityEvents,
-      ...(fixtures ? { fixtures } : {}),
     } satisfies LocalAppSnapshot;
 
     writeCachedLocalAppSnapshot(snapshot);
@@ -1836,7 +1838,7 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
   }
 }
 
-export async function runFixtureSync(): Promise<void> {
+export async function runLedgerSync(): Promise<void> {
   await requestJson("/api/sync/run", {
     method: "POST",
   });
@@ -1883,17 +1885,5 @@ export async function initializeWorkspace(): Promise<
 > {
   return requestJson<LocalAppSnapshot["config"]>("/api/app/workspace", {
     method: "POST",
-  });
-}
-
-export async function setMonobankSource(
-  source: LocalAppSnapshot["config"]["source"],
-): Promise<LocalAppSnapshot["config"]> {
-  return requestJson<LocalAppSnapshot["config"]>("/api/app/source", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ source }),
   });
 }

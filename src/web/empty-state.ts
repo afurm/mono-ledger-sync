@@ -3,12 +3,10 @@ import type { RouteId } from "./navigation.js";
 
 /**
  * Routes that must show the "Sign in with Monobank" empty-state prompt
- * when the user has no token saved. The Settings route hosts the
- * actual sign-in card and is exempt; the Help and Logs routes can
- * still render useful info even before sign-in, so they are also
- * exempt. Everything else (Overview, Transactions, Categories,
- * Budgets, Recurring, Reports, Accounts, Sync, Rules, Exports)
- * shows the prompt so the user is not fed fixture demo data.
+ * when the user has no token saved and no local Monobank data exists yet.
+ * The Settings route hosts the actual sign-in card and is exempt; the Help
+ * and Logs routes can still render useful info even before sign-in, so they
+ * are also exempt.
  */
 const SIGNIN_GATED_ROUTES = new Set<RouteId>([
   "overview",
@@ -23,11 +21,25 @@ const SIGNIN_GATED_ROUTES = new Set<RouteId>([
   "exports",
 ]);
 
+function hasLocalLedgerData(snapshot: LocalAppSnapshot): boolean {
+  return (
+    snapshot.summary.accounts > 0 ||
+    snapshot.summary.ledgerEntries > 0 ||
+    snapshot.accounts.length > 0 ||
+    snapshot.jars.length > 0 ||
+    snapshot.savingsGoalProgress.length > 0 ||
+    snapshot.transactions.total > 0 ||
+    snapshot.transactions.entries.length > 0
+  );
+}
+
 /**
  * Decide whether the active route should render the first-run
  * "Sign in with Monobank" empty state instead of the route's normal
- * data view. The fixture source is developer-only and bypasses the
- * prompt so contributors and screenshots keep working.
+ * data view. Explicit fixture mode remains a development-only source
+ * and bypasses the prompt so contributor workflows keep working. A profile
+ * with existing local ledger rows is no longer first-run, even if the current
+ * server session cannot see a saved token.
  *
  * Extracted as a pure function so it can be unit-tested without
  * React.
@@ -44,8 +56,7 @@ export function shouldShowFirstRunSignInPrompt(
     return false;
   }
 
-  // The fixture source is an explicit developer opt-in. When it is
-  // active we render fixture demo data exactly as before.
+  // Explicit fixture mode is a development-only opt-in.
   if (snapshot.config.source === "fixture") {
     return false;
   }
@@ -54,6 +65,10 @@ export function shouldShowFirstRunSignInPrompt(
   // progressed past the first-run greeting and the empty state is
   // no longer needed.
   if (snapshot.config.token.hasToken) {
+    return false;
+  }
+
+  if (hasLocalLedgerData(snapshot)) {
     return false;
   }
 
@@ -71,7 +86,6 @@ export interface FirstRunEmptyStateView {
   getTokenLabel: string;
   getTokenHref: string;
   openSettingsLabel: string;
-  fixtureHint: string;
   profile: string;
   routeId: RouteId;
 }
@@ -87,8 +101,6 @@ export function buildFirstRunEmptyStateView(
     getTokenLabel: "Get token on api.monobank.ua",
     getTokenHref: "https://api.monobank.ua/",
     openSettingsLabel: "Open Settings to paste token",
-    fixtureHint:
-      "Looking for the offline demo? Switch the source to 'fixture' in developer settings.",
     profile: token.profile,
     routeId,
   };

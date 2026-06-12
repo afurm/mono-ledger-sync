@@ -6,15 +6,18 @@ import { createMonobankHttpAdapter } from "../dist/monobank/index.js";
 const liveTestsEnabled =
   process.env.MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS === "1";
 const monobankToken = process.env.MONOBANK_TOKEN?.trim();
-const skipReason = !liveTestsEnabled
+const authenticatedSkipReason = !liveTestsEnabled
   ? "Set MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1 to run live Monobank adapter validation."
   : monobankToken
     ? false
     : "Set MONOBANK_TOKEN to run live Monobank adapter validation.";
+const publicSkipReason = !liveTestsEnabled
+  ? "Set MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1 to run live Monobank public endpoint validation."
+  : false;
 
 test(
   "live Monobank adapter validates MONOBANK_TOKEN against client info",
-  { skip: skipReason },
+  { skip: authenticatedSkipReason },
   async () => {
     assert.ok(monobankToken);
 
@@ -39,14 +42,9 @@ test(
 // when the network is unavailable so offline CI runners stay green.
 test(
   "live /bank/currency smoke test reaches https://api.monobank.ua without a token",
-  { skip: skipReason },
+  { skip: publicSkipReason },
   async (t) => {
-    // The /bank/currency endpoint requires a non-empty X-Token header
-    // by Monobank's documented behavior, even though it is a public
-    // endpoint. The adapter passes a placeholder token; the upstream
-    // response is independent of token validity for this endpoint.
     const adapter = createMonobankHttpAdapter({
-      token: "public-bank-currency-smoke",
       maxRetries: 0,
       timeoutMs: 10_000,
     });
