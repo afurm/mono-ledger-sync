@@ -29,7 +29,12 @@ jobs:
       - name: Static check for unsafe logging patterns
         run: node scripts/check-unsafe-logging.mjs
       - name: Seed roadmap labels
+        # The default GITHUB_TOKEN on `push` events is read-only for issues/labels,
+        # which makes this step 403. The labels were seeded once in #456 and the
+        # one-shot chore is complete; keep this as a best-effort re-sync rather
+        # than a hard CI gate. Rerun manually from the Actions tab if labels drift.
         if: ${{ github.event_name == 'push' }}
+        continue-on-error: true
         run: bash scripts/seed-labels.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
