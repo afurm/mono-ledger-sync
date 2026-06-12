@@ -159,7 +159,7 @@ test("POST /api/app/token probes live client-info, stores the token, and auto-pr
   });
 });
 
-test("POST /api/app/token succeeds when client-info returns webHookUrl:\"\" (empty webhook is a real Monobank response, not an error)", async () => {
+test('POST /api/app/token succeeds when client-info returns webHookUrl:"" (empty webhook is a real Monobank response, not an error)', async () => {
   // Regression: Monobank returns "webHookUrl": "" for tokens whose owner has
   // never registered a webhook. The local validator used to treat that as
   // "monobank:/personal/client-info.webHookUrl must be a non-empty string"
