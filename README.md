@@ -6,7 +6,7 @@
 
 Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.
 
-`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
+`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data stay on the user's machine, production sync talks to Monobank directly, and raw Monobank payloads are preserved separately from normalized ledger entries.
 
 ## Status
 
@@ -30,7 +30,7 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 - Sync personal Monobank transactions into a durable local ledger.
 - Keep banking tokens and personal finance data off hosted project servers.
-- Support fixture-first development for tests, demos, and offline workflows.
+- Support explicit fixture-backed development for tests and offline contributor workflows.
 - Provide a small TypeScript API, local server boundary, and browser UI that can grow into SQLite storage, exports, reports, and a Vite web app.
 
 ## Install
@@ -46,8 +46,9 @@ npm run dev
 ```
 
 `npm run dev` builds the package and starts the local Fastify server at
-`http://127.0.0.1:3000`. Fixture mode is the default, so the browser UI works
-without network access or banking credentials.
+`http://127.0.0.1:3000`. The browser UI starts in Monobank API mode. Save a
+personal API token in Settings, then run sync to fetch accounts, jars,
+statements, and currency rates into the local SQLite ledger.
 
 Export presets are available through the local API and browser UI for
 `accountant-handoff`, `monthly-personal-finance`, `bookkeeping`,
@@ -64,7 +65,7 @@ import { createSyncPlan } from "mono-ledger-sync";
 
 const plan = createSyncPlan({
   profile: "default",
-  source: "fixture",
+  source: "monobank",
 });
 ```
 
@@ -72,8 +73,8 @@ const plan = createSyncPlan({
 
 - No hosted token relay.
 - No default cloud storage.
-- No cloud account is required for fixture-backed setup, local browsing, local backups, or local exports.
-- Personal API tokens should be stored in OS secure storage once live sync is implemented.
+- No hosted account is required for local browsing, local backups, or local exports.
+- Personal API tokens are stored through OS secure storage when available, with a session-only fallback when no secure provider is available.
 - Use personal Monobank API tokens only for your own data on your own machine; do not use this project as a hosted or shared service for other people's banking data.
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
@@ -136,9 +137,9 @@ The app exposes the browser UI at `/`, health and configuration endpoints,
 ledger summary/account/transaction endpoints, sync run endpoints, webhook
 hint ingestion, and CSV/JSON/JSONL exports. The default product path is
 live — the local server talks to `https://api.monobank.ua` once a personal
-API token is saved in the in-app sign-in flow. Sanitized fixture endpoints
-remain available for development; pass `MONO_LEDGER_SYNC_SOURCE=fixture npm
-run dev` to skip live calls.
+API token is saved in the in-app sign-in flow. Sanitized fixtures remain
+available only through explicit development mode; pass
+`MONO_LEDGER_SYNC_SOURCE=fixture npm run dev` to skip live calls.
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
 The local API binds to `127.0.0.1` by default. Binding to a non-loopback host
 requires `MONO_LEDGER_SYNC_ACCESS_PASSCODE`; the server protects the browser UI

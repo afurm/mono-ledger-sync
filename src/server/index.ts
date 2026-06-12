@@ -36,15 +36,11 @@ import {
   createBundledFixtureMonobankAdapter,
   createMonobankHttpAdapter,
   createMonobankRateLimitState,
-  loadMonobankFixtureSet,
   MonobankApiError,
   MonobankValidationError,
   type MonobankAdapter,
-  type MonobankClientInfo,
-  type MonobankFixtureSet,
   type MonobankPersonalWebhookEvent,
   type MonobankRateLimitState,
-  type MonobankStatementItem,
 } from "../monobank/index.js";
 import { createSqliteLedgerDb, type SqliteLedgerDb } from "../sqlite/index.js";
 import {
@@ -358,36 +354,6 @@ export interface LocalApiAppConfig {
   sync: LocalApiAppConfigSyncState;
 }
 
-export interface LocalApiFixtureSummary {
-  source: "fixture";
-  profile: string;
-  accounts: number;
-  jars: number;
-  currencyRates: number;
-  statementAccounts: number;
-  statementItems: number;
-  webhookEvents: number;
-  errorStates: number;
-}
-
-export interface LocalApiFixtureClientInfo {
-  source: "fixture";
-  profile: string;
-  clientInfo: MonobankClientInfo;
-}
-
-export interface LocalApiFixtureStatementsAccount {
-  accountId: string;
-  items: readonly MonobankStatementItem[];
-}
-
-export interface LocalApiFixtureStatements {
-  source: "fixture";
-  profile: string;
-  totalItems: number;
-  accounts: readonly LocalApiFixtureStatementsAccount[];
-}
-
 interface LocalAppServices {
   profile: string;
   source: LedgerSource;
@@ -523,72 +489,6 @@ const supportBundleResponseSchema = {
     ...diagnosticsResponseSchema.properties,
     supportBundle: { const: true },
     tokenRedacted: { const: true },
-  },
-} as const;
-
-const fixtureSummaryResponseSchema = {
-  type: "object",
-  required: [
-    "source",
-    "profile",
-    "accounts",
-    "jars",
-    "currencyRates",
-    "statementAccounts",
-    "statementItems",
-    "webhookEvents",
-    "errorStates",
-  ],
-  properties: {
-    source: { const: "fixture" },
-    profile: { type: "string" },
-    accounts: { type: "number" },
-    jars: { type: "number" },
-    currencyRates: { type: "number" },
-    statementAccounts: { type: "number" },
-    statementItems: { type: "number" },
-    webhookEvents: { type: "number" },
-    errorStates: { type: "number" },
-  },
-} as const;
-
-const fixtureClientInfoResponseSchema = {
-  type: "object",
-  required: ["source", "profile", "clientInfo"],
-  properties: {
-    source: { const: "fixture" },
-    profile: { type: "string" },
-    clientInfo: {
-      type: "object",
-      additionalProperties: true,
-    },
-  },
-} as const;
-
-const fixtureStatementsResponseSchema = {
-  type: "object",
-  required: ["source", "profile", "totalItems", "accounts"],
-  properties: {
-    source: { const: "fixture" },
-    profile: { type: "string" },
-    totalItems: { type: "number" },
-    accounts: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["accountId", "items"],
-        properties: {
-          accountId: { type: "string" },
-          items: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: true,
-            },
-          },
-        },
-      },
-    },
   },
 } as const;
 
@@ -1320,58 +1220,6 @@ const localConfigurationImportResponseSchema = {
   },
 } as const;
 
-function summarizeFixtureSet(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): LocalApiFixtureSummary {
-  return {
-    source: "fixture",
-    profile,
-    accounts: fixtureSet.clientInfo.accounts.length,
-    jars: fixtureSet.clientInfo.jars?.length ?? 0,
-    currencyRates: fixtureSet.currencyRates.length,
-    statementAccounts: Object.keys(fixtureSet.statements).length,
-    statementItems: Object.values(fixtureSet.statements).reduce(
-      (count, statementItems) => count + statementItems.length,
-      0,
-    ),
-    webhookEvents: Object.keys(fixtureSet.webhookEvents ?? {}).length,
-    errorStates: Object.keys(fixtureSet.errors ?? {}).length,
-  };
-}
-
-function fixtureClientInfoResponse(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): LocalApiFixtureClientInfo {
-  return {
-    source: "fixture",
-    profile,
-    clientInfo: fixtureSet.clientInfo,
-  };
-}
-
-function fixtureStatementsResponse(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): LocalApiFixtureStatements {
-  const accounts = Object.entries(fixtureSet.statements).map(
-    ([accountId, items]) => ({
-      accountId,
-      items,
-    }),
-  );
-
-  return {
-    source: "fixture",
-    profile,
-    totalItems: accounts.reduce((count, account) => {
-      return count + account.items.length;
-    }, 0),
-    accounts,
-  };
-}
-
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -1433,7 +1281,7 @@ function resolveConfiguredSource(
 }
 
 function resolveSource(options: LocalApiServerOptions): LedgerSource {
-  return resolveConfiguredSource(options) ?? "fixture";
+  return resolveConfiguredSource(options) ?? "monobank";
 }
 
 function resolveDataDir(options: LocalApiServerOptions): string {
@@ -1793,38 +1641,8 @@ function readMonthlyCategoryBudgetInput(
   };
 }
 
-function renderLocalFixtureOverview(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): string {
-  const summary = summarizeFixtureSet(fixtureSet, profile);
-  const recentStatementItems = Object.entries(fixtureSet.statements)
-    .flatMap(([accountId, items]) => {
-      return items.map((item) => ({ accountId, item }));
-    })
-    .sort((left, right) => right.item.time - left.item.time)
-    .slice(0, 8);
-  const accountRows = fixtureSet.clientInfo.accounts
-    .map((account) => {
-      return `<tr>
-        <td>${escapeHtml(account.id)}</td>
-        <td>${escapeHtml(account.type)}</td>
-        <td>${escapeHtml(formatMinorAmount(account.balance, account.currencyCode))}</td>
-        <td>${escapeHtml(account.maskedPan?.join(", ") ?? "none")}</td>
-      </tr>`;
-    })
-    .join("");
-  const statementRows = recentStatementItems
-    .map(({ accountId, item }) => {
-      return `<tr>
-        <td>${escapeHtml(new Date(item.time * 1000).toISOString().slice(0, 10))}</td>
-        <td>${escapeHtml(item.description)}</td>
-        <td>${escapeHtml(accountId)}</td>
-        <td class="amount">${escapeHtml(formatMinorAmount(item.amount, item.currencyCode))}</td>
-        <td>${item.hold ? "hold" : "posted"}</td>
-      </tr>`;
-    })
-    .join("");
+function renderLocalApiBootstrap(profile: string): string {
+  const escapedProfile = escapeHtml(profile);
 
   return `<!doctype html>
 <html lang="en">
@@ -1842,105 +1660,40 @@ function renderLocalFixtureOverview(
         --primary: #05962f;
         --primary-dark: #047827;
         --surface: #f7f9fb;
-        --accent: #eef8f1;
-        --danger: #ef4444;
-        --warning: #f59e0b;
       }
       * { box-sizing: border-box; }
-      html {
-        width: 100%;
-      }
       body {
         margin: 0;
+        min-height: 100vh;
         background: var(--background);
         color: var(--foreground);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 14px;
         line-height: 1.5;
-        overflow-x: hidden;
-        width: 100%;
-      }
-      button, input, select {
-        font: inherit;
-      }
-      .shell {
-        display: grid;
-        grid-template-columns: 236px minmax(0, 1fr);
-        min-height: 100vh;
-        max-width: 100vw;
-      }
-      aside {
-        border-right: 1px solid var(--border);
-        background: var(--surface);
-        min-width: 0;
-        padding: 22px 14px;
       }
       main {
-        min-width: 0;
-        max-width: 100vw;
-        padding: 24px;
-      }
-      .brand {
-        font-weight: 750;
-        font-size: 18px;
-        letter-spacing: 0;
-        margin: 0 0 22px;
-      }
-      nav {
         display: grid;
-        gap: 4px;
-      }
-      nav a {
-        border-radius: 6px;
-        color: var(--muted);
-        padding: 8px 10px;
-        text-decoration: none;
-      }
-      nav a.active {
-        background: var(--accent);
-        color: var(--primary-dark);
-        font-weight: 650;
-      }
-      .sidebar-footer {
-        border-top: 1px solid var(--border);
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 24px;
-        padding: 14px 10px 0;
-        overflow-wrap: anywhere;
-      }
-      .sidebar-footer strong {
-        color: var(--foreground);
-        display: block;
-        font-size: 12px;
-        margin-bottom: 4px;
-      }
-      .topbar {
-        align-items: center;
-        border-bottom: 1px solid var(--border);
-        display: flex;
         gap: 16px;
-        justify-content: space-between;
-        margin: -24px -24px 24px;
-        padding: 18px 24px;
+        margin: 0 auto;
+        max-width: 720px;
+        min-height: 100vh;
+        padding: 32px 20px;
+        place-content: center;
       }
-      h1, h2, p {
-        margin: 0;
-      }
+      h1, p { margin: 0; }
       h1 {
-        font-size: 24px;
-        line-height: 1.15;
+        font-size: 28px;
         letter-spacing: 0;
+        line-height: 1.1;
       }
-      h2 {
-        font-size: 16px;
-        line-height: 1.25;
-        letter-spacing: 0;
-        margin-bottom: 10px;
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        display: grid;
+        gap: 12px;
+        padding: 18px;
       }
-      .muted {
-        color: var(--muted);
-      }
+      .muted { color: var(--muted); }
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -1948,14 +1701,12 @@ function renderLocalFixtureOverview(
       }
       .button {
         align-items: center;
-        background: var(--primary);
         border: 1px solid var(--primary);
         border-radius: 6px;
         color: #fff;
-        cursor: pointer;
+        background: var(--primary);
         display: inline-flex;
         font-weight: 650;
-        gap: 8px;
         justify-content: center;
         min-height: 34px;
         padding: 7px 12px;
@@ -1966,389 +1717,26 @@ function renderLocalFixtureOverview(
         border-color: var(--border);
         color: var(--foreground);
       }
-      .button:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
-      }
-      .metrics {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 1px;
-        border: 1px solid var(--border);
-        background: var(--border);
-        margin-bottom: 24px;
-      }
-      .metric {
-        background: #fff;
-        padding: 14px;
-      }
-      .metric strong {
-        display: block;
-        font-size: 22px;
-        line-height: 1.2;
-      }
-      .grid {
-        display: grid;
-        gap: 24px;
-        grid-template-columns: minmax(0, 1fr);
-      }
-      section {
-        min-width: 0;
-      }
-      .panel {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        max-width: 100%;
-        min-width: 0;
-        overflow: hidden;
-      }
-      .panel-header {
-        align-items: center;
+      code {
         background: var(--surface);
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        gap: 12px;
-        justify-content: space-between;
-        padding: 10px 12px;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      th, td {
-        border-bottom: 1px solid var(--border);
-        padding: 9px 12px;
-        text-align: left;
-        vertical-align: top;
-      }
-      th {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 650;
-      }
-      tr:last-child td {
-        border-bottom: 0;
-      }
-      .amount {
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-      .negative {
-        color: var(--danger);
-      }
-      .positive {
-        color: var(--primary-dark);
-      }
-      .status {
-        border-radius: 999px;
-        display: inline-flex;
-        font-size: 12px;
-        font-weight: 650;
-        line-height: 1;
-        padding: 5px 8px;
-      }
-      .status.local {
-        background: var(--accent);
-        color: var(--primary-dark);
-      }
-      .status.hold {
-        background: #fff7ed;
-        color: #9a3412;
-      }
-      .filters {
-        display: grid;
-        gap: 8px;
-        grid-template-columns: minmax(180px, 1fr) 160px;
-      }
-      input, select {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        min-height: 34px;
-        padding: 7px 9px;
-      }
-      .links {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-      .links a {
-        color: var(--primary-dark);
-      }
-      @media (max-width: 840px) {
-        .shell {
-          grid-template-columns: minmax(0, 1fr);
-        }
-        aside {
-          border-bottom: 1px solid var(--border);
-          border-right: 0;
-          max-width: 100vw;
-          overflow: hidden;
-          width: 100%;
-        }
-        nav {
-          display: flex;
-          overflow-x: auto;
-          max-width: 100%;
-          width: 100%;
-        }
-        nav a {
-          flex: 0 0 auto;
-          white-space: nowrap;
-        }
-        main {
-          max-width: 100vw;
-          padding: 18px;
-          width: 100%;
-        }
-        .topbar {
-          align-items: flex-start;
-          flex-direction: column;
-          margin: -18px -18px 18px;
-          padding: 16px 18px;
-        }
-        .metrics {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .panel {
-          max-width: 100%;
-          overflow-x: auto;
-        }
-        .panel-header {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-        .panel-header > .muted {
-          overflow-wrap: anywhere;
-        }
-        table {
-          min-width: 680px;
-        }
-        .filters {
-          grid-template-columns: 1fr;
-          width: 100%;
-        }
+        border-radius: 4px;
+        padding: 2px 5px;
       }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <aside>
-        <p class="brand">mono-ledger-sync</p>
-        <nav aria-label="Primary">
-          <a class="active" href="#overview">Overview</a>
-          <a href="#transactions">Transactions</a>
-          <a href="#rules">Rules & Mappings</a>
-          <a href="#sync">Sync & Webhooks</a>
-          <a href="#accounts">Accounts</a>
-          <a href="#exports">Exports</a>
-          <a href="#logs">Logs</a>
-          <a href="#settings">Settings</a>
-          <a href="#help">Help</a>
-        </nav>
-        <div class="sidebar-footer">
-          <strong>Local database</strong>
-          <span id="database-path">loading</span>
+    <main>
+      <div class="panel">
+        <p class="muted">Profile ${escapedProfile}</p>
+        <h1>Local Monobank ledger API is running</h1>
+        <p class="muted">The production web bundle was not found in this build output. Start the Vite web client or run the production build to load the full app. Data routes are served from the local API and sync uses the saved Monobank token.</p>
+        <div class="actions">
+          <a class="button" href="https://api.monobank.ua/" target="_blank" rel="noopener noreferrer">Get Monobank token</a>
+          <a class="button secondary" href="/api/app/config">Open app config JSON</a>
+          <a class="button secondary" href="/api/health">Open health JSON</a>
         </div>
-      </aside>
-      <main>
-        <div class="topbar">
-          <div>
-            <h1>Local ledger</h1>
-            <p class="muted" id="profile-label">Profile ${escapeHtml(summary.profile)} · fixture source · local only</p>
-          </div>
-          <div class="actions">
-            <button class="button" id="sync-button" type="button">Sync fixture</button>
-            <a class="button secondary" href="/api/exports/ledger?format=csv">Export CSV</a>
-            <span class="status local" id="sync-status">ready</span>
-          </div>
-        </div>
-
-        <section class="metrics" aria-label="Ledger summary">
-          <div class="metric"><strong id="metric-accounts">${summary.accounts}</strong><span>accounts</span></div>
-          <div class="metric"><strong id="metric-entries">${summary.statementItems}</strong><span>transactions</span></div>
-          <div class="metric"><strong id="metric-income">0.00</strong><span>income</span></div>
-          <div class="metric"><strong id="metric-expenses">0.00</strong><span>expenses</span></div>
-        </section>
-
-        <div class="grid">
-          <section id="transactions">
-            <div class="panel">
-              <div class="panel-header">
-                <h2>Transactions</h2>
-                <div class="filters">
-                  <input id="search" type="search" placeholder="Search transactions">
-                  <select id="account-filter">
-                    <option value="">All accounts</option>
-                  </select>
-                </div>
-              </div>
-              <table>
-                <thead>
-                  <tr><th>Date</th><th>Description</th><th>Category</th><th>Account</th><th>Amount</th><th>Status</th></tr>
-                </thead>
-                <tbody id="ledger-rows">
-                  ${statementRows}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section id="accounts">
-            <div class="panel">
-              <div class="panel-header">
-                <h2>Accounts</h2>
-                <span class="muted">fixture-account-uah-main</span>
-              </div>
-              <table>
-                <thead><tr><th>Account</th><th>Type</th><th>Balance</th><th>Masked PAN</th></tr></thead>
-                <tbody id="account-rows">${accountRows}</tbody>
-              </table>
-            </div>
-          </section>
-
-          <section id="exports">
-            <div class="panel">
-              <div class="panel-header">
-                <h2>Exports</h2>
-                <div class="links">
-                  <a href="/api/exports/ledger?format=csv">CSV</a>
-                  <a href="/api/exports/ledger?format=json">JSON</a>
-                  <a href="/api/exports/ledger?format=jsonl">JSONL</a>
-                  <a href="/api/fixtures/client-info">/api/fixtures/client-info</a>
-                  <a href="/api/fixtures/statements">/api/fixtures/statements</a>
-                  <a href="/api/fixtures/summary">/api/fixtures/summary</a>
-                  <a href="/api/health">/api/health</a>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
-      </main>
-    </div>
-    <script>
-      const escapeHtml = (value) => {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#39;");
-      };
-      const currencyLabel = (code) => {
-        if (code === 980) return "UAH";
-        if (code === 978) return "EUR";
-        if (code === 840) return "USD";
-        return String(code);
-      };
-      const formatAmount = (amount, currencyCode) => {
-        return (amount / 100).toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        }) + " " + currencyLabel(currencyCode);
-      };
-      const state = {
-        accounts: [],
-        accountId: "",
-        search: "",
-        bootstrapped: false
-      };
-
-      async function api(path, options) {
-        const response = await fetch(path, options);
-        if (!response.ok) throw new Error(await response.text());
-        return response.json();
-      }
-
-      function renderSummary(summary) {
-        document.querySelector("#metric-accounts").textContent = summary.accounts;
-        document.querySelector("#metric-entries").textContent = summary.ledgerEntries;
-        document.querySelector("#metric-income").textContent =
-          (summary.income / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
-        document.querySelector("#metric-expenses").textContent =
-          (summary.expenses / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
-      }
-
-      function renderConfig(config) {
-        document.querySelector("#database-path").textContent = config.databasePath;
-        document.querySelector("#profile-label").textContent =
-          "Profile " + config.profile + " · " + config.source + " source · local only";
-      }
-
-      function renderAccounts(accounts) {
-        state.accounts = accounts;
-        document.querySelector("#account-filter").innerHTML =
-          '<option value="">All accounts</option>' +
-          accounts.map((account) => {
-            return '<option value="' + escapeHtml(account.id) + '">' + escapeHtml(account.id) + '</option>';
-          }).join("");
-        document.querySelector("#account-rows").innerHTML = accounts.map((account) => {
-          return '<tr><td>' + escapeHtml(account.id) + '</td><td>' + escapeHtml(account.type) + '</td><td>' +
-            escapeHtml(formatAmount(account.balance, account.currencyCode)) + '</td><td>' +
-            escapeHtml((account.maskedPan || ["none"]).join(", ")) + '</td></tr>';
-        }).join("");
-      }
-
-      function renderTransactions(page) {
-        document.querySelector("#ledger-rows").innerHTML = page.entries.map((entry) => {
-          const amountClass = entry.amount < 0 ? "negative" : "positive";
-          const status = entry.hold ? '<span class="status hold">hold</span>' : "posted";
-          return '<tr><td>' + new Date(entry.time * 1000).toISOString().slice(0, 10) +
-            '</td><td>' + escapeHtml(entry.description) + '</td><td>' +
-            escapeHtml(entry.categoryName || "Uncategorized") + '</td><td>' + escapeHtml(entry.accountId) +
-            '</td><td class="amount ' + amountClass + '">' +
-            escapeHtml(formatAmount(entry.amount, entry.currencyCode)) + '</td><td>' + status + '</td></tr>';
-        }).join("");
-      }
-
-      async function refresh() {
-        const params = new URLSearchParams();
-        if (state.accountId) params.set("accountId", state.accountId);
-        if (state.search) params.set("search", state.search);
-        let summary = await api("/api/ledger/summary");
-        if (!state.bootstrapped && summary.ledgerEntries === 0) {
-          state.bootstrapped = true;
-          document.querySelector("#sync-status").textContent = "syncing";
-          await api("/api/sync/run", { method: "POST" });
-          summary = await api("/api/ledger/summary");
-          document.querySelector("#sync-status").textContent = "synced";
-        }
-        const [config, accounts, transactions] = await Promise.all([
-          api("/api/app/config"),
-          api("/api/ledger/accounts"),
-          api("/api/ledger/transactions?" + params.toString())
-        ]);
-        renderConfig(config);
-        renderSummary(summary);
-        renderAccounts(accounts);
-        renderTransactions(transactions);
-      }
-
-      document.querySelector("#sync-button").addEventListener("click", async () => {
-        const button = document.querySelector("#sync-button");
-        const status = document.querySelector("#sync-status");
-        button.disabled = true;
-        status.textContent = "syncing";
-        try {
-          await api("/api/sync/run", { method: "POST" });
-          await refresh();
-          status.textContent = "synced";
-        } catch {
-          status.textContent = "failed";
-        } finally {
-          button.disabled = false;
-        }
-      });
-      document.querySelector("#account-filter").addEventListener("change", (event) => {
-        state.accountId = event.target.value;
-        refresh();
-      });
-      document.querySelector("#search").addEventListener("input", (event) => {
-        state.search = event.target.value;
-        window.clearTimeout(window.__ledgerSearchTimer);
-        window.__ledgerSearchTimer = window.setTimeout(refresh, 180);
-      });
-      refresh().catch(() => undefined);
-    </script>
+      </div>
+    </main>
   </body>
 </html>`;
 }
@@ -2640,11 +2028,9 @@ function registerLocalApiRoutes(
       return builtWebIndex;
     }
 
-    const fixtureSet = await loadMonobankFixtureSet();
-
     reply.type("text/html; charset=utf-8");
 
-    return renderLocalFixtureOverview(fixtureSet, resolveProfile(options));
+    return renderLocalApiBootstrap(resolveProfile(options));
   });
 
   app.get("/assets/*", async (request, reply): Promise<Buffer | void> => {
@@ -2724,14 +2110,30 @@ function registerLocalApiRoutes(
         body: appSourceBodySchema,
         response: {
           200: appConfigResponseSchema,
+          400: localApiErrorResponseSchema,
         },
       },
     },
-    async (request, _reply): Promise<LocalApiAppConfig> => {
+    async (
+      request,
+      reply,
+    ): Promise<LocalApiAppConfig | { error: string; message: string }> => {
       const body = request.body as { source: LedgerSource };
 
-      await setSource(body.source);
-      return readAppConfig();
+      try {
+        await setSource(body.source);
+        return readAppConfig();
+      } catch (error) {
+        if (error instanceof DomainError) {
+          reply.code(400);
+          return {
+            error: error.code,
+            message: error.message,
+          };
+        }
+
+        throw error;
+      }
     },
   );
 
@@ -4315,54 +3717,6 @@ function registerLocalApiRoutes(
       }
     },
   );
-
-  app.get(
-    `${localApiRoutePrefix}/fixtures/summary`,
-    {
-      schema: {
-        response: {
-          200: fixtureSummaryResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiFixtureSummary> => {
-      const fixtureSet = await loadMonobankFixtureSet();
-
-      return summarizeFixtureSet(fixtureSet, resolveProfile(options));
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/fixtures/client-info`,
-    {
-      schema: {
-        response: {
-          200: fixtureClientInfoResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiFixtureClientInfo> => {
-      const fixtureSet = await loadMonobankFixtureSet();
-
-      return fixtureClientInfoResponse(fixtureSet, resolveProfile(options));
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/fixtures/statements`,
-    {
-      schema: {
-        response: {
-          200: fixtureStatementsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiFixtureStatements> => {
-      const fixtureSet = await loadMonobankFixtureSet();
-
-      return fixtureStatementsResponse(fixtureSet, resolveProfile(options));
-    },
-  );
 }
 
 export function createLocalApiServer(
@@ -4389,7 +3743,7 @@ export function createLocalApiServer(
   const monobankRateLimitState: MonobankRateLimitState =
     createMonobankRateLimitState();
   const configuredSource = resolveConfiguredSource(options);
-  let source = configuredSource ?? "fixture";
+  let source = configuredSource ?? "monobank";
   let storedSettingsLoadPromise: Promise<void> | undefined;
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
@@ -4467,7 +3821,7 @@ export function createLocalApiServer(
         await db.migrate();
         const settings = await db.getLocalAppSettings(profile);
 
-        if (settings?.source !== undefined) {
+        if (settings?.source === "monobank") {
           source = settings.source;
         }
 
@@ -4551,7 +3905,7 @@ export function createLocalApiServer(
     monobankToken = undefined;
     monobankTokenSource = undefined;
     await rebuildServices();
-    await autoDemoteSourceOnTokenDelete();
+    await keepMonobankSourceOnTokenDelete();
     const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
 
     return {
@@ -4810,14 +4164,24 @@ export function createLocalApiServer(
     await updateSource("monobank");
   }
 
-  async function autoDemoteSourceOnTokenDelete(): Promise<void> {
-    if (source === "fixture") {
+  async function keepMonobankSourceOnTokenDelete(): Promise<void> {
+    if (configuredSource !== undefined || source === "monobank") {
       return;
     }
-    await updateSource("fixture");
+
+    await updateSource("monobank");
   }
 
   async function updateSource(nextSource: LedgerSource): Promise<void> {
+    if (nextSource === "fixture" && configuredSource !== "fixture") {
+      throw new DomainError(
+        "Fixture source is only available when explicitly configured for development.",
+        "config_invalid",
+        "config",
+        { source: nextSource },
+      );
+    }
+
     if (source === nextSource) {
       await persistSource(nextSource);
       return;

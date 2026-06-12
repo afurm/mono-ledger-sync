@@ -418,7 +418,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       assert.equal(transactions.total, 7);
       assert.equal(merchants.length > 0, true);
       assert.ok(
-        merchants.some((merchant) => merchant.name === "Fixture Grocery"),
+        merchants.some((merchant) => merchant.name === "Fixture Grocery LLC"),
       );
       assert.equal(
         merchants.every(
@@ -430,7 +430,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         transactions.entries.some((entry) => {
           return (
             entry.rawStatementItemId === "fixture-stmt-2026-04-02-silpo" &&
-            entry.merchantName === "Fixture Grocery" &&
+            entry.merchantName === "Fixture Grocery LLC" &&
             entry.categoryId === "groceries"
           );
         }),
@@ -666,6 +666,102 @@ test("splits statement windows without exceeding the Monobank personal cap", () 
   );
 });
 
+test("continues Monobank statement paging when a window returns 500 items", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const accountId = "live-account-uah-main";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+    const statementItems = Array.from({ length: 501 }, (_value, index) => {
+      const time = index + 1;
+
+      return {
+        id: `live-statement-${String(time).padStart(3, "0")}`,
+        time,
+        description: `Live statement ${time}`,
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -100 - time,
+        operationAmount: -100 - time,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 100_000 - time,
+        hold: false,
+      };
+    });
+    const statementWindows = [];
+    const adapter = {
+      async getClientInfo() {
+        return {
+          clientId: "live-client",
+          name: "Live Client",
+          accounts: [
+            {
+              id: accountId,
+              sendId: "live-send",
+              balance: 100_000,
+              creditLimit: 0,
+              type: "black",
+              currencyCode: 980,
+              maskedPan: ["537541******1234"],
+              iban: "UA733220010000026201234567890",
+            },
+          ],
+          jars: [],
+        };
+      },
+      async getCurrency() {
+        return [];
+      },
+      async getStatement(window) {
+        statementWindows.push(window);
+
+        return statementItems
+          .filter((item) => item.time >= window.from && item.time <= window.to)
+          .sort((left, right) => right.time - left.time)
+          .slice(0, 500);
+      },
+      async setWebhook() {
+        return undefined;
+      },
+    };
+
+    try {
+      const result = await syncLedgerWithMonobank({
+        profile,
+        source: "monobank",
+        adapter,
+        db,
+        accountIds: [accountId],
+        from: 1,
+        to: 501,
+      });
+      const transactions = await db.listLedgerEntries({
+        profile,
+        limit: 1_000,
+      });
+      const cursor = await db.getSyncCursor(profile, accountId);
+
+      assert.equal(result.run.status, "success");
+      assert.equal(result.run.itemsSeen, 501);
+      assert.equal(result.stats.apiCalls, 4);
+      assert.equal(result.stats.windowsFetched, 2);
+      assert.equal(result.accounts[0].windowsFetched, 2);
+      assert.equal(transactions.total, 501);
+      assert.equal(cursor?.statementTo, 501);
+      assert.deepEqual(statementWindows, [
+        { accountId, from: 1, to: 501 },
+        { accountId, from: 1, to: 1 },
+      ]);
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("categorizes statement items by stable built-in rules", () => {
   const baseItem = {
     id: "fixture-category-test",
@@ -857,13 +953,9 @@ test("seeds merchant cleanup rules for built-in merchant normalization", async (
 
       assert.deepEqual(
         rules.map((rule) => rule.id),
-        [
-          "fixture-grocery-cleanup",
-          "kyiv-metro-cleanup",
-          "cloud-subscription-cleanup",
-        ],
+        ["kyiv-metro-cleanup", "cloud-subscription-cleanup"],
       );
-      assert.equal(rules[0].canonicalName, "Fixture Grocery");
+      assert.equal(rules[0].canonicalName, "Kyiv Metro");
       assert.equal(
         rules.every((rule) => rule.isSystem),
         true,
@@ -2861,13 +2953,14 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0017_ledger_entry_manual_overrides",
         "0018_ledger_entry_category_rule_metadata",
         "0019_recurring_detection_decisions",
+        "0020_remove_fixture_merchant_cleanup_seed",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
       assert.equal(afterMigration.syncRuns, 0);
       assert.equal((await db.listCategories(profile)).length, 17);
       assert.equal((await db.listCategoryRules(profile)).length, 17);
-      assert.equal((await db.listMerchantCleanupRules(profile)).length, 3);
+      assert.equal((await db.listMerchantCleanupRules(profile)).length, 2);
       assert.deepEqual(await db.listBudgets(profile), []);
       assert.deepEqual(await db.listBudgetPeriods(profile), []);
       assert.deepEqual(await db.listRecurringItems(profile), []);
@@ -2907,7 +3000,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(afterMigration.syncRuns, 1);
         assert.equal(
           afterMigration.migrations.at(-1),
-          "0019_recurring_detection_decisions",
+          "0020_remove_fixture_merchant_cleanup_seed",
         );
 
         const summary = await db.getLedgerSummary(profile);
@@ -2943,7 +3036,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
           groceryPage.entries[0].merchantName,
           "Fixture Grocery LLC",
         );
-        assert.equal((await db.listMerchantCleanupRules(profile)).length, 3);
+        assert.equal((await db.listMerchantCleanupRules(profile)).length, 2);
 
         const annotated = await db.updateLedgerEntryAnnotation(
           profile,
@@ -3307,7 +3400,7 @@ test("does not backfill legacy annotation-only edits as category overrides", asy
         assert.equal(secondRun.skipped, 0);
         assert.equal(page.entries[0]?.categoryId, "utilities");
         assert.equal(page.entries[0]?.categoryName, "Utilities");
-        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery");
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery LLC");
       } finally {
         await db.close();
       }
@@ -3370,7 +3463,7 @@ test("does not backfill merchant cleanup as a legacy manual override", async () 
         assert.equal(secondRun.inserted, 0);
         assert.equal(secondRun.updated, 1);
         assert.equal(secondRun.skipped, 0);
-        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery");
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery LLC");
       } finally {
         await db.close();
       }
@@ -3556,8 +3649,8 @@ test("does not backfill cleaned merchants as legacy manual overrides", async () 
             is_system, is_enabled, created_at, updated_at
           ) VALUES (
             'legacy',
-            'fixture-grocery-cleanup',
-            'Fixture Grocery cleanup',
+            'legacy-grocery-cleanup',
+            'Legacy Grocery cleanup',
             100,
             'fixture grocery',
             'Fixture Grocery',
@@ -3593,7 +3686,7 @@ test("does not backfill cleaned merchants as legacy manual overrides", async () 
                 WHERE profile = ? AND id = ?
               `,
             )
-            .run(profile, "fixture-grocery-cleanup");
+            .run(profile, "legacy-grocery-cleanup");
         } finally {
           postMigrationDatabase.close();
         }
@@ -3789,7 +3882,7 @@ test("seeds category rules for every legacy profile before override backfill", a
         assert.equal(secondRun.skipped, 0);
         assert.equal(page.entries[0]?.categoryId, "utilities");
         assert.equal(page.entries[0]?.categoryName, "Utilities");
-        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery");
+        assert.equal(page.entries[0]?.merchantName, "Fixture Grocery LLC");
       } finally {
         await secondProfileDb.close();
       }
@@ -4435,7 +4528,6 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           .json()
           .map((rule) => [rule.id, rule.canonicalName]),
         [
-          ["fixture-grocery-cleanup", "Fixture Grocery"],
           ["kyiv-metro-cleanup", "Kyiv Metro"],
           ["cloud-subscription-cleanup", "Cloud Subscription"],
         ],
@@ -4594,7 +4686,7 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           ]),
         [
           ["Emergency fund top-up", 980, 250000, 41667],
-          ["Fixture Grocery", 980, 84250, 14042],
+          ["Fixture Grocery LLC", 980, 84250, 14042],
           ["Cloud Subscription", 840, 52900, 8817],
           ["Travel booking", 978, 20000, 3333],
           ["Kyiv Metro", 980, 1500, 250],
@@ -5341,16 +5433,19 @@ test("local API token endpoint saves and deletes monobank token state", async ()
       assert.equal(deletedTokenConfig.json().token.profile, "demo");
       assert.equal(deletedTokenConfig.json().token.hasToken, false);
       // After a successful token save, the workspace auto-promotes
-      // to monobank; after a token delete, it auto-demotes to fixture
-      // so a tokenless workspace never references a missing token.
-      assert.equal(deletedTokenConfig.json().source, "fixture");
+      // to monobank; after a token delete, it stays there so the UI
+      // shows sign-in instead of silently switching to fixture data.
+      assert.equal(deletedTokenConfig.json().source, "monobank");
       assert.equal(
         await monobankTokenStore.getToken("other"),
         "other-profile-token",
       );
-      // With source=fixture, /api/sync/run now runs against fixture
-      // data instead of returning auth_required.
-      assert.equal(deletedTokenSync.statusCode, 200);
+      assert.equal(deletedTokenSync.statusCode, 400);
+      assert.deepEqual(deletedTokenSync.json(), {
+        error: "auth_required",
+        message:
+          "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
+      });
     } finally {
       await server.close();
     }

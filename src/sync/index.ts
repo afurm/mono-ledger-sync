@@ -72,6 +72,7 @@ export interface ProcessSignalAbortController {
 
 const fixtureSyncTo = 4_102_444_800;
 const liveSyncWindowSeconds = 31 * 24 * 60 * 60;
+const monobankStatementPageLimit = 500;
 
 const fallbackStatementItemIdPrefix = "missing-id:";
 
@@ -540,6 +541,60 @@ function mergeStatementWindows(
   return mergedWindows;
 }
 
+async function fetchStatementWindowPages(
+  options: SyncLedgerOptions,
+  statsState: { current: SyncLedgerStats },
+  accountId: string,
+  window: StatementSyncWindow,
+): Promise<{
+  statementItems: readonly MonobankStatementItem[];
+  windowsFetched: number;
+}> {
+  const statementItems: MonobankStatementItem[] = [];
+  let windowsFetched = 0;
+  let pageTo = window.to;
+
+  while (pageTo >= window.from) {
+    const pageItems = await callAdapter(statsState, () =>
+      options.adapter.getStatement({
+        accountId,
+        from: window.from,
+        to: pageTo,
+      }),
+    );
+    const updatedStats = {
+      ...statsState.current,
+      windowsFetched: statsState.current.windowsFetched + 1,
+      itemsSeen: statsState.current.itemsSeen + pageItems.length,
+    };
+
+    statsState.current = updatedStats;
+    windowsFetched += 1;
+    statementItems.push(...pageItems);
+
+    if (
+      options.source !== "monobank" ||
+      pageItems.length < monobankStatementPageLimit
+    ) {
+      break;
+    }
+
+    const oldestItemTime = Math.min(...pageItems.map((item) => item.time));
+    const nextPageTo = oldestItemTime - 1;
+
+    if (nextPageTo < window.from || nextPageTo >= pageTo) {
+      break;
+    }
+
+    pageTo = nextPageTo;
+  }
+
+  return {
+    statementItems,
+    windowsFetched,
+  };
+}
+
 export async function syncLedgerWithMonobank(
   options: SyncLedgerOptions,
 ): Promise<SyncLedgerResult> {
@@ -632,25 +687,19 @@ export async function syncLedgerWithMonobank(
       const accountTo = windows.at(-1)?.to ?? to;
       let accountStats = emptyWriteStats();
       let accountItemsSeen = 0;
+      let accountWindowsFetched = 0;
       let accountCompletedWindowCount = 0;
 
       for (const window of windows) {
         throwIfAborted(options.signal);
 
-        const statementItems = await callAdapter(statsState, () =>
-          options.adapter.getStatement({
-            accountId: account.id,
-            from: window.from,
-            to: window.to,
-          }),
+        const statementWindow = await fetchStatementWindowPages(
+          options,
+          statsState,
+          account.id,
+          window,
         );
-        const updatedStats = {
-          ...statsState.current,
-          windowsFetched: statsState.current.windowsFetched + 1,
-          itemsSeen: statsState.current.itemsSeen + statementItems.length,
-        };
-
-        statsState.current = updatedStats;
+        const statementItems = statementWindow.statementItems;
         const entries = statementItems.map((item) => {
           return createLedgerEntryFromStatementItem(account.id, item);
         });
@@ -681,6 +730,7 @@ export async function syncLedgerWithMonobank(
         }
 
         accountItemsSeen += statementItems.length;
+        accountWindowsFetched += statementWindow.windowsFetched;
         accountStats = addWriteStats(accountStats, writeStats);
         statsState.current = statsFromWriteStats(
           statsState.current,
@@ -704,7 +754,7 @@ export async function syncLedgerWithMonobank(
         accountId: account.id,
         from: accountFrom,
         to: accountTo,
-        windowsFetched: windows.length,
+        windowsFetched: accountWindowsFetched,
         itemsSeen: accountItemsSeen,
         writeStats: accountStats,
       });

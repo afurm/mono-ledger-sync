@@ -374,7 +374,6 @@ test("keeps standard visual controls on shadcn primitives", async () => {
     /from "@\/components\/ui\/textarea"/,
     /from "@\/components\/ui\/tooltip"/,
     /from "@\/components\/ui\/sonner"/,
-    /from "@\/components\/ui\/switch"/,
   ];
 
   assert.match(appSource, /from "@\/components\/ui\/checkbox"/);
@@ -385,7 +384,6 @@ test("keeps standard visual controls on shadcn primitives", async () => {
     assert.match(appSource, importPattern);
   }
   assert.match(appSource, /<Pagination\b/);
-  assert.match(appSource, /<Switch\b/);
   assert.match(appSource, /<Dialog\b/);
   assert.match(appSource, /<Toaster\b/);
   assert.match(appSource, /toast\.success/);
@@ -458,7 +456,7 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
     /profile-scoped SQLite\s+ledger/,
     /Webhook events are sync hints/,
     /Local files generated from the current SQLite ledger/,
-    /CSV, JSON, JSONL, and SQLite snapshots/,
+    /CSV, JSON, JSONL, and journal CSV files/,
     /Ledger transactions/,
     /Rules & Mappings/,
     /Sync & Webhooks/,
@@ -481,6 +479,8 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
   assert.doesNotMatch(productUiSource, genericDashboardCopyPattern);
   assert.doesNotMatch(productUiSource, placeholderRouteCopyPattern);
   assert.doesNotMatch(productUiSource, /function PlaceholderRoute/);
+  assert.doesNotMatch(productUiSource, /\/api\/exports\/ledger\?format=sqlite/);
+  assert.match(productUiSource, /\/api\/exports\/ledger\?format=journal-csv/);
 });
 
 test("keeps finance workspace typography compact", async () => {
@@ -1154,88 +1154,25 @@ test("serves the built local web UI when available", async () => {
   }
 });
 
-test("serves bundled fixture summary through the local API", async () => {
+test("does not expose bundled fixture payloads through the local API", async () => {
   const server = createLocalApiServer({
     profile: "demo",
     source: "fixture",
   });
 
   try {
-    const response = await server.inject({
-      method: "GET",
-      url: "/api/fixtures/summary",
-    });
+    for (const url of [
+      "/api/fixtures/summary",
+      "/api/fixtures/client-info",
+      "/api/fixtures/statements",
+    ]) {
+      const response = await server.inject({
+        method: "GET",
+        url,
+      });
 
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json(), {
-      source: "fixture",
-      profile: "demo",
-      accounts: 2,
-      jars: 1,
-      currencyRates: 3,
-      statementAccounts: 3,
-      statementItems: 7,
-      webhookEvents: 1,
-      errorStates: 3,
-    });
-  } finally {
-    await server.close();
-  }
-});
-
-test("serves bundled fixture client info through the local API", async () => {
-  const server = createLocalApiServer({
-    profile: "demo",
-    source: "fixture",
-  });
-
-  try {
-    const response = await server.inject({
-      method: "GET",
-      url: "/api/fixtures/client-info",
-    });
-    const body = response.json();
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(body.source, "fixture");
-    assert.equal(body.profile, "demo");
-    assert.equal(body.clientInfo.clientId, "fixture-client-primary");
-    assert.equal(body.clientInfo.accounts.length, 2);
-  } finally {
-    await server.close();
-  }
-});
-
-test("serves bundled fixture statements through the local API", async () => {
-  const server = createLocalApiServer({
-    profile: "demo",
-    source: "fixture",
-  });
-
-  try {
-    const response = await server.inject({
-      method: "GET",
-      url: "/api/fixtures/statements",
-    });
-    const body = response.json();
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(body.source, "fixture");
-    assert.equal(body.profile, "demo");
-    assert.equal(body.totalItems, 7);
-    assert.deepEqual(
-      body.accounts.map((account) => account.accountId),
-      [
-        "fixture-account-uah-main",
-        "fixture-account-eur-savings",
-        "fixture-account-empty",
-      ],
-    );
-    assert.ok(
-      body.accounts[0].items.some(
-        (item) => item.id === "fixture-stmt-2026-04-01-salary",
-      ),
-    );
+      assert.equal(response.statusCode, 404);
+    }
   } finally {
     await server.close();
   }
