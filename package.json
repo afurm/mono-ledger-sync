@@ -1,6 +1,6 @@
 {
   "name": "mono-ledger-sync",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.",
   "type": "module",
   "main": "./dist/index.js",

@@ -22,7 +22,7 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 ## Release notes
 
-- [v0.2.0 — Live by default](docs/release/0.2.0.md): first-run greeting leads with Sign in with Monobank, every route shows a sign-in prompt instead of fixture demo data when no token is saved, Re-check Monobank connection button, live bank/currency smoke test, and a new privacy test suite.
+- [v0.2.0](docs/release/0.2.0.md): live-by-default sign-in flow, bulk edit, category version history, diagnostics endpoint, reporting suite, recurring-payments engine, and a long-running privacy/security hardening pass. 228 commits since `v0.1.1`; test count 226 pass / 0 fail / 4 skipped.
 - v0.1.1: GitHub Release `v0.1.1`; `mono-ledger-sync@0.1.1` on npm. Public discoverability metadata follow-up.
 - v0.1.0: Initial public package release. `mono-ledger-sync@0.1.0`; initial commit `5b1b6c2`.
 
