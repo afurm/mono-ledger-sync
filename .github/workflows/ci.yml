@@ -35,6 +35,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run typecheck
       - run: npm test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Live Monobank adapter smoke
         if: ${{ github.event_name == 'push' }}
         run: npm run test:live-monobank

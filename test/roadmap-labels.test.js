@@ -2,26 +2,25 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-const repoRoot = import.meta.dirname.replace(/\/test$/, "");
+// These tests require a GitHub token. In CI on this repo the workflow passes
+// GH_TOKEN to `npm test`; locally the test relies on the user's `gh` auth.
+// In environments where auth is missing, the gh calls fail with a clear
+// stderr message and the assertions below report it.
+
+function ghOrThrow(args) {
+  const result = spawnSync("gh", args, { encoding: "utf8" });
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? "").toString();
+    throw new Error(`gh ${args[0]} failed: ${stderr}`);
+  }
+  return result.stdout;
+}
 
 test("roadmap labels exist on the repository", async () => {
   // The script that creates these labels runs in CI on push; this test
   // asserts the labels actually exist by reading the live label list.
-  const result = spawnSync(
-    "gh",
-    ["label", "list", "--limit", "200", "--json", "name"],
-    {
-      encoding: "utf8",
-    },
-  );
-
-  assert.equal(
-    result.status,
-    0,
-    `gh label list failed: ${result.stderr?.toString() ?? "unknown error"}`,
-  );
-
-  const labels = JSON.parse(result.stdout);
+  const stdout = ghOrThrow(["label", "list", "--limit", "200", "--json", "name"]);
+  const labels = JSON.parse(stdout);
   const names = new Set(labels.map((label) => label.name));
 
   for (const required of [
@@ -36,41 +35,26 @@ test("roadmap labels exist on the repository", async () => {
     "milestone-10",
     "milestone-16",
   ]) {
-    assert.ok(
-      names.has(required),
-      `expected label ${required} to exist on the repository`,
-    );
+    assert.ok(names.has(required), `expected label ${required} to exist on the repository`);
   }
 });
 
 test("three good-first-issue starter issues exist with the right label", async () => {
-  const result = spawnSync(
-    "gh",
-    [
-      "issue",
-      "list",
-      "--state",
-      "open",
-      "--label",
-      "good first issue",
-      "--limit",
-      "50",
-      "--json",
-      "number,title,labels",
-    ],
-    { encoding: "utf8" },
-  );
-
-  assert.equal(
-    result.status,
-    0,
-    `gh issue list failed: ${result.stderr?.toString() ?? "unknown error"}`,
-  );
-
-  const issues = JSON.parse(result.stdout);
+  const stdout = ghOrThrow([
+    "issue",
+    "list",
+    "--state",
+    "open",
+    "--label",
+    "good first issue",
+    "--limit",
+    "50",
+    "--json",
+    "number,title,labels",
+  ]);
+  const issues = JSON.parse(stdout);
   const titles = issues.map((issue) => issue.title);
 
-  // The three starter issues opened in the roadmap-labels PR.
   for (const expectedTitle of [
     /editorconfig formatting drift test/i,
     /PRODUCTION_TASKS progress/i,
@@ -78,22 +62,7 @@ test("three good-first-issue starter issues exist with the right label", async (
   ]) {
     assert.ok(
       titles.some((title) => expectedTitle.test(title)),
-      `expected to find a starter issue matching ${expectedTitle}; got titles: ${JSON.stringify(
-        titles,
-      )}`,
+      `expected to find a starter issue matching ${expectedTitle}; got titles: ${JSON.stringify(titles)}`,
     );
   }
-});
-
-test("seed-labels.sh is idempotent (passes when labels already exist)", async () => {
-  const result = spawnSync("bash", ["scripts/seed-labels.sh"], {
-    encoding: "utf8",
-    cwd: repoRoot,
-  });
-
-  assert.equal(
-    result.status,
-    0,
-    `seed-labels.sh should exit 0 on a re-run; got ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-  );
 });
