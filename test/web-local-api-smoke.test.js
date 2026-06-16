@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createSessionMonobankTokenStore } from "../dist/security/index.js";
 import { createLocalApiServer } from "../dist/server/index.js";
+import { createSqliteLedgerDb } from "../dist/sqlite/index.js";
 
 async function withTempLedger(callback) {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-smoke-"));
@@ -60,6 +61,35 @@ test("first-run config: GET /api/app/config on a fresh workspace reports fixture
   });
 });
 
+test("built favicon assets are served without favicon.ico 404", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createSmokeServer(tempRoot);
+    try {
+      const ico = await server.inject({
+        method: "GET",
+        url: "/favicon.ico",
+      });
+      assert.notEqual(ico.statusCode, 404);
+      assert.equal(ico.statusCode, 200);
+      assert.match(String(ico.headers["content-type"] ?? ""), /image\/x-icon/i);
+      assert.ok(ico.body.length > 0);
+
+      const svg = await server.inject({
+        method: "GET",
+        url: "/favicon.svg",
+      });
+      assert.equal(svg.statusCode, 200);
+      assert.match(
+        String(svg.headers["content-type"] ?? ""),
+        /image\/svg\+xml/i,
+      );
+      assert.ok(svg.body.includes("<svg"));
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("fixture source selection: POST /api/app/source fixture makes ledger accounts available", async () => {
   await withTempLedger(async ({ tempRoot }) => {
     const server = createSmokeServer(tempRoot);
@@ -100,6 +130,73 @@ test("fixture source selection: POST /api/app/source fixture makes ledger accoun
           accounts,
         )}`,
       );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("stale running sync runs are interrupted before listing and a new fixture sync can start", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const profile = "smoke";
+    const dbPath = path.join(tempRoot, `${profile}.sqlite`);
+    const db = createSqliteLedgerDb({
+      filePath: dbPath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.recordSyncRun({
+        id: "stale-running-sync",
+        profile,
+        source: "fixture",
+        status: "running",
+        startedAt: "2026-05-17T08:00:00.000Z",
+        apiCalls: 0,
+        windowsFetched: 0,
+        itemsSeen: 0,
+        itemsInserted: 0,
+        itemsUpdated: 0,
+        itemsSkipped: 0,
+        rateLimited: 0,
+      });
+    } finally {
+      await db.close();
+    }
+
+    const server = createLocalApiServer({
+      profile,
+      source: "fixture",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 56002,
+      monobankTokenStore: createSessionMonobankTokenStore(),
+      now: () => Date.parse("2026-05-17T09:00:00.000Z"),
+    });
+
+    try {
+      const runsResponse = await server.inject({
+        method: "GET",
+        url: "/api/sync/runs",
+      });
+      assert.equal(runsResponse.statusCode, 200);
+      const runs = runsResponse.json();
+      assert.equal(runs[0].id, "stale-running-sync");
+      assert.equal(runs[0].status, "interrupted");
+      assert.equal(runs[0].finishedAt, "2026-05-17T09:00:00.000Z");
+      assert.match(runs[0].errorMessage, /more than 30 minutes/);
+      assert.equal(
+        runs.some((run) => run.status === "queued" || run.status === "running"),
+        false,
+      );
+
+      const syncResponse = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+      assert.equal(syncResponse.statusCode, 200);
+      assert.equal(syncResponse.json().run.status, "success");
     } finally {
       await server.close();
     }

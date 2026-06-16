@@ -788,6 +788,10 @@ export async function syncLedgerWithMonobank(
       ...run,
       status: options.signal?.aborted ? "partial" : "failed",
       finishedAt: nowIso(),
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : "Sync failed before completion.",
       ...stats,
     };
 

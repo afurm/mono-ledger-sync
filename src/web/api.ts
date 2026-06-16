@@ -682,9 +682,16 @@ export interface SyncRun {
   id: string;
   profile: string;
   source: "fixture" | "monobank";
-  status: "queued" | "running" | "success" | "partial" | "failed";
+  status:
+    | "queued"
+    | "running"
+    | "success"
+    | "partial"
+    | "failed"
+    | "interrupted";
   startedAt: string;
   finishedAt?: string;
+  errorMessage?: string;
   apiCalls: number;
   windowsFetched: number;
   itemsSeen: number;
@@ -1111,7 +1118,7 @@ function syncRunSeverity(
     return "info";
   }
 
-  if (status === "partial") {
+  if (status === "partial" || status === "interrupted") {
     return "warning";
   }
 
@@ -1134,10 +1141,16 @@ function syncRunStatusLabel(status: SyncRun["status"]): string {
       return "Partial sync";
     case "failed":
       return "Failed sync";
+    case "interrupted":
+      return "Interrupted sync";
   }
 }
 
 function syncRunSummary(run: SyncRun): string {
+  if (run.errorMessage) {
+    return `${run.errorMessage} Seen ${run.itemsSeen}, inserted ${run.itemsInserted}, updated ${run.itemsUpdated}, skipped ${run.itemsSkipped} in ${formatSyncRunDuration(run)}`;
+  }
+
   return `Seen ${run.itemsSeen}, inserted ${run.itemsInserted}, updated ${run.itemsUpdated}, skipped ${run.itemsSkipped} in ${formatSyncRunDuration(run)}`;
 }
 
@@ -1239,16 +1252,19 @@ export function buildLocalActivityEvents(
       referenceId: run.id,
     });
 
-    if (run.status === "failed") {
+    if (run.status === "failed" || run.status === "interrupted") {
       events.push({
         id: `sync-run:${run.id}:error`,
-        type: "error",
-        title: "Sync run failed",
-        details: `${syncRunSourceLabel(
-          run.source,
-        )} run ${run.id} needs attention`,
+        type: run.status === "interrupted" ? "warning" : "error",
+        title:
+          run.status === "interrupted"
+            ? "Sync run interrupted"
+            : "Sync run failed",
+        details:
+          run.errorMessage ??
+          `${syncRunSourceLabel(run.source)} run ${run.id} needs attention`,
         timestamp: formatSyncRunTimestamp(run),
-        severity: "error",
+        severity: run.status === "interrupted" ? "warning" : "error",
         source: run.profile,
         referenceId: run.id,
       });

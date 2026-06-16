@@ -2954,6 +2954,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0018_ledger_entry_category_rule_metadata",
         "0019_recurring_detection_decisions",
         "0020_remove_fixture_merchant_cleanup_seed",
+        "0021_sync_run_error_message",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -3000,7 +3001,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         assert.equal(afterMigration.syncRuns, 1);
         assert.equal(
           afterMigration.migrations.at(-1),
-          "0020_remove_fixture_merchant_cleanup_seed",
+          "0021_sync_run_error_message",
         );
 
         const summary = await db.getLedgerSummary(profile);

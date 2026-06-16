@@ -212,6 +212,12 @@ export interface LedgerDb {
     update: LocalAppSettingsUpdate,
   ): Promise<LocalAppSettings>;
   recordSyncRun(run: SyncRun): Promise<void>;
+  interruptStaleSyncRuns(
+    profile: string,
+    staleBefore: string,
+    interruptedAt: string,
+    reason: string,
+  ): Promise<number>;
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategorySpending(
     profile?: string,
