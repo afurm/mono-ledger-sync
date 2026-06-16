@@ -111,6 +111,7 @@ export const syncRunStatuses = [
   "success",
   "partial",
   "failed",
+  "interrupted",
 ] as const;
 
 export type SyncRunStatus = (typeof syncRunStatuses)[number];
@@ -797,6 +798,7 @@ export interface SyncRun {
   status: SyncRunStatus;
   startedAt: string;
   finishedAt?: string;
+  errorMessage?: string;
   apiCalls: number;
   windowsFetched: number;
   itemsSeen: number;

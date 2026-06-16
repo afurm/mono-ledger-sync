@@ -249,6 +249,7 @@ function requestHasAccessPasscode(
 const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
 const localWebBuildDir = path.resolve(serverModuleDir, "../web");
 const localWebAssetsDir = path.join(localWebBuildDir, "assets");
+const localWebStaticAssetNames = new Set(["favicon.ico", "favicon.svg"]);
 
 export interface LocalApiServerOptions {
   host?: string;
@@ -1027,10 +1028,18 @@ const syncRunResponseSchema = {
     profile: { type: "string" },
     source: { enum: ["fixture", "monobank"] },
     status: {
-      enum: ["queued", "running", "success", "partial", "failed"],
+      enum: [
+        "queued",
+        "running",
+        "success",
+        "partial",
+        "failed",
+        "interrupted",
+      ],
     },
     startedAt: { type: "string" },
     finishedAt: { type: "string" },
+    errorMessage: { type: "string" },
     apiCalls: { type: "number" },
     windowsFetched: { type: "number" },
     itemsSeen: { type: "number" },
@@ -1139,6 +1148,7 @@ const webhookEventResponseSchema = {
 
 const defaultWebhookRateLimitMaxRequests = 30;
 const defaultWebhookRateLimitWindowMs = 60_000;
+const staleRunningSyncRunTimeoutMs = 30 * 60 * 1000;
 
 const webhookEventsResponseSchema = {
   type: "array",
@@ -1386,6 +1396,11 @@ async function createServices(
   });
 
   await db.migrate();
+  await interruptStaleRunningSyncRuns(
+    db,
+    profile,
+    options.now?.() ?? Date.now(),
+  );
 
   return {
     profile,
@@ -1397,6 +1412,30 @@ async function createServices(
     queryService: createLedgerQueryService({ db, defaultProfile: profile }),
     writeService: createLedgerWriteService({ db, defaultProfile: profile }),
   };
+}
+
+function staleRunningSyncRunReason(timeoutMs: number): string {
+  const timeoutMinutes = Math.round(timeoutMs / 60_000);
+
+  return `Marked interrupted because this sync run stayed running for more than ${timeoutMinutes} minutes. The local process likely stopped before it could finish.`;
+}
+
+async function interruptStaleRunningSyncRuns(
+  db: SqliteLedgerDb,
+  profile: string,
+  nowMs: number,
+): Promise<number> {
+  const interruptedAt = new Date(nowMs).toISOString();
+  const staleBefore = new Date(
+    nowMs - staleRunningSyncRunTimeoutMs,
+  ).toISOString();
+
+  return db.interruptStaleSyncRuns(
+    profile,
+    staleBefore,
+    interruptedAt,
+    staleRunningSyncRunReason(staleRunningSyncRunTimeoutMs),
+  );
 }
 
 function readNumberQuery(value: unknown): number | undefined {
@@ -1787,6 +1826,29 @@ async function readBuiltWebAsset(
   }
 }
 
+async function readBuiltWebStaticAsset(
+  assetPath: string,
+): Promise<{ body: Buffer; contentType: string } | undefined> {
+  if (!localWebStaticAssetNames.has(assetPath)) {
+    return undefined;
+  }
+
+  const resolvedPath = path.resolve(localWebBuildDir, assetPath);
+
+  if (!resolvedPath.startsWith(`${localWebBuildDir}${path.sep}`)) {
+    return undefined;
+  }
+
+  try {
+    return {
+      body: await readFile(resolvedPath),
+      contentType: contentTypeForAsset(resolvedPath),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function requestPathname(url: string): string {
   return new URL(url, "http://local").pathname;
 }
@@ -1978,6 +2040,7 @@ function registerLocalApiRoutes(
 
   async function readAppConfig(): Promise<LocalApiAppConfig> {
     const services = await getServices();
+    await interruptStaleRunningSyncRuns(services.db, services.profile, now());
     const monobankToken = getMonobankToken();
     const tokenStoreStatus = await getMonobankTokenStoreStatus(
       services.profile,
@@ -2047,7 +2110,28 @@ function registerLocalApiRoutes(
     return asset.body;
   });
 
-  app.get("/favicon.ico", async (_request, reply): Promise<void> => {
+  app.get("/favicon.svg", async (_request, reply): Promise<Buffer | void> => {
+    const asset = await readBuiltWebStaticAsset("favicon.svg");
+
+    if (!asset) {
+      reply.code(404).send();
+      return;
+    }
+
+    reply.type(asset.contentType);
+
+    return asset.body;
+  });
+
+  app.get("/favicon.ico", async (_request, reply): Promise<Buffer | void> => {
+    const asset = await readBuiltWebStaticAsset("favicon.ico");
+
+    if (asset) {
+      reply.type(asset.contentType);
+
+      return asset.body;
+    }
+
     reply.code(204).send();
   });
 
@@ -3426,6 +3510,7 @@ function registerLocalApiRoutes(
       reply,
     ): Promise<SyncLedgerResult | { error: string; message: string }> => {
       const services = await getServices();
+      await interruptStaleRunningSyncRuns(services.db, services.profile, now());
       const monobankToken = getMonobankToken();
 
       if (services.source === "monobank" && monobankToken === undefined) {
@@ -3465,6 +3550,7 @@ function registerLocalApiRoutes(
     },
     async (): Promise<readonly SyncRun[]> => {
       const services = await getServices();
+      await interruptStaleRunningSyncRuns(services.db, services.profile, now());
 
       return services.queryService.listSyncRuns(services.profile);
     },

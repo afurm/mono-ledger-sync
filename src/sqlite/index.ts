@@ -167,6 +167,12 @@ export interface SqliteLedgerDb extends LedgerDb {
     decidedAt?: string,
   ): Promise<RecurringDetectionDecision>;
   listTags(profile?: string): Promise<readonly Tag[]>;
+  interruptStaleSyncRuns(
+    profile: string,
+    staleBefore: string,
+    interruptedAt: string,
+    reason: string,
+  ): Promise<number>;
   listSyncRuns(profile?: string, limit?: number): Promise<readonly SyncRun[]>;
   listWebhookEvents(
     profile?: string,
@@ -268,6 +274,7 @@ interface SqliteSyncRunRow {
   status: SyncRun["status"];
   started_at: string;
   finished_at: string | null;
+  error_message: string | null;
   api_calls: number;
   windows_fetched: number;
   items_seen: number;
@@ -1257,6 +1264,13 @@ const migrations: readonly SqliteMigration[] = [
         AND is_system = 1;
     `,
   },
+  {
+    id: "0021_sync_run_error_message",
+    description: "Track user-facing sync run failure reasons",
+    sql: `
+      ALTER TABLE sync_runs ADD COLUMN error_message TEXT;
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -2036,6 +2050,10 @@ function mapSyncRunRow(row: SqliteSyncRunRow): SyncRun {
     run.finishedAt = row.finished_at;
   }
 
+  if (row.error_message !== null) {
+    run.errorMessage = row.error_message;
+  }
+
   return run;
 }
 
@@ -2382,15 +2400,18 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `
           INSERT INTO sync_runs (
             id, profile, source, status, started_at, finished_at,
+            error_message,
             api_calls, windows_fetched, items_seen, items_inserted, items_updated, items_skipped, rate_limited
           )
           VALUES (
             @id, @profile, @source, @status, @startedAt, @finishedAt,
+            @errorMessage,
             @apiCalls, @windowsFetched, @itemsSeen, @itemsInserted, @itemsUpdated, @itemsSkipped, @rateLimited
           )
           ON CONFLICT(id) DO UPDATE SET
             status = excluded.status,
             finished_at = excluded.finished_at,
+            error_message = excluded.error_message,
             api_calls = excluded.api_calls,
             windows_fetched = excluded.windows_fetched,
             items_seen = excluded.items_seen,
@@ -2407,6 +2428,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         status: run.status,
         startedAt: run.startedAt,
         finishedAt: run.finishedAt ?? null,
+        errorMessage: run.errorMessage ?? null,
         apiCalls: run.apiCalls,
         windowsFetched: run.windowsFetched,
         itemsSeen: run.itemsSeen,
@@ -2415,6 +2437,35 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         itemsSkipped: run.itemsSkipped,
         rateLimited: run.rateLimited,
       });
+  }
+
+  async interruptStaleSyncRuns(
+    profile: string,
+    staleBefore: string,
+    interruptedAt: string,
+    reason: string,
+  ): Promise<number> {
+    const result = this.#database
+      .prepare(
+        `
+          UPDATE sync_runs
+          SET
+            status = 'interrupted',
+            finished_at = @interruptedAt,
+            error_message = @reason
+          WHERE profile = @profile
+            AND status = 'running'
+            AND started_at <= @staleBefore
+        `,
+      )
+      .run({
+        profile,
+        staleBefore,
+        interruptedAt,
+        reason,
+      });
+
+    return result.changes;
   }
 
   async upsertAccounts(
@@ -3846,6 +3897,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         `
           SELECT
             id, profile, source, status, started_at, finished_at,
+            error_message,
             api_calls, windows_fetched, items_seen, items_inserted, items_updated, items_skipped, rate_limited
           FROM sync_runs
           WHERE profile = ?

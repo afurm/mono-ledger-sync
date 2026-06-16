@@ -1198,7 +1198,7 @@ function statusVariant(
     return "default";
   }
 
-  if (status === "failed") {
+  if (status === "failed" || status === "interrupted") {
     return "destructive";
   }
 
@@ -2069,6 +2069,11 @@ function RecentSyncRunsCard({
                 <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
               </div>
               <SyncRunStats run={run} />
+              {run.errorMessage ? (
+                <p className="text-xs text-muted-foreground">
+                  {run.errorMessage}
+                </p>
+              ) : null}
             </div>
           ))
         )}
@@ -2120,7 +2125,14 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
                 {formatDateTime(run.startedAt)}
               </TableCell>
               <TableCell className="whitespace-nowrap">
-                {formatSyncRunDuration(run)}
+                <div className="grid gap-1">
+                  <span>{formatSyncRunDuration(run)}</span>
+                  {run.errorMessage ? (
+                    <span className="max-w-64 text-xs text-muted-foreground">
+                      {run.errorMessage}
+                    </span>
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1.5">
@@ -8323,6 +8335,80 @@ function FirstRunSignInCard({
   );
 }
 
+function ExactDestructiveActionDialog({
+  children,
+  confirmationValue,
+  confirmLabel,
+  description,
+  isConfirming,
+  onConfirm,
+  onOpenChange,
+  open,
+  title,
+}: {
+  children: ReactNode;
+  confirmationValue: string;
+  confirmLabel: string;
+  description: ReactNode;
+  isConfirming: boolean;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  title: string;
+}) {
+  const [confirmationInput, setConfirmationInput] = useState("");
+  const confirmed = confirmationInput === confirmationValue;
+
+  function handleOpenChange(nextOpen: boolean): void {
+    if (!nextOpen) {
+      setConfirmationInput("");
+    }
+
+    onOpenChange(nextOpen);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2">
+          <Label htmlFor="destructive-confirmation">
+            Type{" "}
+            <span className="font-mono font-semibold">{confirmationValue}</span>{" "}
+            to confirm.
+          </Label>
+          <Input
+            id="destructive-confirmation"
+            value={confirmationInput}
+            autoComplete="off"
+            onChange={(event) => setConfirmationInput(event.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button type="button" variant="outline" disabled={isConfirming}>
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={!confirmed || isConfirming}
+            onClick={onConfirm}
+          >
+            <Trash2Icon data-icon="inline-start" />
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SettingsRoute({
   snapshot,
   loading,
@@ -8344,7 +8430,6 @@ function SettingsRoute({
   const [isDeletingToken, setIsDeletingToken] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [acknowledgedLocalToken, setAcknowledgedLocalToken] = useState(false);
-  const [confirmedTokenRemoval, setConfirmedTokenRemoval] = useState(false);
   const [tokenRemovalDialogOpen, setTokenRemovalDialogOpen] = useState(false);
   const [isInitializingWorkspace, setIsInitializingWorkspace] = useState(false);
   const [workspaceActionError, setWorkspaceActionError] = useState<
@@ -8404,7 +8489,6 @@ function SettingsRoute({
       setTokenInput("");
       setShowToken(false);
       setAcknowledgedLocalToken(false);
-      setConfirmedTokenRemoval(false);
       setTokenActionMessage(
         `Monobank token saved for the ${tokenStatus.profile} local profile.`,
       );
@@ -8419,11 +8503,6 @@ function SettingsRoute({
   }
 
   async function removeToken(): Promise<void> {
-    if (!confirmedTokenRemoval) {
-      setTokenActionError("Confirm token removal before deleting it.");
-      return;
-    }
-
     setIsDeletingToken(true);
     setTokenActionError(undefined);
     setTokenActionMessage(undefined);
@@ -8431,7 +8510,6 @@ function SettingsRoute({
     try {
       const tokenStatus = await clearMonobankToken();
       setAcknowledgedLocalToken(false);
-      setConfirmedTokenRemoval(false);
       setTokenRemovalDialogOpen(false);
       setTokenActionMessage(
         `Monobank token removed from the ${tokenStatus.profile} local profile.`,
@@ -8551,16 +8629,35 @@ function SettingsRoute({
             </div>
           </div>
 
-          <form className="grid gap-3" onSubmit={saveToken}>
+          <form
+            className="grid gap-3"
+            data-testid="settings-token-form"
+            onSubmit={saveToken}
+          >
+            <Label className="sr-only" htmlFor="monobank-token-profile">
+              Local profile username
+            </Label>
+            <Input
+              id="monobank-token-profile"
+              name="username"
+              type="text"
+              value={activeProfile}
+              autoComplete="username"
+              readOnly
+              tabIndex={-1}
+              className="sr-only"
+            />
             <Label className="grid gap-2">
               <span className="text-xs font-medium text-muted-foreground">
                 Monobank personal API token
               </span>
               <Input
+                id="monobank-token"
+                name="password"
                 type={showToken ? "text" : "password"}
                 value={tokenInput}
                 placeholder="Paste token from Monobank"
-                autoComplete="new-password"
+                autoComplete="current-password"
                 inputMode="text"
                 onChange={(event) => {
                   setTokenInput(event.target.value);
@@ -8653,25 +8750,6 @@ function SettingsRoute({
               </span>
             </Label>
 
-            {snapshot.config.token.hasToken && (
-              <Label className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-                <Checkbox
-                  className="mt-0.5 border-destructive/50 data-checked:border-destructive data-checked:bg-destructive data-checked:text-destructive-foreground"
-                  checked={confirmedTokenRemoval}
-                  disabled={isBusy}
-                  onCheckedChange={(checked) => {
-                    setConfirmedTokenRemoval(checked === true);
-                    setTokenActionError(undefined);
-                    setTokenActionMessage(undefined);
-                  }}
-                />
-                <span className="text-muted-foreground">
-                  Delete the saved Monobank token for the {activeProfile} local
-                  profile.
-                </span>
-              </Label>
-            )}
-
             <div className="flex flex-wrap gap-2">
               <Button
                 type="submit"
@@ -8679,55 +8757,38 @@ function SettingsRoute({
               >
                 {isSavingToken ? "Saving..." : "Save token"}
               </Button>
-              <Dialog
+              <ExactDestructiveActionDialog
                 open={tokenRemovalDialogOpen}
                 onOpenChange={setTokenRemovalDialogOpen}
+                confirmationValue={activeProfile}
+                confirmLabel={isDeletingToken ? "Removing..." : "Remove token"}
+                isConfirming={isDeletingToken}
+                onConfirm={() => void removeToken()}
+                title="Remove Monobank token?"
+                description={
+                  <>
+                    This deletes the saved token for the{" "}
+                    <span className="font-mono font-semibold">
+                      {activeProfile}
+                    </span>{" "}
+                    local profile using database{" "}
+                    <span className="break-all font-mono font-semibold">
+                      {snapshot.config.databasePath}
+                    </span>
+                    . Existing SQLite ledger data and exports remain on this
+                    device.
+                  </>
+                }
               >
-                <DialogTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={
-                      isBusy ||
-                      !snapshot.config.token.hasToken ||
-                      !confirmedTokenRemoval
-                    }
-                  >
-                    <Trash2Icon data-icon="inline-start" />
-                    {isDeletingToken ? "Removing..." : "Remove token"}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Remove Monobank token?</DialogTitle>
-                    <DialogDescription>
-                      This deletes the saved token for the {activeProfile} local
-                      profile. Existing SQLite ledger data and exports remain on
-                      this device.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <DialogFooter>
-                    <DialogClose asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={isDeletingToken}
-                      >
-                        Cancel
-                      </Button>
-                    </DialogClose>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      disabled={isDeletingToken}
-                      onClick={() => void removeToken()}
-                    >
-                      <Trash2Icon data-icon="inline-start" />
-                      {isDeletingToken ? "Removing..." : "Remove token"}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={isBusy || !snapshot.config.token.hasToken}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  {isDeletingToken ? "Removing..." : "Remove token"}
+                </Button>
+              </ExactDestructiveActionDialog>
             </div>
           </form>
 
@@ -11084,8 +11145,6 @@ export default function App() {
               onRefresh={refresh}
               snapshot={snapshot}
             />
-
-            {activeRoute === "exports" ? null : <ExportShortcutsCard />}
           </main>
         </SidebarInset>
       </SidebarProvider>
