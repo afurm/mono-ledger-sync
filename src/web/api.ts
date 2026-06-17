@@ -1,758 +1,163 @@
+import type { WebhookEventStatus as DomainWebhookEventStatus } from "../domain/index.js";
 import type {
-  LocalActivityEvent as DomainLocalActivityEvent,
-  LocalActivityEventSeverity as DomainLocalActivityEventSeverity,
-  LocalActivityEventType as DomainLocalActivityEventType,
-  WebhookEventStatus as DomainWebhookEventStatus,
-} from "../domain/index.js";
+  LocalApiHealth,
+  LocalApiWebhookSettings,
+  LocalApiAccessBinding,
+  LocalApiMonobankClientInfoSummary,
+  LocalApiMonobankTokenStatus,
+  RecheckMonobankConnectionResult,
+  LocalAppSyncSchedule,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
+  LocalApiAppConfigSyncState,
+  LocalApiAppConfig,
+  LocalApiStorageInfo,
+  LocalApiBackupFile,
+  LocalApiBackupResult,
+  LocalApiLocalDataDeletionResult,
+  LocalConfigurationImportResult,
+  LocalExportRecord,
+  LedgerExportRequest,
+  LedgerSummary,
+  LedgerCashflowSummary,
+  LedgerCategorySpending,
+  MonthlySpendingCurrencyTotal,
+  MonthlySpendingCategory,
+  MonthlySpendingMerchant,
+  ReportCurrencyConversionRate,
+  ConvertedReportTotals,
+  MonthlySpendingReport,
+  CashflowReportPoint,
+  CashflowReportCurrencyTotal,
+  CashflowReport,
+  SavingsRateReportPoint,
+  SavingsRateReportCurrencyTotal,
+  SavingsRateReport,
+  BalanceProjectionPoint,
+  BalanceProjectionCurrencyTotal,
+  BalanceProjectionEvent,
+  BalanceProjectionReport,
+  CategoryTrendReportPoint,
+  CategoryTrendReportCategory,
+  CategoryTrendReport,
+  MerchantTrendReportPoint,
+  MerchantTrendReportMerchant,
+  MerchantTrendReport,
+  BudgetProgress,
+  NetWorthTrendPoint,
+  NetWorthTrend,
+  UpcomingRecurringPayment,
+  MissedRecurringPayment,
+  SubscriptionIncreaseAlert,
+  RecurringCalendarEvent,
+  RecurringDetectionCandidate,
+  RecurringItem,
+  ManualRecurringItemInput,
+  RecurringDetectionDecisionResult,
+  LedgerAccount,
+  LedgerJar,
+  SavingsGoalProgress,
+  Category,
+  CategoryRule,
+  CategoryRuleInput,
+  MerchantCleanupRule,
+  LedgerEntry,
+  LedgerEntrySplitPlanUpdate,
+  LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
+  MonthlyCategoryBudgetInput,
+  LedgerEntryPage,
+  LedgerTransactionSortField,
+  LedgerTransactionSortDirection,
+  LedgerTransactionFilters,
+  SyncRun,
+  WebhookEvent,
+  LocalActivityEventType,
+  LocalActivityEventSeverity,
+  LocalActivityEvent,
+  OfflineSnapshotMetadata,
+  LocalAppSnapshot,
+} from "./api-types.js";
 
-export interface LocalApiHealth {
-  status: "ok";
-  localOnly: boolean;
-  version: string;
-  framework: string;
-  apiPrefix: string;
-  architecture: {
-    ui: string;
-    server: string;
-    storage: string;
-  };
-}
-
-export interface LocalApiWebhookSettings {
-  enabled: boolean;
-  path: string;
-  host: string;
-  port: number;
-  url: string;
-}
-
-export interface LocalApiAccessBinding {
-  localOnly: boolean;
-  host: string;
-  authentication: "none" | "passcode";
-}
-
-export interface LocalApiMonobankClientInfoSummary {
-  clientId: string;
-  name: string;
-  accounts: number;
-  jars: number;
-  masked: true;
-}
-
-export interface LocalApiMonobankTokenStatus {
-  profile: string;
-  hasToken: boolean;
-  storage: "secure" | "session";
-  persistence: "persistent" | "session";
-  fallbackReason?: "secure_storage_unavailable" | "secure_storage_write_failed";
-  clientInfo?: LocalApiMonobankClientInfoSummary;
-}
-
-export interface LocalApiAppConfig {
-  profile: string;
-  source: "fixture" | "monobank";
-  dataDir: string;
-  databasePath: string;
-  localOnly: boolean;
-  access: LocalApiAccessBinding;
-  webhook: LocalApiWebhookSettings;
-  token: LocalApiMonobankTokenStatus;
-}
-
-export interface LedgerSummary {
-  profile: string;
-  accounts: number;
-  ledgerEntries: number;
-  income: number;
-  expenses: number;
-  net: number;
-  monthToDate: LedgerCashflowSummary;
-  currencies: readonly number[];
-  lastSyncedAt?: string;
-  oldestSyncCursorUpdatedAt?: string;
-}
-
-export interface LedgerCashflowSummary {
-  month: string;
-  from: string;
-  to: string;
-  income: number;
-  expenses: number;
-  net: number;
-}
-
-export interface LedgerCategorySpending {
-  categoryId: string;
-  categoryName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-}
-
-export interface MonthlySpendingCurrencyTotal {
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-  averageTransactionAmount: number;
-}
-
-export interface MonthlySpendingCategory {
-  categoryId: string;
-  categoryName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-  sharePercentage: number;
-}
-
-export interface MonthlySpendingMerchant {
-  merchantName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-  sharePercentage: number;
-}
-
-export interface ReportCurrencyConversionRate {
-  currencyCode: number;
-  baseCurrencyCode: number;
-  rate: number;
-  date: number;
-}
-
-export interface ConvertedReportTotals {
-  baseCurrencyCode: number;
-  totalIncome?: number;
-  totalExpenses?: number;
-  netCashflow?: number;
-  totalSavings?: number;
-  totalCurrentBalance?: number;
-  totalProjectedOutflows?: number;
-  totalProjectedBalance?: number;
-  missingCurrencyCodes: readonly number[];
-  rates: readonly ReportCurrencyConversionRate[];
-}
-
-export interface MonthlySpendingReport {
-  profile: string;
-  month: string;
-  from: string;
-  to: string;
-  generatedAt: string;
-  totalExpenses: number;
-  transactionCount: number;
-  averageTransactionAmount: number;
-  currencies: readonly number[];
-  currencyTotals: readonly MonthlySpendingCurrencyTotal[];
-  categories: readonly MonthlySpendingCategory[];
-  merchants: readonly MonthlySpendingMerchant[];
-  convertedTotals?: ConvertedReportTotals;
-}
-
-export interface CashflowReportPoint {
-  month: string;
-  from: string;
-  to: string;
-  currencyCode: number;
-  income: number;
-  expenses: number;
-  net: number;
-  transactionCount: number;
-}
-
-export interface CashflowReportCurrencyTotal {
-  currencyCode: number;
-  income: number;
-  expenses: number;
-  net: number;
-  transactionCount: number;
-}
-
-export interface CashflowReport {
-  profile: string;
-  from: string;
-  to: string;
-  months: number;
-  generatedAt: string;
-  totalIncome: number;
-  totalExpenses: number;
-  netCashflow: number;
-  transactionCount: number;
-  currencies: readonly number[];
-  totals: readonly CashflowReportCurrencyTotal[];
-  points: readonly CashflowReportPoint[];
-  convertedTotals?: ConvertedReportTotals;
-}
-
-export interface SavingsRateReportPoint {
-  month: string;
-  from: string;
-  to: string;
-  currencyCode: number;
-  income: number;
-  expenses: number;
-  savings: number;
-  savingsRate: number;
-  transactionCount: number;
-}
-
-export interface SavingsRateReportCurrencyTotal {
-  currencyCode: number;
-  income: number;
-  expenses: number;
-  savings: number;
-  savingsRate: number;
-  transactionCount: number;
-  averageMonthlySavings: number;
-}
-
-export interface SavingsRateReport {
-  profile: string;
-  from: string;
-  to: string;
-  months: number;
-  generatedAt: string;
-  totalIncome: number;
-  totalExpenses: number;
-  totalSavings: number;
-  savingsRate: number;
-  transactionCount: number;
-  currencies: readonly number[];
-  totals: readonly SavingsRateReportCurrencyTotal[];
-  points: readonly SavingsRateReportPoint[];
-  convertedTotals?: ConvertedReportTotals;
-}
-
-export interface BalanceProjectionPoint {
-  date: string;
-  currencyCode: number;
-  startingBalance: number;
-  projectedOutflows: number;
-  projectedBalance: number;
-  eventCount: number;
-}
-
-export interface BalanceProjectionCurrencyTotal {
-  currencyCode: number;
-  currentBalance: number;
-  projectedOutflows: number;
-  projectedBalance: number;
-  eventCount: number;
-}
-
-export interface BalanceProjectionEvent {
-  id: string;
-  recurringItemId: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName?: string;
-  frequency: RecurringCalendarEvent["frequency"];
-  currencyCode: number;
-  date: string;
-  dueAt: string;
-  projectedAmount: number;
-}
-
-export interface BalanceProjectionReport {
-  profile: string;
-  from: string;
-  to: string;
-  days: number;
-  generatedAt: string;
-  totalCurrentBalance: number;
-  totalProjectedOutflows: number;
-  totalProjectedBalance: number;
-  currencies: readonly number[];
-  totals: readonly BalanceProjectionCurrencyTotal[];
-  points: readonly BalanceProjectionPoint[];
-  events: readonly BalanceProjectionEvent[];
-  convertedTotals?: ConvertedReportTotals;
-}
-
-export interface CategoryTrendReportPoint {
-  month: string;
-  from: string;
-  to: string;
-  categoryId: string;
-  categoryName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-}
-
-export interface CategoryTrendReportCategory {
-  categoryId: string;
-  categoryName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-  averageMonthlyAmount: number;
-}
-
-export interface CategoryTrendReport {
-  profile: string;
-  from: string;
-  to: string;
-  months: number;
-  generatedAt: string;
-  totalExpenses: number;
-  transactionCount: number;
-  currencies: readonly number[];
-  categories: readonly CategoryTrendReportCategory[];
-  points: readonly CategoryTrendReportPoint[];
-  convertedTotals?: ConvertedReportTotals;
-}
-
-export interface MerchantTrendReportPoint {
-  month: string;
-  from: string;
-  to: string;
-  merchantName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-}
-
-export interface MerchantTrendReportMerchant {
-  merchantName: string;
-  currencyCode: number;
-  amount: number;
-  transactionCount: number;
-  averageMonthlyAmount: number;
-}
-
-export interface MerchantTrendReport {
-  profile: string;
-  from: string;
-  to: string;
-  months: number;
-  generatedAt: string;
-  totalExpenses: number;
-  transactionCount: number;
-  currencies: readonly number[];
-  merchants: readonly MerchantTrendReportMerchant[];
-  points: readonly MerchantTrendReportPoint[];
-  convertedTotals?: ConvertedReportTotals;
-}
-
-export interface BudgetProgress {
-  id: string;
-  budgetId: string;
-  profile: string;
-  categoryId: string;
-  categoryName: string;
-  currencyCode: number;
-  periodStart: string;
-  periodEnd: string;
-  amountLimit: number;
-  actualAmount: number;
-  remainingAmount: number;
-  progressPercentage: number;
-  status: "on_track" | "near_limit" | "overspent";
-}
-
-export interface NetWorthTrendPoint {
-  date: string;
-  amount: number;
-  currencyCode: number;
-}
-
-export interface NetWorthTrend {
-  enabled: boolean;
-  reason?: string;
-  points: readonly NetWorthTrendPoint[];
-}
-
-export interface UpcomingRecurringPayment {
-  id: string;
-  recurringItemId: string;
-  profile: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName?: string;
-  frequency:
-    | "daily"
-    | "weekly"
-    | "monthly"
-    | "quarterly"
-    | "yearly"
-    | "irregular";
-  expectedAmountMin?: number;
-  expectedAmountMax?: number;
-  currencyCode: number;
-  lastSeenAt?: string;
-  nextDueAt: string;
-  daysUntilDue: number;
-  isOverdue: boolean;
-}
-
-export interface MissedRecurringPayment {
-  id: string;
-  recurringItemId: string;
-  profile: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName?: string;
-  frequency:
-    | "daily"
-    | "weekly"
-    | "monthly"
-    | "quarterly"
-    | "yearly"
-    | "irregular";
-  expectedAmountMin?: number;
-  expectedAmountMax?: number;
-  currencyCode: number;
-  expectedDate: string;
-  expectedDueAt: string;
-  daysOverdue: number;
-  matchWindowStart: string;
-  matchWindowEnd: string;
-  lastSeenAt?: string;
-}
-
-export interface SubscriptionIncreaseAlert {
-  id: string;
-  recurringItemId: string;
-  ledgerEntryId: string;
-  profile: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName?: string;
-  frequency:
-    | "daily"
-    | "weekly"
-    | "monthly"
-    | "quarterly"
-    | "yearly"
-    | "irregular";
-  expectedAmountMin?: number;
-  expectedAmountMax: number;
-  actualAmount: number;
-  increaseAmount: number;
-  increasePercentage: number;
-  currencyCode: number;
-  occurredAt: string;
-  lastSeenAt?: string;
-}
-
-export interface RecurringCalendarEvent {
-  id: string;
-  recurringItemId: string;
-  profile: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName?: string;
-  frequency:
-    | "daily"
-    | "weekly"
-    | "monthly"
-    | "quarterly"
-    | "yearly"
-    | "irregular";
-  expectedAmountMin?: number;
-  expectedAmountMax?: number;
-  currencyCode: number;
-  date: string;
-  month: string;
-  dueAt: string;
-  isPast: boolean;
-}
-
-export interface RecurringDetectionCandidate {
-  id: string;
-  profile: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName: string;
-  frequency:
-    | "daily"
-    | "weekly"
-    | "monthly"
-    | "quarterly"
-    | "yearly"
-    | "irregular";
-  expectedAmountMin: number;
-  expectedAmountMax: number;
-  currencyCode: number;
-  occurrences: number;
-  confidence: number;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  averageGapDays?: number;
-  latestLedgerEntryId: string;
-}
-
-export interface RecurringItem {
-  id: string;
-  profile: string;
-  accountId: string;
-  categoryId?: string;
-  merchantName?: string;
-  frequency:
-    | "daily"
-    | "weekly"
-    | "monthly"
-    | "quarterly"
-    | "yearly"
-    | "irregular";
-  expectedAmountMin?: number;
-  expectedAmountMax?: number;
-  isActive: boolean;
-  startedAt?: string;
-  lastSeenAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface RecurringDetectionDecisionResult {
-  profile: string;
-  candidateId: string;
-  action: "confirmed" | "ignored";
-  updatedAt: string;
-  recurringItem?: RecurringItem;
-}
-
-export interface LedgerAccount {
-  id: string;
-  type: string;
-  currencyCode: number;
-  balance: number;
-  creditLimit: number;
-  maskedPan?: readonly string[];
-  updatedAt: string;
-}
-
-export interface LedgerJar {
-  id: string;
-  title: string;
-  description: string;
-  currencyCode: number;
-  balance: number;
-  goal: number;
-  updatedAt: string;
-}
-
-export interface SavingsGoalProgress {
-  id: string;
-  source: "jar";
-  sourceId: string;
-  title: string;
-  description: string;
-  currencyCode: number;
-  currentAmount: number;
-  targetAmount: number;
-  remainingAmount: number;
-  progressPercentage: number;
-  status: "not_started" | "in_progress" | "completed";
-  updatedAt: string;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  color?: string;
-  description?: string;
-  isSystem?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-export interface CategoryRule {
-  id: string;
-  categoryId: string;
-  name: string;
-  priority: number;
-  matchType: "condition" | "fallback";
-  merchantContains?: string;
-  descriptionContains?: string;
-  mcc?: number;
-  amountDirection?: "income" | "expense" | "any";
-  isSystem?: boolean;
-  isEnabled?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-export interface MerchantCleanupRule {
-  id: string;
-  name: string;
-  priority: number;
-  merchantContains: string;
-  canonicalName: string;
-  isSystem?: boolean;
-  isEnabled?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-export interface LedgerEntry {
-  id: string;
-  accountId: string;
-  time: number;
-  description: string;
-  amount: number;
-  operationAmount?: number;
-  currencyCode: number;
-  categoryId?: string;
-  categoryName?: string;
-  categorySource?: "system_rule" | "user_rule" | "manual";
-  categoryRuleId?: string;
-  categoryRuleVersion?: string;
-  merchantName?: string;
-  hold?: boolean;
-  balance?: number;
-  note?: string;
-  tags?: readonly string[];
-  splitPlan?: readonly {
-    category: string;
-    amount: number;
-  }[];
-  rawStatementItemId: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface LedgerEntrySplitPlanUpdate {
-  lines: readonly {
-    category: string;
-    amount: number;
-  }[];
-}
-
-export interface LedgerEntryBulkEditUpdate {
-  ids: readonly string[];
-  categoryId?: string;
-  merchantName?: string;
-  tags?: readonly string[];
-}
-
-export interface LedgerEntryCategoryRestoreEntry {
-  id: string;
-  categoryId?: string;
-  categoryName?: string;
-  categorySource?: "system_rule" | "user_rule" | "manual";
-  categoryRuleId?: string;
-  categoryRuleVersion?: string;
-}
-
-export interface MonthlyCategoryBudgetInput {
-  categoryId: string;
-  currencyCode?: number;
-  month: string;
-  amountLimit: number;
-  rollover?: boolean;
-}
-
-export interface LedgerEntryPage {
-  entries: readonly LedgerEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export type LedgerTransactionSortField =
-  | "time"
-  | "merchant"
-  | "amount"
-  | "account"
-  | "category"
-  | "status";
-
-export type LedgerTransactionSortDirection = "asc" | "desc";
-
-export interface LedgerTransactionFilters {
-  accountId?: string;
-  categoryId?: string;
-  merchantName?: string;
-  status?: "hold" | "posted";
-  amountMin?: number;
-  amountMax?: number;
-  search?: string;
-  from?: number;
-  to?: number;
-  limit?: number;
-  offset?: number;
-  sortBy?: LedgerTransactionSortField;
-  sortDirection?: LedgerTransactionSortDirection;
-}
-
-export interface SyncRun {
-  id: string;
-  profile: string;
-  source: "fixture" | "monobank";
-  status:
-    | "queued"
-    | "running"
-    | "success"
-    | "partial"
-    | "failed"
-    | "interrupted";
-  startedAt: string;
-  finishedAt?: string;
-  errorMessage?: string;
-  apiCalls: number;
-  windowsFetched: number;
-  itemsSeen: number;
-  itemsInserted: number;
-  itemsUpdated: number;
-  itemsSkipped: number;
-  rateLimited: number;
-}
-
-export interface WebhookEvent {
-  id: string;
-  profile: string;
-  accountId: string;
-  type: string;
-  statementItemId?: string;
-  status: DomainWebhookEventStatus;
-  receivedAt: string;
-  processedAt?: string;
-}
-
-export type LocalActivityEventType = DomainLocalActivityEventType;
-
-export type LocalActivityEventSeverity = DomainLocalActivityEventSeverity;
-
-export type LocalActivityEvent = DomainLocalActivityEvent;
-
-export interface OfflineSnapshotMetadata {
-  cachedAt: string;
-  reason: string;
-}
-
-export interface LocalAppSnapshot {
-  health: LocalApiHealth;
-  config: LocalApiAppConfig;
-  summary: LedgerSummary;
-  netWorthTrend: NetWorthTrend;
-  accounts: readonly LedgerAccount[];
-  jars: readonly LedgerJar[];
-  savingsGoalProgress: readonly SavingsGoalProgress[];
-  categories: readonly Category[];
-  categoryRules: readonly CategoryRule[];
-  merchantCleanupRules: readonly MerchantCleanupRule[];
-  categorySpending: readonly LedgerCategorySpending[];
-  cashflowReport: CashflowReport;
-  savingsRateReport: SavingsRateReport;
-  balanceProjectionReport: BalanceProjectionReport;
-  categoryTrendReport: CategoryTrendReport;
-  merchantTrendReport: MerchantTrendReport;
-  monthlySpendingReport: MonthlySpendingReport;
-  budgetProgress: readonly BudgetProgress[];
-  upcomingRecurringPayments: readonly UpcomingRecurringPayment[];
-  missedRecurringPayments: readonly MissedRecurringPayment[];
-  subscriptionIncreaseAlerts: readonly SubscriptionIncreaseAlert[];
-  recurringDetectionCandidates: readonly RecurringDetectionCandidate[];
-  recurringCalendar: readonly RecurringCalendarEvent[];
-  transactions: LedgerEntryPage;
-  syncRuns: readonly SyncRun[];
-  webhookEvents: readonly WebhookEvent[];
-  activityEvents: readonly LocalActivityEvent[];
-  offline?: OfflineSnapshotMetadata;
-}
+export type {
+  LocalApiHealth,
+  LocalApiWebhookSettings,
+  LocalApiAccessBinding,
+  LocalApiMonobankClientInfoSummary,
+  LocalApiMonobankTokenStatus,
+  RecheckMonobankConnectionResult,
+  LocalAppSyncSchedule,
+  LocalAppSettings,
+  LocalAppSettingsUpdate,
+  LocalApiAppConfigSyncState,
+  LocalApiAppConfig,
+  LocalApiStorageInfo,
+  LocalApiBackupFile,
+  LocalApiBackupResult,
+  LocalApiLocalDataDeletionResult,
+  LocalConfigurationImportResult,
+  LocalExportRecord,
+  LedgerExportRequest,
+  LedgerSummary,
+  LedgerCashflowSummary,
+  LedgerCategorySpending,
+  MonthlySpendingCurrencyTotal,
+  MonthlySpendingCategory,
+  MonthlySpendingMerchant,
+  ReportCurrencyConversionRate,
+  ConvertedReportTotals,
+  MonthlySpendingReport,
+  CashflowReportPoint,
+  CashflowReportCurrencyTotal,
+  CashflowReport,
+  SavingsRateReportPoint,
+  SavingsRateReportCurrencyTotal,
+  SavingsRateReport,
+  BalanceProjectionPoint,
+  BalanceProjectionCurrencyTotal,
+  BalanceProjectionEvent,
+  BalanceProjectionReport,
+  CategoryTrendReportPoint,
+  CategoryTrendReportCategory,
+  CategoryTrendReport,
+  MerchantTrendReportPoint,
+  MerchantTrendReportMerchant,
+  MerchantTrendReport,
+  BudgetProgress,
+  NetWorthTrendPoint,
+  NetWorthTrend,
+  UpcomingRecurringPayment,
+  MissedRecurringPayment,
+  SubscriptionIncreaseAlert,
+  RecurringCalendarEvent,
+  RecurringDetectionCandidate,
+  RecurringItem,
+  ManualRecurringItemInput,
+  RecurringDetectionDecisionResult,
+  LedgerAccount,
+  LedgerJar,
+  SavingsGoalProgress,
+  Category,
+  CategoryRule,
+  CategoryRuleInput,
+  MerchantCleanupRule,
+  LedgerEntry,
+  LedgerEntrySplitPlanUpdate,
+  LedgerEntryBulkEditUpdate,
+  LedgerEntryCategoryRestoreEntry,
+  MonthlyCategoryBudgetInput,
+  LedgerEntryPage,
+  LedgerTransactionSortField,
+  LedgerTransactionSortDirection,
+  LedgerTransactionFilters,
+  SyncRun,
+  WebhookEvent,
+  LocalActivityEventType,
+  LocalActivityEventSeverity,
+  LocalActivityEvent,
+  OfflineSnapshotMetadata,
+  LocalAppSnapshot,
+} from "./api-types.js";
 
 interface BrowserStorage {
   getItem(key: string): string | null;
@@ -785,6 +190,8 @@ type PersistedLocalAppSnapshot = Omit<
   | "recurringCalendar"
   | "merchantCleanupRules"
   | "categoryRules"
+  | "storage"
+  | "exportHistory"
 > & {
   netWorthTrend?: NetWorthTrend;
   jars?: readonly LedgerJar[];
@@ -804,6 +211,8 @@ type PersistedLocalAppSnapshot = Omit<
   recurringCalendar?: readonly RecurringCalendarEvent[];
   merchantCleanupRules?: readonly MerchantCleanupRule[];
   categoryRules?: readonly CategoryRule[];
+  storage?: LocalApiStorageInfo;
+  exportHistory?: readonly LocalExportRecord[];
   summary: Omit<LedgerSummary, "monthToDate"> & {
     monthToDate?: LedgerCashflowSummary;
   };
@@ -992,6 +401,20 @@ function normalizeCachedLocalAppSnapshot(
   cached: CachedLocalAppSnapshot,
 ): CachedLocalAppSnapshot {
   const snapshot = cached.snapshot as PersistedLocalAppSnapshot;
+  const config = {
+    ...snapshot.config,
+    settings: snapshot.config.settings ?? {
+      profile: snapshot.config.profile,
+      source: snapshot.config.source,
+      syncSchedule: snapshot.config.sync?.schedule ?? "manual",
+      excludedAccountIds: [],
+      budgetWarningThreshold: 80,
+      updatedAt: new Date(0).toISOString(),
+    },
+    sync: snapshot.config.sync ?? {
+      schedule: "manual",
+    },
+  };
   const monthToDate = snapshot.summary.monthToDate ?? {
     month: "cached",
     from: "cached",
@@ -1005,6 +428,7 @@ function normalizeCachedLocalAppSnapshot(
     ...cached,
     snapshot: {
       ...snapshot,
+      config,
       summary: {
         ...snapshot.summary,
         monthToDate,
@@ -1043,6 +467,25 @@ function normalizeCachedLocalAppSnapshot(
       recurringCalendar: snapshot.recurringCalendar ?? [],
       merchantCleanupRules: snapshot.merchantCleanupRules ?? [],
       categoryRules: snapshot.categoryRules ?? [],
+      storage:
+        snapshot.storage ??
+        ({
+          profile: config.profile,
+          dataDir: config.dataDir,
+          databasePath: config.databasePath,
+          databaseBytes: 0,
+          integrityCheck: "cached",
+          pageCount: 0,
+          pageSize: 0,
+          migrations: [],
+          accounts: snapshot.summary.accounts,
+          ledgerEntries: snapshot.summary.ledgerEntries,
+          syncRuns: snapshot.syncRuns.length,
+          webhookEvents: snapshot.webhookEvents.length,
+          backupDirectory: "",
+          backups: [],
+        } satisfies LocalApiStorageInfo),
+      exportHistory: snapshot.exportHistory ?? [],
     },
   };
 }
@@ -1510,6 +953,18 @@ export async function createMonthlyCategoryBudget(
   });
 }
 
+export async function createCategoryRule(
+  input: CategoryRuleInput,
+): Promise<CategoryRule> {
+  return requestJson<CategoryRule>("/api/ledger/category-rules", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+}
+
 export async function deleteMonthlyCategoryBudget(
   budgetPeriodId: string,
 ): Promise<{ deleted: boolean }> {
@@ -1552,6 +1007,18 @@ export async function loadRecurringDetectionCandidates(): Promise<
   return requestJson<readonly RecurringDetectionCandidate[]>(
     "/api/ledger/recurring-detections",
   );
+}
+
+export async function createManualRecurringItem(
+  input: ManualRecurringItemInput,
+): Promise<RecurringItem> {
+  return requestJson<RecurringItem>("/api/ledger/recurring-items", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function loadMonthlySpendingReport(options?: {
@@ -1763,6 +1230,8 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       transactions,
       syncRuns,
       webhookEvents,
+      storage,
+      exportHistory,
     ] = await Promise.all([
       requestJson<LocalApiHealth>("/api/health"),
       requestJson<LedgerSummary>("/api/ledger/summary"),
@@ -1797,6 +1266,8 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       loadLedgerTransactions({ limit: LOCAL_APP_TRANSACTION_LIMIT }),
       requestJson<readonly SyncRun[]>("/api/sync/runs"),
       requestJson<readonly WebhookEvent[]>("/api/webhooks/events"),
+      requestJson<LocalApiStorageInfo>("/api/app/storage"),
+      requestJson<readonly LocalExportRecord[]>("/api/exports/history"),
     ]);
 
     const activityEvents = buildLocalActivityEvents(syncRuns, webhookEvents);
@@ -1828,6 +1299,8 @@ export async function loadLocalAppSnapshot(): Promise<LocalAppSnapshot> {
       transactions,
       syncRuns,
       webhookEvents,
+      storage,
+      exportHistory,
       activityEvents,
     } satisfies LocalAppSnapshot;
 
@@ -1879,14 +1352,6 @@ export async function clearMonobankToken(): Promise<LocalApiMonobankTokenStatus>
   });
 }
 
-export type RecheckMonobankConnectionResult =
-  | LocalApiMonobankTokenStatus
-  | {
-      error: string;
-      message?: string;
-      upstreamStatus?: number;
-    };
-
 export async function recheckMonobankConnection(): Promise<RecheckMonobankConnectionResult> {
   return requestJson<RecheckMonobankConnectionResult>(
     "/api/app/token/recheck",
@@ -1902,4 +1367,90 @@ export async function initializeWorkspace(): Promise<
   return requestJson<LocalAppSnapshot["config"]>("/api/app/workspace", {
     method: "POST",
   });
+}
+
+export async function updateLocalAppSettings(
+  update: LocalAppSettingsUpdate,
+): Promise<LocalAppSnapshot["config"]> {
+  return requestJson<LocalAppSnapshot["config"]>("/api/app/settings", {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(update),
+  });
+}
+
+export async function createLocalBackup(): Promise<LocalApiBackupResult> {
+  return requestJson<LocalApiBackupResult>("/api/app/storage/backup", {
+    method: "POST",
+  });
+}
+
+export async function compactLocalDatabase(): Promise<LocalApiStorageInfo> {
+  return requestJson<LocalApiStorageInfo>("/api/app/storage/compact", {
+    method: "POST",
+  });
+}
+
+export async function restoreLocalDatabase(input: {
+  backupPath: string;
+  confirmProfile: string;
+  confirmDatabasePath: string;
+}): Promise<LocalApiStorageInfo> {
+  return requestJson<LocalApiStorageInfo>("/api/app/storage/restore", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteLocalData(input: {
+  confirmProfile: string;
+  confirmDatabasePath: string;
+  ledgerData?: boolean;
+  token?: boolean;
+}): Promise<LocalApiLocalDataDeletionResult> {
+  return requestJson<LocalApiLocalDataDeletionResult>("/api/app/local-data", {
+    method: "DELETE",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function importLocalConfiguration(
+  configuration: unknown,
+): Promise<LocalConfigurationImportResult> {
+  return requestJson<LocalConfigurationImportResult>(
+    "/api/imports/local-configuration",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(configuration),
+    },
+  );
+}
+
+export async function saveLedgerExportToFolder(
+  request: LedgerExportRequest,
+): Promise<LocalExportRecord> {
+  return requestJson<LocalExportRecord>("/api/exports/ledger", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+}
+
+export async function loadExportHistory(): Promise<
+  readonly LocalExportRecord[]
+> {
+  return requestJson<readonly LocalExportRecord[]>("/api/exports/history");
 }

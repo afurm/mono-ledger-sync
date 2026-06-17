@@ -120,6 +120,18 @@ async function collectSourceFiles(directory) {
   return files.flat();
 }
 
+async function readSourceBundle(sourceFiles) {
+  return (
+    await Promise.all(
+      sourceFiles.sort().map((sourceFile) => readFile(sourceFile, "utf8")),
+    )
+  ).join("\n");
+}
+
+async function readWebSourceBundle() {
+  return readSourceBundle(await collectSourceFiles("src/web"));
+}
+
 async function collectStyleFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = await Promise.all(
@@ -356,8 +368,27 @@ test("documents thin local UI component wrappers", async () => {
   assert.match(pullRequestTemplate, thinWrapperPattern);
 });
 
+test("runs browser route smoke in CI and pull request validation", async () => {
+  const ciWorkflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const releaseWorkflow = await readFile(
+    ".github/workflows/release.yml",
+    "utf8",
+  );
+  const pullRequestTemplate = await readFile(
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "utf8",
+  );
+
+  for (const workflow of [ciWorkflow, releaseWorkflow]) {
+    assert.match(workflow, /npx playwright install --with-deps chromium/);
+    assert.match(workflow, /npm run smoke:web/);
+  }
+
+  assert.match(pullRequestTemplate, /`npm run smoke:web`/);
+});
+
 test("keeps standard visual controls on shadcn primitives", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const webSource = await readWebSourceBundle();
   const requiredCompositionImports = [
     /from "@\/components\/ui\/badge"/,
     /from "@\/components\/ui\/card"/,
@@ -376,25 +407,25 @@ test("keeps standard visual controls on shadcn primitives", async () => {
     /from "@\/components\/ui\/sonner"/,
   ];
 
-  assert.match(appSource, /from "@\/components\/ui\/checkbox"/);
-  assert.match(appSource, /from "@\/components\/ui\/skeleton"/);
-  assert.match(appSource, /from "@\/components\/ui\/textarea"/);
-  assert.match(appSource, /from "sonner"/);
+  assert.match(webSource, /from "@\/components\/ui\/checkbox"/);
+  assert.match(webSource, /from "@\/components\/ui\/skeleton"/);
+  assert.match(webSource, /from "@\/components\/ui\/textarea"/);
+  assert.match(webSource, /from "sonner"/);
   for (const importPattern of requiredCompositionImports) {
-    assert.match(appSource, importPattern);
+    assert.match(webSource, importPattern);
   }
-  assert.match(appSource, /<Pagination\b/);
-  assert.match(appSource, /<Dialog\b/);
-  assert.match(appSource, /<Toaster\b/);
-  assert.match(appSource, /toast\.success/);
-  assert.match(appSource, /toast\.error/);
-  assert.doesNotMatch(appSource, /<button\b/);
-  assert.doesNotMatch(appSource, /<input\b/);
-  assert.doesNotMatch(appSource, /<label\b/);
-  assert.doesNotMatch(appSource, /<select\b/);
-  assert.doesNotMatch(appSource, /<table\b/);
-  assert.doesNotMatch(appSource, /<textarea\b/);
-  assert.doesNotMatch(appSource, /type="checkbox"/);
+  assert.match(webSource, /<Pagination\b/);
+  assert.match(webSource, /<Dialog\b/);
+  assert.match(webSource, /<Toaster\b/);
+  assert.match(webSource, /toast\.success/);
+  assert.match(webSource, /toast\.error/);
+  assert.doesNotMatch(webSource, /<button\b/);
+  assert.doesNotMatch(webSource, /<input\b/);
+  assert.doesNotMatch(webSource, /<label\b/);
+  assert.doesNotMatch(webSource, /<select\b/);
+  assert.doesNotMatch(webSource, /<table\b/);
+  assert.doesNotMatch(webSource, /<textarea\b/);
+  assert.doesNotMatch(webSource, /type="checkbox"/);
 });
 
 test("keeps web styling inside the shadcn theme boundary", async () => {
@@ -438,12 +469,7 @@ test("defers app-level keyboard shortcuts until pointer flows are intentional", 
 });
 
 test("keeps the web UI anchored to the Monobank local-ledger product", async () => {
-  const sourceFiles = [
-    "src/web/App.tsx",
-    "src/web/navigation.ts",
-    "src/web/empty-state.ts",
-    "src/web/signin-card.ts",
-  ];
+  const sourceFiles = (await collectSourceFiles("src/web")).sort();
   const productUiSource = (
     await Promise.all(
       sourceFiles.map((sourceFile) => readFile(sourceFile, "utf8")),
@@ -485,20 +511,23 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
 
 test("keeps finance workspace typography compact", async () => {
   const appSource = await readFile("src/web/App.tsx", "utf8");
-  const largeTypographyLines = appSource
+  const webSource = await readWebSourceBundle();
+  const largeTypographyLines = webSource
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => largeScreenTypographyPattern.test(line));
 
-  assert.deepEqual(largeTypographyLines, [
-    '<p className="text-xl font-semibold tabular-nums">{value}</p>',
-    '<CardTitle className="text-xl tabular-nums">{value}</CardTitle>',
-    "className={`text-xl font-semibold tabular-nums ${amountSemanticTextClassName(entry.amount)}`}",
-  ]);
+  assert.deepEqual(
+    [...new Set(largeTypographyLines)].sort(),
+    [
+      '<p className="text-xl font-semibold tabular-nums">{value}</p>',
+      "className={`text-xl font-semibold tabular-nums ${amountSemanticTextClassName(entry.amount)}`}",
+    ].sort(),
+  );
   assert.match(appSource, /<h1 className="truncate text-lg font-semibold">/);
-  assert.doesNotMatch(appSource, /\btext-[2-9]xl\b/);
+  assert.doesNotMatch(webSource, /\btext-[2-9]xl\b/);
   assert.doesNotMatch(
-    appSource,
+    webSource,
     /\btracking-(?:tight|tighter|wide|wider|widest)\b/,
   );
 });
@@ -538,7 +567,7 @@ test("routes web colors through shadcn tokens and component variants", async () 
 });
 
 test("keeps screen colors on semantic tokens", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const webSource = await readWebSourceBundle();
   const stylesSource = await readFile("src/web/styles.css", "utf8");
   const alertSource = await readFile("src/components/ui/alert.tsx", "utf8");
   const badgeSource = await readFile("src/components/ui/badge.tsx", "utf8");
@@ -551,10 +580,10 @@ test("keeps screen colors on semantic tokens", async () => {
     /\btext-primary-foreground\b/,
   ];
 
-  assert.doesNotMatch(appSource, rawPaletteUtilityPattern);
-  assert.doesNotMatch(appSource, arbitraryVisualUtilityPattern);
+  assert.doesNotMatch(webSource, rawPaletteUtilityPattern);
+  assert.doesNotMatch(webSource, arbitraryVisualUtilityPattern);
   for (const tokenPattern of requiredScreenTokenPatterns) {
-    assert.match(appSource, tokenPattern);
+    assert.match(webSource, tokenPattern);
   }
   assert.match(stylesSource, /@apply border-border/);
   assert.match(stylesSource, /@apply bg-background text-foreground/);
@@ -570,7 +599,11 @@ test("keeps screen colors on semantic tokens", async () => {
 });
 
 test("keeps income and expense color semantics aligned", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const webSource = await readWebSourceBundle();
+  const transactionCellsSource = await readFile(
+    "src/web/transaction-cells.tsx",
+    "utf8",
+  );
   const stylesSource = await readFile("src/web/styles.css", "utf8");
 
   assert.match(stylesSource, /--income:/);
@@ -579,22 +612,25 @@ test("keeps income and expense color semantics aligned", async () => {
   assert.match(stylesSource, /--expense-foreground:/);
   assert.match(stylesSource, /--color-income: var\(--income\)/);
   assert.match(stylesSource, /--color-expense: var\(--expense\)/);
-  assert.match(appSource, /function amountSemanticTextClassName/);
-  assert.match(appSource, /return "text-income-foreground"/);
-  assert.match(appSource, /return "text-expense-foreground"/);
-  assert.match(appSource, /amountSemanticTextClassName\(entry\.amount\)/);
-  assert.match(appSource, /amountSemanticTextClassName\(monthToDate\.net\)/);
-  assert.match(appSource, /bg-income/);
-  assert.match(appSource, /bg-expense/);
+  assert.match(transactionCellsSource, /function amountSemanticTextClassName/);
+  assert.match(transactionCellsSource, /return "text-income-foreground"/);
+  assert.match(transactionCellsSource, /return "text-expense-foreground"/);
   assert.match(
-    appSource,
+    transactionCellsSource,
+    /amountSemanticTextClassName\(entry\.amount\)/,
+  );
+  assert.match(webSource, /amountSemanticTextClassName\(monthToDate\.net\)/);
+  assert.match(webSource, /bg-income/);
+  assert.match(webSource, /bg-expense/);
+  assert.match(
+    webSource,
     /text-income-foreground[\s\S]*formatMinorAmount\(total\.income/,
   );
   assert.match(
-    appSource,
+    webSource,
     /text-expense-foreground[\s\S]*formatMinorAmount\(total\.expenses/,
   );
-  assert.doesNotMatch(appSource, /row\.expenses[\s\S]{0,240}bg-warning/);
+  assert.doesNotMatch(webSource, /row\.expenses[\s\S]{0,240}bg-warning/);
 });
 
 test("documents the minimum local product flow", async () => {
@@ -718,92 +754,166 @@ test("documents token cleanup during local account removal", async () => {
 });
 
 test("local web UI exposes webhook settings panel fields", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const syncRouteSource = await readFile(
+    "src/web/routes/sync/index.tsx",
+    "utf8",
+  );
 
-  assert.match(appSource, /function WebhookSettingsPanel/);
-  assert.match(appSource, /Profile/);
-  assert.match(appSource, /Port/);
-  assert.match(appSource, /Path/);
-  assert.match(appSource, /Enabled/);
-  assert.match(appSource, /Webhook endpoint/);
-  assert.match(appSource, /Personal webhook payloads are hints/);
-  assert.match(appSource, /verifiable personal webhook signature/);
-  assert.match(appSource, /reconcile it through statement\s+pulls/);
+  assert.match(syncRouteSource, /function WebhookSettingsPanel/);
+  assert.match(syncRouteSource, /Profile/);
+  assert.match(syncRouteSource, /Port/);
+  assert.match(syncRouteSource, /Path/);
+  assert.match(syncRouteSource, /Enabled/);
+  assert.match(syncRouteSource, /Webhook endpoint/);
+  assert.match(syncRouteSource, /Personal webhook payloads are hints/);
+  assert.match(syncRouteSource, /verifiable personal webhook signature/);
+  assert.match(syncRouteSource, /reconcile it through statement\s+pulls/);
 });
 
 test("local web UI exposes a privacy onboarding screen", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const overviewRouteSource = await readFile(
+    "src/web/routes/overview/index.tsx",
+    "utf8",
+  );
 
-  assert.match(appSource, /function PrivacyOnboardingCard/);
-  assert.match(appSource, /Privacy-first local setup/);
-  assert.match(appSource, /No cloud account required/);
-  assert.match(appSource, /no hosted token relay/);
-  assert.match(appSource, /Review privacy settings/);
+  assert.match(overviewRouteSource, /function PrivacyOnboardingCard/);
+  assert.match(overviewRouteSource, /Privacy-first local setup/);
+  assert.match(overviewRouteSource, /No cloud account required/);
+  assert.match(overviewRouteSource, /no hosted token relay/);
+  assert.match(overviewRouteSource, /Review privacy settings/);
 });
 
 test("rules UI keeps current rule previews and conflicts aligned", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const rulesRouteSource = await readFile(
+    "src/web/routes/rules/index.tsx",
+    "utf8",
+  );
+  const transactionsRouteSource = await readFile(
+    "src/web/routes/transactions/index.tsx",
+    "utf8",
+  );
+  const ruleSource = `${rulesRouteSource}\n${transactionsRouteSource}`;
 
-  assert.match(appSource, /matchType: CategoryRuleSummary\["matchType"\]/);
-  assert.match(appSource, /function findRuleHistoricalMatches/);
-  assert.match(appSource, /updateLedgerTransactionsBulk/);
-  assert.match(appSource, /restoreLedgerTransactionCategories/);
-  assert.match(appSource, /function applyPreviewedChanges/);
-  assert.match(appSource, /function rollbackPreviewedChanges/);
-  assert.match(appSource, /ruleApplyConfirmationMessage/);
-  assert.match(appSource, /ruleRollbackConfirmationMessage/);
-  assert.match(appSource, /Roll back apply/);
-  assert.match(appSource, /categoryId: rule\.categoryId/);
-  assert.match(appSource, /Preview before applying/);
-  assert.match(appSource, /categoryRestoreEntryFromLedgerEntry/);
-  assert.match(appSource, /rule\.matchType !== "fallback"/);
-  assert.match(appSource, /function ruleHasMccOnlyHistoryConstraint/);
-  assert.match(appSource, /MCC-only preview unavailable/);
-  assert.match(appSource, /income amount/);
-  assert.match(appSource, /normalizedValue === "any merchant"/);
-  assert.doesNotMatch(appSource, /normalizedValue\.startsWith\("any"\)/);
-  assert.match(appSource, /const merchantText = entry\.merchantName \?\? ""/);
+  assert.match(ruleSource, /matchType: CategoryRuleSummary\["matchType"\]/);
+  assert.match(rulesRouteSource, /function findRuleHistoricalMatches/);
+  assert.match(rulesRouteSource, /updateLedgerTransactionsBulk/);
+  assert.match(rulesRouteSource, /restoreLedgerTransactionCategories/);
+  assert.match(rulesRouteSource, /function applyPreviewedChanges/);
+  assert.match(rulesRouteSource, /function rollbackPreviewedChanges/);
+  assert.match(rulesRouteSource, /ruleApplyConfirmationMessage/);
+  assert.match(rulesRouteSource, /ruleRollbackConfirmationMessage/);
+  assert.match(rulesRouteSource, /Roll back apply/);
+  assert.match(rulesRouteSource, /categoryId: rule\.categoryId/);
+  assert.match(rulesRouteSource, /Preview before applying/);
+  assert.match(rulesRouteSource, /categoryRestoreEntryFromLedgerEntry/);
+  assert.match(rulesRouteSource, /rule\.matchType !== "fallback"/);
+  assert.match(rulesRouteSource, /function ruleHasMccOnlyHistoryConstraint/);
+  assert.match(rulesRouteSource, /MCC-only preview unavailable/);
+  assert.match(rulesRouteSource, /income amount/);
+  assert.match(rulesRouteSource, /normalizedValue === "any merchant"/);
+  assert.doesNotMatch(rulesRouteSource, /normalizedValue\.startsWith\("any"\)/);
+  assert.match(
+    rulesRouteSource,
+    /const merchantText = entry\.merchantName \?\? ""/,
+  );
   assert.doesNotMatch(
-    appSource,
+    rulesRouteSource,
     /const merchantText = `\$\{entry\.merchantName \?\? ""\} \$\{entry\.description\}`/,
   );
   assert.match(
-    appSource,
+    rulesRouteSource,
     /function findRuleConflicts\(\s*entries:[\s\S]*rules:/,
   );
-  assert.match(appSource, /entry\.categorySource === "manual"/);
-  assert.match(appSource, /entry\.categorySource === "user_rule"/);
-  assert.match(appSource, /entry\.categorySource === "system_rule"/);
-  assert.match(appSource, /entry\.categoryRuleVersion/);
-  assert.match(appSource, /findRuleConflicts\(entries, rules\)/);
-  assert.match(appSource, /rules=\{categoryRuleSummaries\}/);
+  assert.match(ruleSource, /entry\.categorySource === "manual"/);
+  assert.match(ruleSource, /entry\.categorySource === "user_rule"/);
+  assert.match(ruleSource, /entry\.categorySource === "system_rule"/);
+  assert.match(ruleSource, /entry\.categoryRuleVersion/);
+  assert.match(rulesRouteSource, /findRuleConflicts\(entries, rules\)/);
+  assert.match(rulesRouteSource, /rules=\{categoryRuleSummaries\}/);
+  assert.match(
+    transactionsRouteSource,
+    /createCategoryRule\(categoryRuleDraft\)/,
+  );
+  assert.match(transactionsRouteSource, /Rule from this edit/);
+  assert.match(transactionsRouteSource, /loaded matches/);
+  assert.match(rulesRouteSource, /Rule creation starts from review edits/);
   assert.doesNotMatch(
-    appSource,
+    rulesRouteSource,
     /builtInRuleSummaries\.filter\(\(rule\) =>\s*ledgerEntryMatchesRule/,
   );
-  assert.doesNotMatch(appSource, /historical apply controls stay disabled/);
+  assert.doesNotMatch(
+    rulesRouteSource,
+    /historical apply controls stay disabled/,
+  );
+  assert.doesNotMatch(
+    rulesRouteSource,
+    /Manual rule editing is not enabled yet/,
+  );
 });
 
 test("transaction drawer explains category assignment version history", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const transactionsRouteSource = await readFile(
+    "src/web/routes/transactions/index.tsx",
+    "utf8",
+  );
 
-  assert.match(appSource, /interface CategoryVersionHistoryItem/);
-  assert.match(appSource, /function categorySourceVersionLabel/);
-  assert.match(appSource, /function transactionCategoryVersionHistory/);
-  assert.match(appSource, /function CategoryVersionHistoryList/);
-  assert.match(appSource, /Category version history/);
-  assert.match(appSource, /<CategoryVersionHistoryList entry=\{entry\}/);
-  assert.match(appSource, /Stored as a manual local override/);
-  assert.match(appSource, /Rule metadata was cleared/);
-  assert.match(appSource, /Applied from rule version/);
-  assert.match(appSource, /No manual override or matching category rule/);
-  assert.match(appSource, /entry\.categoryRuleVersion/);
+  assert.match(transactionsRouteSource, /interface CategoryVersionHistoryItem/);
+  assert.match(transactionsRouteSource, /function categorySourceVersionLabel/);
+  assert.match(
+    transactionsRouteSource,
+    /function transactionCategoryVersionHistory/,
+  );
+  assert.match(transactionsRouteSource, /function CategoryVersionHistoryList/);
+  assert.match(transactionsRouteSource, /Category version history/);
+  assert.match(
+    transactionsRouteSource,
+    /<CategoryVersionHistoryList entry=\{entry\}/,
+  );
+  assert.match(transactionsRouteSource, /Stored as a manual local override/);
+  assert.match(transactionsRouteSource, /Rule metadata was cleared/);
+  assert.match(transactionsRouteSource, /Applied from rule version/);
+  assert.match(
+    transactionsRouteSource,
+    /No manual override or matching category rule/,
+  );
+  assert.match(transactionsRouteSource, /entry\.categoryRuleVersion/);
 });
 
 test("web client caches local snapshots for offline browsing", async () => {
   const apiSource = await readFile("src/web/api.ts", "utf8");
+  const apiTypesSource = await readFile("src/web/api-types.ts", "utf8");
   const appSource = await readFile("src/web/App.tsx", "utf8");
+  const overviewRouteSource = await readFile(
+    "src/web/routes/overview/index.tsx",
+    "utf8",
+  );
+  const recurringRouteSource = await readFile(
+    "src/web/routes/recurring/index.tsx",
+    "utf8",
+  );
+  const exportsRouteSource = await readFile(
+    "src/web/routes/exports/index.tsx",
+    "utf8",
+  );
+  const reportCardsSource = await readFile("src/web/report-cards.tsx", "utf8");
+  const syncRouteSource = await readFile(
+    "src/web/routes/sync/index.tsx",
+    "utf8",
+  );
+  const transactionsRouteSource = await readFile(
+    "src/web/routes/transactions/index.tsx",
+    "utf8",
+  );
   const navigationSource = await readFile("src/web/navigation.ts", "utf8");
+  const routeSource = [
+    appSource,
+    overviewRouteSource,
+    recurringRouteSource,
+    exportsRouteSource,
+    reportCardsSource,
+    syncRouteSource,
+    transactionsRouteSource,
+  ].join("\n");
 
   assert.match(apiSource, /LOCAL_APP_SNAPSHOT_CACHE_PREFIX/);
   assert.match(apiSource, /LOCAL_APP_ACTIVE_SNAPSHOT_CACHE_KEY/);
@@ -874,93 +984,141 @@ test("web client caches local snapshots for offline browsing", async () => {
   assert.match(apiSource, /loadBalanceProjectionReport/);
   assert.match(apiSource, /loadCategoryTrendReport/);
   assert.match(apiSource, /loadMerchantTrendReport/);
-  assert.match(apiSource, /convertedTotals\?: ConvertedReportTotals/);
+  assert.match(apiTypesSource, /convertedTotals\?: ConvertedReportTotals/);
   assert.match(apiSource, /snapshot\.summary\.monthToDate \?\?/);
   assert.match(apiSource, /try \{\s*return \(globalThis as/);
   assert.match(apiSource, /LOCAL_APP_TRANSACTION_LIMIT = 25/);
   assert.doesNotMatch(apiSource, /LEDGER_TRANSACTION_CACHE_PREFIX/);
   assert.match(apiSource, /offline: \{/);
-  assert.match(appSource, /OVERVIEW_TRANSACTION_LIMIT = 8/);
-  assert.match(appSource, /canUseSnapshotTransactionFallback/);
-  assert.match(appSource, /snapshotTransactionFallbackPage/);
-  assert.match(appSource, /total: snapshot\.transactions\.entries\.length/);
-  assert.match(appSource, /Browsing last local snapshot/);
+  assert.match(overviewRouteSource, /OVERVIEW_TRANSACTION_LIMIT = 8/);
+  assert.match(transactionsRouteSource, /canUseSnapshotTransactionFallback/);
+  assert.match(transactionsRouteSource, /snapshotTransactionFallbackPage/);
+  assert.match(
+    transactionsRouteSource,
+    /total: snapshot\.transactions\.entries\.length/,
+  );
+  assert.match(syncRouteSource, /Browsing last local snapshot/);
   assert.match(appSource, /snapshot\?\.offline\?\.reason/);
-  assert.match(appSource, /MTD net cashflow/);
-  assert.match(appSource, /Budget progress/);
-  assert.match(appSource, /Net worth trend/);
-  assert.match(appSource, /Cashflow report/);
-  assert.match(appSource, /Savings rate report/);
-  assert.match(appSource, /Balance projection/);
-  assert.match(appSource, /Category trend report/);
-  assert.match(appSource, /Merchant trend report/);
-  assert.match(appSource, /convertedReportTotalLabel/);
-  assert.match(appSource, /Monthly spending report/);
+  assert.match(overviewRouteSource, /MTD net cashflow/);
+  assert.match(routeSource, /Budget progress/);
+  assert.match(overviewRouteSource, /Net worth trend/);
+  assert.match(reportCardsSource, /Cashflow report/);
+  assert.match(reportCardsSource, /Savings rate report/);
+  assert.match(reportCardsSource, /Balance projection/);
+  assert.match(reportCardsSource, /Category trend report/);
+  assert.match(reportCardsSource, /Merchant trend report/);
+  assert.match(reportCardsSource, /convertedReportTotalLabel/);
+  assert.match(reportCardsSource, /Monthly spending report/);
   assert.match(navigationSource, /id: "categories"/);
   assert.match(navigationSource, /id: "budgets"/);
   assert.match(navigationSource, /id: "recurring"/);
   assert.match(navigationSource, /id: "reports"/);
-  assert.match(appSource, /function CategoriesRoute/);
-  assert.match(appSource, /function BudgetsRoute/);
-  assert.match(appSource, /function RecurringRoute/);
-  assert.match(appSource, /function ReportsRoute/);
-  assert.match(appSource, /function ExportsRoute/);
+  assert.match(overviewRouteSource, /function CategoriesRoute/);
+  assert.match(overviewRouteSource, /function BudgetsRoute/);
+  assert.match(recurringRouteSource, /function RecurringRoute/);
+  assert.match(overviewRouteSource, /function ReportsRoute/);
+  assert.match(routeSource, /function ExportsRoute/);
   assert.match(appSource, /case "exports":\s*return <ExportsRoute/);
-  assert.match(appSource, /Spending by category/);
-  assert.match(appSource, /Missed recurring payments/);
-  assert.match(appSource, /Subscription increase alerts/);
-  assert.match(appSource, /Recurring suggestions/);
-  assert.match(appSource, /Upcoming recurring payments/);
-  assert.match(appSource, /Recurring calendar/);
+  assert.match(reportCardsSource, /Spending by category/);
+  assert.match(recurringRouteSource, /Missed recurring payments/);
+  assert.match(recurringRouteSource, /Subscription increase alerts/);
+  assert.match(recurringRouteSource, /Recurring suggestions/);
+  assert.match(recurringRouteSource, /Upcoming recurring payments/);
+  assert.match(recurringRouteSource, /Recurring calendar/);
 });
 
 test("surfaces month-to-date finance summary on overview", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const overviewRouteSource = await readFile(
+    "src/web/routes/overview/index.tsx",
+    "utf8",
+  );
+  const reportCardsSource = await readFile("src/web/report-cards.tsx", "utf8");
+  const overviewSource = `${overviewRouteSource}\n${reportCardsSource}`;
 
-  assert.match(appSource, /function MonthToDateFinanceSummaryCard/);
+  assert.match(reportCardsSource, /function MonthToDateFinanceSummaryCard/);
   assert.match(
-    appSource,
+    overviewRouteSource,
     /<MonthToDateFinanceSummaryCard[\s\S]*snapshot=\{snapshot\}[\s\S]*monthDetail=\{monthDetail\}[\s\S]*monthFilters=\{monthFilters\}/,
   );
-  assert.match(appSource, /Month-to-date finance/);
-  assert.match(appSource, /Review month cashflow/);
-  assert.match(appSource, /Top categories/);
-  assert.match(appSource, /Budget watchlist/);
-  assert.match(appSource, /Next recurring payments/);
-  assert.match(appSource, /formatMinorAmount\(monthToDate\.income\)/);
-  assert.match(appSource, /formatMinorAmount\(monthToDate\.expenses\)/);
-  assert.match(appSource, /formatMinorAmount\(monthToDate\.net\)/);
+  assert.match(reportCardsSource, /Month-to-date finance/);
+  assert.match(reportCardsSource, /Review month cashflow/);
+  assert.match(reportCardsSource, /Top categories/);
+  assert.match(overviewSource, /Budget watchlist/);
+  assert.match(reportCardsSource, /Next recurring payments/);
+  assert.match(overviewSource, /formatMinorAmount\(monthToDate\.income\)/);
+  assert.match(overviewSource, /formatMinorAmount\(monthToDate\.expenses\)/);
+  assert.match(overviewSource, /formatMinorAmount\(monthToDate\.net\)/);
   assert.match(
-    appSource,
+    reportCardsSource,
     /snapshot\.monthlySpendingReport\.categories\.slice\(0, 3\)/,
   );
-  assert.match(appSource, /snapshot\.budgetProgress\.slice\(0, 3\)/);
-  assert.match(appSource, /snapshot\.upcomingRecurringPayments\.slice\(0, 3\)/);
-  assert.match(appSource, /categoryDateFrom =\s*monthFilters\.dateFrom/);
-  assert.match(appSource, /dateFrom: categoryDateFrom/);
-  assert.match(appSource, /budgetProgressBadgeVariant\(row\.status\)/);
-  assert.match(appSource, /recurringPaymentDueLabel\(payment\)/);
+  assert.match(reportCardsSource, /snapshot\.budgetProgress\.slice\(0, 3\)/);
+  assert.match(
+    reportCardsSource,
+    /snapshot\.upcomingRecurringPayments\.slice\(0, 3\)/,
+  );
+  assert.match(
+    reportCardsSource,
+    /categoryDateFrom =\s*monthFilters\.dateFrom/,
+  );
+  assert.match(reportCardsSource, /dateFrom: categoryDateFrom/);
+  assert.match(overviewSource, /budgetProgressBadgeVariant\(row\.status\)/);
+  assert.match(overviewSource, /recurringPaymentDueLabel\(payment\)/);
 });
 
 test("transactions route exposes selected-row bulk category and merchant edits", async () => {
-  const appSource = await readFile("src/web/App.tsx", "utf8");
+  const transactionsRouteSource = await readFile(
+    "src/web/routes/transactions/index.tsx",
+    "utf8",
+  );
+  const transactionCellsSource = await readFile(
+    "src/web/transaction-cells.tsx",
+    "utf8",
+  );
 
-  assert.match(appSource, /type TransactionBulkEditState/);
-  assert.match(appSource, /selectedTransactionIds/);
-  assert.match(appSource, /function setTransactionSelected/);
-  assert.match(appSource, /function setVisibleTransactionsSelected/);
-  assert.match(appSource, /Select all visible transactions/);
-  assert.match(appSource, /Bulk edit selected transactions/);
-  assert.match(appSource, /Bulk category edit/);
-  assert.match(appSource, /Merchant override/);
-  assert.match(appSource, /updateLedgerTransactionsBulk\(\{/);
-  assert.match(appSource, /ids,/);
-  assert.match(appSource, /categoryId: bulkCategoryId/);
-  assert.match(appSource, /merchantName: trimmedBulkMerchantName/);
-  assert.match(appSource, /selectedEntryIds=\{selectedTransactionIds\}/);
-  assert.match(appSource, /onSelectionChange=\{setTransactionSelected\}/);
-  assert.match(appSource, /onSelectVisible=\{setVisibleTransactionsSelected\}/);
-  assert.match(appSource, /setSelectedTransactionIds\(new Set\(\)\)/);
+  assert.match(transactionsRouteSource, /type TransactionBulkEditState/);
+  assert.match(transactionsRouteSource, /selectedTransactionIds/);
+  assert.match(
+    transactionsRouteSource,
+    /const setTransactionSelected = useCallback/,
+  );
+  assert.match(
+    transactionsRouteSource,
+    /const setVisibleTransactionsSelected = useCallback/,
+  );
+  assert.match(transactionCellsSource, /Select all visible transactions/);
+  assert.match(transactionCellsSource, /const TransactionTableRow = memo/);
+  assert.match(transactionCellsSource, /function TransactionDateCell/);
+  assert.match(transactionCellsSource, /function TransactionAccountCell/);
+  assert.match(transactionCellsSource, /function TransactionStatusCell/);
+  assert.match(transactionCellsSource, /function TransactionAmountCell/);
+  assert.match(transactionCellsSource, /function TransactionTagsCell/);
+  assert.match(transactionsRouteSource, /Bulk edit selected transactions/);
+  assert.match(transactionsRouteSource, /Bulk category edit/);
+  assert.match(transactionsRouteSource, /Merchant override/);
+  assert.match(transactionsRouteSource, /updateLedgerTransactionsBulk\(\{/);
+  assert.match(transactionsRouteSource, /ids,/);
+  assert.match(transactionsRouteSource, /categoryId: bulkCategoryId/);
+  assert.match(
+    transactionsRouteSource,
+    /merchantName: trimmedBulkMerchantName/,
+  );
+  assert.match(
+    transactionsRouteSource,
+    /selectedEntryIds=\{selectedTransactionIds\}/,
+  );
+  assert.match(
+    transactionsRouteSource,
+    /onSelectionChange=\{setTransactionSelected\}/,
+  );
+  assert.match(
+    transactionsRouteSource,
+    /onSelectVisible=\{setVisibleTransactionsSelected\}/,
+  );
+  assert.match(
+    transactionsRouteSource,
+    /setSelectedTransactionIds\(new Set\(\)\)/,
+  );
 });
 
 test("serves local API health through Fastify", async () => {

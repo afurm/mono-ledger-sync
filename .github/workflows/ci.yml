@@ -42,6 +42,9 @@ jobs:
       - run: npm test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install browser smoke dependencies
+        run: npx playwright install --with-deps chromium
+      - run: npm run smoke:web
       - name: Live Monobank adapter smoke
         if: ${{ github.event_name == 'push' }}
         run: npm run test:live-monobank

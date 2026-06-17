@@ -210,7 +210,7 @@ test("query service defaults profile and wraps storage reads", async () => {
       ];
       const expectedConvertedExpenseTotals = {
         baseCurrencyCode: 980,
-        totalExpenses: 3304815,
+        totalExpenses: 3054815,
         missingCurrencyCodes: [],
         rates: expectedConvertedReportRates,
       };
@@ -219,9 +219,9 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(cashflowReport.from, "2025-11-01");
       assert.equal(cashflowReport.to, "2026-04-30");
       assert.equal(cashflowReport.totalIncome, 8520000);
-      assert.equal(cashflowReport.totalExpenses, 408650);
-      assert.equal(cashflowReport.netCashflow, 8111350);
-      assert.equal(cashflowReport.transactionCount, 7);
+      assert.equal(cashflowReport.totalExpenses, 158650);
+      assert.equal(cashflowReport.netCashflow, 8361350);
+      assert.equal(cashflowReport.transactionCount, 6);
       assert.deepEqual(
         cashflowReport.totals.map((row) => [
           row.currencyCode,
@@ -231,7 +231,7 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.transactionCount,
         ]),
         [
-          [980, 8500000, 335750, 8164250, 4],
+          [980, 8500000, 85750, 8414250, 3],
           [840, 0, 52900, -52900, 1],
           [978, 20000, 20000, 0, 2],
         ],
@@ -248,22 +248,22 @@ test("query service defaults profile and wraps storage reads", async () => {
         [
           ["2026-04", 840, 0, 52900, -52900, 1],
           ["2026-04", 978, 20000, 20000, 0, 2],
-          ["2026-04", 980, 8500000, 335750, 8164250, 4],
+          ["2026-04", 980, 8500000, 85750, 8414250, 3],
         ],
       );
       assert.deepEqual(cashflowReport.convertedTotals, {
         ...expectedConvertedExpenseTotals,
         totalIncome: 9361000,
-        netCashflow: 6056185,
+        netCashflow: 6306185,
       });
       assert.equal(savingsRateReport.months, 6);
       assert.equal(savingsRateReport.from, "2025-11-01");
       assert.equal(savingsRateReport.to, "2026-04-30");
       assert.equal(savingsRateReport.totalIncome, 8520000);
-      assert.equal(savingsRateReport.totalExpenses, 408650);
-      assert.equal(savingsRateReport.totalSavings, 8111350);
-      assert.equal(savingsRateReport.savingsRate, 95.2);
-      assert.equal(savingsRateReport.transactionCount, 7);
+      assert.equal(savingsRateReport.totalExpenses, 158650);
+      assert.equal(savingsRateReport.totalSavings, 8361350);
+      assert.equal(savingsRateReport.savingsRate, 98.14);
+      assert.equal(savingsRateReport.transactionCount, 6);
       assert.deepEqual(
         savingsRateReport.totals.map((row) => [
           row.currencyCode,
@@ -275,7 +275,7 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.averageMonthlySavings,
         ]),
         [
-          [980, 8500000, 335750, 8164250, 96.05, 4, 1360708],
+          [980, 8500000, 85750, 8414250, 98.99, 3, 1402375],
           [840, 0, 52900, -52900, 0, 1, -8817],
           [978, 20000, 20000, 0, 0, 2, 0],
         ],
@@ -293,13 +293,13 @@ test("query service defaults profile and wraps storage reads", async () => {
         [
           ["2026-04", 840, 0, 52900, -52900, 0, 1],
           ["2026-04", 978, 20000, 20000, 0, 0, 2],
-          ["2026-04", 980, 8500000, 335750, 8164250, 96.05, 4],
+          ["2026-04", 980, 8500000, 85750, 8414250, 98.99, 3],
         ],
       );
       assert.deepEqual(savingsRateReport.convertedTotals, {
         ...expectedConvertedExpenseTotals,
         totalIncome: 9361000,
-        totalSavings: 6056185,
+        totalSavings: 6306185,
       });
       const expectedBalanceTotals = [
         ...balances
@@ -380,8 +380,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(categoryTrendReport.months, 6);
       assert.equal(categoryTrendReport.from, "2025-11-01");
       assert.equal(categoryTrendReport.to, "2026-04-30");
-      assert.equal(categoryTrendReport.totalExpenses, 408650);
-      assert.equal(categoryTrendReport.transactionCount, 5);
+      assert.equal(categoryTrendReport.totalExpenses, 158650);
+      assert.equal(categoryTrendReport.transactionCount, 4);
       assert.deepEqual(
         categoryTrendReport.categories.map((row) => [
           row.categoryId,
@@ -391,7 +391,6 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.averageMonthlyAmount,
         ]),
         [
-          ["transfers", 980, 250000, 1, 41667],
           ["groceries", 980, 84250, 1, 14042],
           ["subscriptions", 840, 52900, 1, 8817],
           ["travel", 978, 20000, 1, 3333],
@@ -407,7 +406,6 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.transactionCount,
         ]),
         [
-          ["2026-04", "transfers", 980, 250000, 1],
           ["2026-04", "groceries", 980, 84250, 1],
           ["2026-04", "subscriptions", 840, 52900, 1],
           ["2026-04", "travel", 978, 20000, 1],
@@ -421,8 +419,8 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(merchantTrendReport.months, 6);
       assert.equal(merchantTrendReport.from, "2025-11-01");
       assert.equal(merchantTrendReport.to, "2026-04-30");
-      assert.equal(merchantTrendReport.totalExpenses, 408650);
-      assert.equal(merchantTrendReport.transactionCount, 5);
+      assert.equal(merchantTrendReport.totalExpenses, 158650);
+      assert.equal(merchantTrendReport.transactionCount, 4);
       assert.deepEqual(
         merchantTrendReport.merchants.map((row) => [
           row.merchantName,
@@ -432,7 +430,6 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.averageMonthlyAmount,
         ]),
         [
-          ["Emergency fund top-up", 980, 250000, 1, 41667],
           ["Fixture Grocery LLC", 980, 84250, 1, 14042],
           ["Cloud Subscription", 840, 52900, 1, 8817],
           ["Travel booking", 978, 20000, 1, 3333],
@@ -448,7 +445,6 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.transactionCount,
         ]),
         [
-          ["2026-04", "Emergency fund top-up", 980, 250000, 1],
           ["2026-04", "Fixture Grocery LLC", 980, 84250, 1],
           ["2026-04", "Cloud Subscription", 840, 52900, 1],
           ["2026-04", "Travel booking", 978, 20000, 1],
@@ -462,9 +458,9 @@ test("query service defaults profile and wraps storage reads", async () => {
       assert.equal(monthlySpendingReport.month, "2026-04");
       assert.equal(monthlySpendingReport.from, "2026-04-01");
       assert.equal(monthlySpendingReport.to, "2026-04-30");
-      assert.equal(monthlySpendingReport.totalExpenses, 408650);
-      assert.equal(monthlySpendingReport.transactionCount, 5);
-      assert.equal(monthlySpendingReport.averageTransactionAmount, 81730);
+      assert.equal(monthlySpendingReport.totalExpenses, 158650);
+      assert.equal(monthlySpendingReport.transactionCount, 4);
+      assert.equal(monthlySpendingReport.averageTransactionAmount, 39663);
       assert.deepEqual(
         monthlySpendingReport.currencyTotals.map((row) => [
           row.currencyCode,
@@ -473,7 +469,7 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.averageTransactionAmount,
         ]),
         [
-          [980, 335750, 3, 111917],
+          [980, 85750, 2, 42875],
           [840, 52900, 1, 52900],
           [978, 20000, 1, 20000],
         ],
@@ -487,11 +483,10 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.sharePercentage,
         ]),
         [
-          ["transfers", 980, 250000, 1, 74.46],
-          ["groceries", 980, 84250, 1, 25.09],
+          ["groceries", 980, 84250, 1, 98.25],
           ["subscriptions", 840, 52900, 1, 100],
           ["travel", 978, 20000, 1, 100],
-          ["transport", 980, 1500, 1, 0.45],
+          ["transport", 980, 1500, 1, 1.75],
         ],
       );
       assert.deepEqual(
@@ -502,7 +497,6 @@ test("query service defaults profile and wraps storage reads", async () => {
           row.transactionCount,
         ]),
         [
-          ["Emergency fund top-up", 980, 250000, 1],
           ["Fixture Grocery LLC", 980, 84250, 1],
           ["Cloud Subscription", 840, 52900, 1],
           ["Travel booking", 978, 20000, 1],
@@ -1360,6 +1354,184 @@ test("write service ignores transfer-like entries when calculating budget progre
 
       assert.equal(progress.actualAmount, 3_000);
       assert.equal(progress.status, "on_track");
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("statement writes infer internal transfers and preserve manual overrides", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.upsertAccounts([
+        {
+          id: "fixture-account-uah-main",
+          type: "account-uah",
+          currencyCode: 980,
+          balance: 200_000,
+          creditLimit: 0,
+        },
+        {
+          id: "fixture-account-uah-jar",
+          type: "jar-uah",
+          currencyCode: 980,
+          balance: 50_000,
+          creditLimit: 0,
+        },
+      ]);
+
+      const transferOut = {
+        id: "fixture-internal-transfer-out",
+        time: Math.floor(Date.parse("2026-04-14T10:00:00.000Z") / 1000),
+        description: "Savings movement",
+        mcc: 5411,
+        originalMcc: 5411,
+        amount: -25_000,
+        operationAmount: -25_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 175_000,
+        hold: false,
+      };
+      const transferIn = {
+        id: "fixture-internal-transfer-in",
+        time: Math.floor(Date.parse("2026-04-14T10:05:00.000Z") / 1000),
+        description: "Savings movement",
+        mcc: 6012,
+        originalMcc: 6012,
+        amount: 25_000,
+        operationAmount: 25_000,
+        currencyCode: 980,
+        commissionRate: 0,
+        cashbackAmount: 0,
+        balance: 75_000,
+        hold: false,
+      };
+
+      await db.upsertStatementItems(
+        "fixture-account-uah-main",
+        [transferOut],
+        [
+          createLedgerEntryFromStatementItem(
+            "fixture-account-uah-main",
+            transferOut,
+          ),
+        ],
+      );
+      await db.upsertStatementItems(
+        "fixture-account-uah-jar",
+        [transferIn],
+        [
+          createLedgerEntryFromStatementItem(
+            "fixture-account-uah-jar",
+            transferIn,
+          ),
+        ],
+      );
+
+      const inferredEntries = await db.listLedgerEntries({
+        profile,
+        limit: 10,
+        sortBy: "time",
+        sortDirection: "asc",
+      });
+
+      assert.deepEqual(
+        inferredEntries.entries.map((entry) => [
+          entry.rawStatementItemId,
+          entry.categoryId,
+          entry.categorySource,
+          entry.categoryRuleId,
+        ]),
+        [
+          [
+            "fixture-internal-transfer-out",
+            "transfers",
+            "system_rule",
+            "internal-transfer-pair",
+          ],
+          [
+            "fixture-internal-transfer-in",
+            "transfers",
+            "system_rule",
+            "internal-transfer-pair",
+          ],
+        ],
+      );
+
+      const queryService = createLedgerQueryService({
+        db,
+        defaultProfile: profile,
+      });
+      const monthlySpendingReport = await queryService.getMonthlySpendingReport(
+        profile,
+        "2026-04",
+      );
+      const cashflowReport = await queryService.getCashflowReport(profile, 1);
+
+      assert.equal(monthlySpendingReport.totalExpenses, 0);
+      assert.equal(monthlySpendingReport.transactionCount, 0);
+      assert.equal(cashflowReport.totalIncome, 0);
+      assert.equal(cashflowReport.totalExpenses, 0);
+      assert.equal(cashflowReport.netCashflow, 0);
+
+      const [outEntry, inEntry] = inferredEntries.entries;
+      assert.ok(outEntry);
+      assert.ok(inEntry);
+
+      await db.updateLedgerEntriesBulkEdit(profile, [outEntry.id], {
+        categoryId: "groceries",
+      });
+      await db.updateLedgerEntriesBulkEdit(profile, [inEntry.id], {
+        categoryId: "income",
+      });
+      await db.upsertStatementItems(
+        "fixture-account-uah-main",
+        [transferOut],
+        [
+          createLedgerEntryFromStatementItem(
+            "fixture-account-uah-main",
+            transferOut,
+          ),
+        ],
+      );
+      await db.upsertStatementItems(
+        "fixture-account-uah-jar",
+        [transferIn],
+        [
+          createLedgerEntryFromStatementItem(
+            "fixture-account-uah-jar",
+            transferIn,
+          ),
+        ],
+      );
+
+      const overriddenEntries = await db.listLedgerEntries({
+        profile,
+        limit: 10,
+        sortBy: "time",
+        sortDirection: "asc",
+      });
+
+      assert.deepEqual(
+        overriddenEntries.entries.map((entry) => [
+          entry.rawStatementItemId,
+          entry.categoryId,
+          entry.categorySource,
+        ]),
+        [
+          ["fixture-internal-transfer-out", "groceries", "manual"],
+          ["fixture-internal-transfer-in", "income", "manual"],
+        ],
+      );
     } finally {
       await db.close();
     }

@@ -1,4 +1,4 @@
-import type { SyncRun } from "./api.js";
+import type { SyncRun } from "./api-types.js";
 
 export interface SyncRunSummaryStats {
   runs: number;

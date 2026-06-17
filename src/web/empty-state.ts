@@ -1,4 +1,7 @@
-import type { LocalApiMonobankTokenStatus, LocalAppSnapshot } from "./api.js";
+import type {
+  LocalApiMonobankTokenStatus,
+  LocalAppSnapshot,
+} from "./api-types.js";
 import type { RouteId } from "./navigation.js";
 
 /**
