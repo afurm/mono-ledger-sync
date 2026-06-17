@@ -27,6 +27,7 @@ import type {
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
   LedgerEntryCategoryRestoreEntry,
+  LedgerEntryReviewState,
   LedgerEntrySplitPlanUpdate,
   LedgerEntryPage,
   LedgerEntryQuery,
@@ -35,6 +36,7 @@ import type {
   LedgerJar,
   LedgerSummary,
   LedgerWriteStats,
+  LocalExportRecord,
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
@@ -53,14 +55,20 @@ const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3") as typeof BetterSqlite3;
 
 export const sqliteStorageEngine = "sqlite";
+const internalTransferCategoryId = "transfers";
+const internalTransferCategoryName = "Transfers";
+const internalTransferRuleId = "internal-transfer-pair";
+const internalTransferWindowSeconds = 3 * 24 * 60 * 60;
 
 const ledgerEntrySortColumns: Record<LedgerEntrySortField, string> = {
-  time: "time",
-  merchant: "LOWER(COALESCE(merchant_name, description, ''))",
-  amount: "amount",
-  account: "account_id",
-  category: "LOWER(COALESCE(category_name, category_id, ''))",
-  status: "hold",
+  time: "ledger_entries.time",
+  merchant:
+    "LOWER(COALESCE(ledger_entries.merchant_name, ledger_entries.description, ''))",
+  amount: "ledger_entries.amount",
+  account: "ledger_entries.account_id",
+  category:
+    "LOWER(COALESCE(ledger_entries.category_name, ledger_entries.category_id, ''))",
+  status: "ledger_entries.hold",
 };
 
 export interface SqliteLedgerDbOptions {
@@ -145,6 +153,10 @@ export interface SqliteLedgerDb extends LedgerDb {
   getLedgerSummary(profile?: string): Promise<LedgerSummary>;
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
+  upsertCategoryRule(
+    profile: string,
+    rule: CategoryRule,
+  ): Promise<CategoryRule>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listBudgets(profile?: string): Promise<readonly Budget[]>;
   listBudgetPeriods(profile?: string): Promise<readonly BudgetPeriod[]>;
@@ -178,6 +190,12 @@ export interface SqliteLedgerDb extends LedgerDb {
     profile?: string,
     limit?: number,
   ): Promise<readonly StoredWebhookEvent[]>;
+  recordLocalExport(record: LocalExportRecord): Promise<LocalExportRecord>;
+  listLocalExports(
+    profile?: string,
+    limit?: number,
+  ): Promise<readonly LocalExportRecord[]>;
+  clearProfileLedgerData(profile: string): Promise<Record<string, number>>;
   importLocalConfiguration(
     profile: string,
     configuration: SqliteLocalConfigurationImport,
@@ -199,6 +217,7 @@ export interface SqliteLedgerDb extends LedgerDb {
     receivedBefore?: string,
   ): Promise<void>;
   getDatabaseInfo(profile?: string): Promise<SqliteDatabaseInfo>;
+  checkpoint(): Promise<void>;
   compact(): Promise<void>;
   close(): Promise<void>;
 }
@@ -243,6 +262,9 @@ interface SqliteLedgerEntryRow {
   note: string | null;
   tags_json: string | null;
   split_plan_json: string | null;
+  review_state?: LedgerEntryReviewState | null;
+  reviewed_at?: string | null;
+  reviewed_source?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -264,6 +286,12 @@ interface SqliteSyncCursorRow {
 interface SqliteLocalAppSettingsRow {
   profile: string;
   source: "fixture" | "monobank" | null;
+  sync_schedule: LocalAppSettings["syncSchedule"] | null;
+  excluded_account_ids_json: string | null;
+  export_directory: string | null;
+  budget_warning_threshold: number | null;
+  last_backup_at: string | null;
+  last_compact_at: string | null;
   updated_at: string;
 }
 
@@ -305,6 +333,21 @@ interface SqlitePendingWebhookEventRow {
   id: string;
   statement_item_id: string | null;
   payload_json: string;
+}
+
+interface SqliteLocalExportRow {
+  id: string;
+  profile: string;
+  format: string;
+  preset: string | null;
+  filters_json: string;
+  row_count: number;
+  destination: LocalExportRecord["destination"];
+  file_path: string | null;
+  status: LocalExportRecord["status"];
+  created_at: string;
+  completed_at: string | null;
+  error_message: string | null;
 }
 
 interface SqliteSummaryRow {
@@ -470,6 +513,17 @@ interface SeedMerchantCleanupRule {
   priority: number;
   merchantContains: string;
   canonicalName: string;
+}
+
+interface InternalTransferCandidateRow {
+  id: string;
+  account_id: string;
+  time: number;
+  amount: number;
+  currency_code: number;
+  category_id: string | null;
+  hold: number;
+  has_category_override: number | null;
 }
 
 const seededCategories: readonly SeedCategory[] = [
@@ -1271,6 +1325,63 @@ const migrations: readonly SqliteMigration[] = [
       ALTER TABLE sync_runs ADD COLUMN error_message TEXT;
     `,
   },
+  {
+    id: "0022_ledger_entry_review_states",
+    description: "Track local transaction review state",
+    sql: `
+      CREATE TABLE IF NOT EXISTS ledger_entry_review_states (
+        profile TEXT NOT NULL,
+        ledger_entry_id TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'needs_review',
+        reviewed_at TEXT,
+        reviewed_source TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (profile, ledger_entry_id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ledger_entry_review_states_profile_state
+        ON ledger_entry_review_states(profile, state, updated_at DESC);
+    `,
+  },
+  {
+    id: "0023_local_app_cockpit_settings",
+    description: "Store local cockpit workflow settings",
+    sql: `
+      ALTER TABLE local_app_settings ADD COLUMN sync_schedule TEXT;
+      ALTER TABLE local_app_settings ADD COLUMN excluded_account_ids_json TEXT;
+      ALTER TABLE local_app_settings ADD COLUMN export_directory TEXT;
+      ALTER TABLE local_app_settings ADD COLUMN budget_warning_threshold INTEGER;
+      ALTER TABLE local_app_settings ADD COLUMN last_backup_at TEXT;
+      ALTER TABLE local_app_settings ADD COLUMN last_compact_at TEXT;
+    `,
+  },
+  {
+    id: "0024_local_exports",
+    description: "Track recent local export runs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS local_exports (
+        id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        format TEXT NOT NULL,
+        preset TEXT,
+        filters_json TEXT NOT NULL,
+        row_count INTEGER NOT NULL,
+        destination TEXT NOT NULL,
+        file_path TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        error_message TEXT,
+        PRIMARY KEY (profile, id),
+        FOREIGN KEY (profile) REFERENCES profiles(name)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_local_exports_profile_created
+        ON local_exports(profile, created_at DESC);
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -1466,6 +1577,56 @@ function parseTags(value: string | null): readonly string[] | undefined {
   return tags.length > 0 ? tags : undefined;
 }
 
+function parseStringList(value: string | null): readonly string[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        parsed
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function parseRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return {};
+  }
+
+  return {};
+}
+
+function isSyncSchedule(
+  value: unknown,
+): value is NonNullable<LocalAppSettings["syncSchedule"]> {
+  return (
+    value === "manual" ||
+    value === "hourly" ||
+    value === "daily" ||
+    value === "app_start"
+  );
+}
+
 function parseSplitPlan(
   value: string | null,
 ): readonly { category: string; amount: number }[] | undefined {
@@ -1545,15 +1706,29 @@ function normalizeLedgerEntryAnnotation(update: LedgerEntryAnnotationUpdate): {
   };
 }
 
+function isLedgerEntryReviewState(
+  value: unknown,
+): value is LedgerEntryReviewState {
+  return (
+    value === "needs_review" || value === "reviewed" || value === "ignored"
+  );
+}
+
 function normalizeLedgerEntryBulkEdit(update: LedgerEntryBulkEditUpdate): {
   categoryId: string | null | undefined;
   merchantName: string | null | undefined;
   tagsJson: string | null | undefined;
+  reviewState: LedgerEntryReviewState | undefined;
+  reviewedSource: string | null | undefined;
 } {
   const categoryId =
     update.categoryId === undefined ? undefined : update.categoryId.trim();
   const merchantName =
     update.merchantName === undefined ? undefined : update.merchantName.trim();
+  const reviewedSource =
+    update.reviewedSource === undefined
+      ? undefined
+      : update.reviewedSource.trim();
   const tags =
     update.tags === undefined
       ? undefined
@@ -1578,6 +1753,15 @@ function normalizeLedgerEntryBulkEdit(update: LedgerEntryBulkEditUpdate): {
         : tags.length === 0
           ? null
           : JSON.stringify(tags),
+    reviewState: isLedgerEntryReviewState(update.reviewState)
+      ? update.reviewState
+      : undefined,
+    reviewedSource:
+      reviewedSource === undefined
+        ? undefined
+        : reviewedSource === ""
+          ? null
+          : reviewedSource,
   };
 }
 
@@ -2016,6 +2200,16 @@ function mapLedgerEntryRow(row: SqliteLedgerEntryRow): LedgerEntry {
     entry.splitPlan = splitPlan;
   }
 
+  entry.reviewState = row.review_state ?? "needs_review";
+
+  if (row.reviewed_at) {
+    entry.reviewedAt = row.reviewed_at;
+  }
+
+  if (row.reviewed_source) {
+    entry.reviewedSource = row.reviewed_source;
+  }
+
   return entry;
 }
 
@@ -2099,6 +2293,112 @@ function mapWebhookEventRow(row: SqliteWebhookEventRow): StoredWebhookEvent {
   return event;
 }
 
+function mapLocalAppSettingsRow(
+  row: SqliteLocalAppSettingsRow,
+): LocalAppSettings {
+  const settings: LocalAppSettings = {
+    profile: row.profile,
+    updatedAt: row.updated_at,
+  };
+  const excludedAccountIds = parseStringList(row.excluded_account_ids_json);
+
+  if (row.source !== null) {
+    settings.source = row.source;
+  }
+
+  if (isSyncSchedule(row.sync_schedule)) {
+    settings.syncSchedule = row.sync_schedule;
+  }
+
+  if (excludedAccountIds.length > 0) {
+    settings.excludedAccountIds = excludedAccountIds;
+  }
+
+  if (row.export_directory !== null && row.export_directory.trim() !== "") {
+    settings.exportDirectory = row.export_directory;
+  }
+
+  if (
+    row.budget_warning_threshold !== null &&
+    Number.isInteger(row.budget_warning_threshold)
+  ) {
+    settings.budgetWarningThreshold = row.budget_warning_threshold;
+  }
+
+  if (row.last_backup_at !== null) {
+    settings.lastBackupAt = row.last_backup_at;
+  }
+
+  if (row.last_compact_at !== null) {
+    settings.lastCompactAt = row.last_compact_at;
+  }
+
+  return settings;
+}
+
+function mapLocalExportRow(row: SqliteLocalExportRow): LocalExportRecord {
+  const record: LocalExportRecord = {
+    id: row.id,
+    profile: row.profile,
+    format: row.format,
+    filters: parseRecord(row.filters_json),
+    rowCount: row.row_count,
+    destination: row.destination,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+
+  if (row.preset !== null) {
+    record.preset = row.preset;
+  }
+
+  if (row.file_path !== null) {
+    record.filePath = row.file_path;
+  }
+
+  if (row.completed_at !== null) {
+    record.completedAt = row.completed_at;
+  }
+
+  if (row.error_message !== null) {
+    record.errorMessage = row.error_message;
+  }
+
+  return record;
+}
+
+function accountExclusionClause(
+  excludedAccountIds: readonly string[] | undefined,
+  column = "ledger_entries.account_id",
+): {
+  sql: string;
+  params: Record<string, string>;
+} {
+  const normalizedIds = [
+    ...new Set(
+      (excludedAccountIds ?? []).map((id) => id.trim()).filter(Boolean),
+    ),
+  ];
+
+  if (normalizedIds.length === 0) {
+    return {
+      sql: "",
+      params: {},
+    };
+  }
+
+  const placeholders = normalizedIds.map((id, index) => {
+    return [`excludedAccountId${index}`, id] as const;
+  });
+
+  return {
+    sql: ` AND ${column} NOT IN (${placeholders
+      .map(([key]) => `@${key}`)
+      .join(", ")})`,
+    params: Object.fromEntries(placeholders),
+  };
+}
+
 function ensureParentDirectory(filePath: string): void {
   if (filePath === ":memory:") {
     return;
@@ -2111,32 +2411,51 @@ function buildLedgerEntryWhereClause(query: LedgerEntryQuery): {
   sql: string;
   params: Record<string, string | number>;
 } {
-  const clauses = ["profile = @profile"];
+  const clauses = ["ledger_entries.profile = @profile"];
   const params: Record<string, string | number> = {
     profile: query.profile,
   };
 
   if (query.accountId) {
-    clauses.push("account_id = @accountId");
+    clauses.push("ledger_entries.account_id = @accountId");
     params.accountId = query.accountId;
+  } else if (!query.includeExcludedAccounts) {
+    const exclusions = accountExclusionClause(query.excludedAccountIds);
+
+    if (exclusions.sql) {
+      clauses.push(exclusions.sql.replace(/^ AND /, ""));
+      Object.assign(params, exclusions.params);
+    }
   }
 
   if (query.categoryId) {
-    clauses.push("category_id = @categoryId");
+    clauses.push("ledger_entries.category_id = @categoryId");
     params.categoryId = query.categoryId;
   }
 
   if (query.merchantName?.trim()) {
-    clauses.push("merchant_name LIKE @merchantName");
+    clauses.push("ledger_entries.merchant_name LIKE @merchantName");
     params.merchantName = `%${query.merchantName.trim()}%`;
   }
 
   if (query.status === "hold") {
-    clauses.push("hold = 1");
+    clauses.push("ledger_entries.hold = 1");
   }
 
   if (query.status === "posted") {
-    clauses.push("hold = 0");
+    clauses.push("ledger_entries.hold = 0");
+  }
+
+  if (query.reviewState !== undefined) {
+    clauses.push(
+      "COALESCE(ledger_entry_review_states.state, 'needs_review') = @reviewState",
+    );
+    params.reviewState = query.reviewState;
+  }
+
+  if (query.currencyCode !== undefined) {
+    clauses.push("ledger_entries.currency_code = @currencyCode");
+    params.currencyCode = query.currencyCode;
   }
 
   if (query.tag?.trim()) {
@@ -2147,28 +2466,28 @@ function buildLedgerEntryWhereClause(query: LedgerEntryQuery): {
   }
 
   if (query.amountMin !== undefined) {
-    clauses.push("amount >= @amountMin");
+    clauses.push("ledger_entries.amount >= @amountMin");
     params.amountMin = query.amountMin;
   }
 
   if (query.amountMax !== undefined) {
-    clauses.push("amount <= @amountMax");
+    clauses.push("ledger_entries.amount <= @amountMax");
     params.amountMax = query.amountMax;
   }
 
   if (query.from !== undefined) {
-    clauses.push("time >= @from");
+    clauses.push("ledger_entries.time >= @from");
     params.from = query.from;
   }
 
   if (query.to !== undefined) {
-    clauses.push("time <= @to");
+    clauses.push("ledger_entries.time <= @to");
     params.to = query.to;
   }
 
   if (query.search?.trim()) {
     clauses.push(
-      "(description LIKE @search OR merchant_name LIKE @search OR category_name LIKE @search OR note LIKE @search OR tags_json LIKE @search)",
+      "(ledger_entries.description LIKE @search OR ledger_entries.merchant_name LIKE @search OR ledger_entries.category_name LIKE @search OR ledger_entries.note LIKE @search OR ledger_entries.tags_json LIKE @search)",
     );
     params.search = `%${query.search.trim()}%`;
   }
@@ -2304,16 +2623,22 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   async getAccountBalances(
     profile = this.profile,
   ): Promise<readonly AccountBalance[]> {
+    const settings = await this.getLocalAppSettings(profile);
+    const exclusions = accountExclusionClause(
+      settings?.excludedAccountIds,
+      "id",
+    );
     const rows = this.#database
       .prepare(
         `
           SELECT id AS accountId, currency_code AS currencyCode, balance, credit_limit AS creditLimit
           FROM accounts
-          WHERE profile = ?
+          WHERE profile = @profile
+            ${exclusions.sql}
           ORDER BY id
         `,
       )
-      .all(profile) as AccountBalance[];
+      .all({ profile, ...exclusions.params }) as AccountBalance[];
 
     return rows;
   }
@@ -2343,22 +2668,23 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     const row = this.#database
       .prepare(
         `
-          SELECT profile, source, updated_at
+          SELECT
+            profile,
+            source,
+            sync_schedule,
+            excluded_account_ids_json,
+            export_directory,
+            budget_warning_threshold,
+            last_backup_at,
+            last_compact_at,
+            updated_at
           FROM local_app_settings
           WHERE profile = ?
         `,
       )
       .get(profile) as SqliteLocalAppSettingsRow | undefined;
 
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      profile: row.profile,
-      ...(row.source === null ? {} : { source: row.source }),
-      updatedAt: row.updated_at,
-    };
+    return row ? mapLocalAppSettingsRow(row) : undefined;
   }
 
   async updateLocalAppSettings(
@@ -2369,29 +2695,86 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
 
     const current = await this.getLocalAppSettings(profile);
     const nextSource = update.source ?? current?.source;
+    const nextSyncSchedule = update.syncSchedule ?? current?.syncSchedule;
+    const nextExcludedAccountIds =
+      update.excludedAccountIds === undefined
+        ? (current?.excludedAccountIds ?? [])
+        : [
+            ...new Set(
+              update.excludedAccountIds.map((id) => id.trim()).filter(Boolean),
+            ),
+          ];
+    const nextExportDirectory =
+      update.exportDirectory === undefined
+        ? current?.exportDirectory
+        : (update.exportDirectory?.trim() ?? undefined);
+    const nextBudgetWarningThreshold =
+      update.budgetWarningThreshold ?? current?.budgetWarningThreshold;
+    const nextLastBackupAt = update.lastBackupAt ?? current?.lastBackupAt;
+    const nextLastCompactAt = update.lastCompactAt ?? current?.lastCompactAt;
     const updatedAt = nowIso();
 
     this.#database
       .prepare(
         `
-          INSERT INTO local_app_settings (profile, source, updated_at)
-          VALUES (@profile, @source, @updatedAt)
+          INSERT INTO local_app_settings (
+            profile,
+            source,
+            sync_schedule,
+            excluded_account_ids_json,
+            export_directory,
+            budget_warning_threshold,
+            last_backup_at,
+            last_compact_at,
+            updated_at
+          )
+          VALUES (
+            @profile,
+            @source,
+            @syncSchedule,
+            @excludedAccountIdsJson,
+            @exportDirectory,
+            @budgetWarningThreshold,
+            @lastBackupAt,
+            @lastCompactAt,
+            @updatedAt
+          )
           ON CONFLICT(profile) DO UPDATE SET
             source = excluded.source,
+            sync_schedule = excluded.sync_schedule,
+            excluded_account_ids_json = excluded.excluded_account_ids_json,
+            export_directory = excluded.export_directory,
+            budget_warning_threshold = excluded.budget_warning_threshold,
+            last_backup_at = excluded.last_backup_at,
+            last_compact_at = excluded.last_compact_at,
             updated_at = excluded.updated_at
         `,
       )
       .run({
         profile,
         source: nextSource ?? null,
+        syncSchedule: nextSyncSchedule ?? null,
+        excludedAccountIdsJson:
+          nextExcludedAccountIds.length === 0
+            ? null
+            : JSON.stringify(nextExcludedAccountIds),
+        exportDirectory: nextExportDirectory ?? null,
+        budgetWarningThreshold: nextBudgetWarningThreshold ?? null,
+        lastBackupAt: nextLastBackupAt ?? null,
+        lastCompactAt: nextLastCompactAt ?? null,
         updatedAt,
       });
 
-    return {
-      profile,
-      ...(nextSource === undefined ? {} : { source: nextSource }),
-      updatedAt,
-    };
+    const row = await this.getLocalAppSettings(profile);
+
+    if (!row) {
+      return {
+        profile,
+        updatedAt,
+      };
+    }
+
+    return row;
   }
 
   async recordSyncRun(run: SyncRun): Promise<void> {
@@ -2682,6 +3065,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     entries: readonly LedgerEntry[],
   ): Promise<LedgerWriteStats> {
     let stats = emptyWriteStats();
+    const touchedLedgerEntryIds = new Set<string>();
     const rawExists = this.#database.prepare(`
       SELECT 1 FROM raw_statement_items
       WHERE profile = ? AND account_id = ? AND statement_item_id = ?
@@ -2737,6 +3121,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           continue;
         }
 
+        touchedLedgerEntryIds.add(entry.id);
+
         if (existed && previousPayload === payloadJson) {
           const normalizedEntry = this.mergeManualLedgerEntryOverrides(
             this.prepareLedgerEntryForWrite(entry, item),
@@ -2778,15 +3164,176 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           stats.skipped += 1;
         }
       }
+
+      stats = addWriteStats(
+        stats,
+        this.applyInferredInternalTransferCategories(
+          [...touchedLedgerEntryIds],
+          nowIso(),
+        ),
+      );
     });
     write();
 
     return stats;
   }
 
+  private applyInferredInternalTransferCategories(
+    entryIds: readonly string[],
+    updatedAt: string,
+  ): LedgerWriteStats {
+    const normalizedIds = [
+      ...new Set(entryIds.map((id) => id.trim()).filter(Boolean)),
+    ];
+
+    if (normalizedIds.length === 0) {
+      return emptyWriteStats();
+    }
+
+    const selectEntry = this.#database.prepare(
+      `
+        SELECT
+          ledger_entries.id,
+          ledger_entries.account_id,
+          ledger_entries.time,
+          ledger_entries.amount,
+          ledger_entries.currency_code,
+          ledger_entries.category_id,
+          ledger_entries.hold,
+          ledger_entry_manual_overrides.has_category_override
+        FROM ledger_entries
+        LEFT JOIN ledger_entry_manual_overrides
+          ON ledger_entry_manual_overrides.profile = ledger_entries.profile
+          AND ledger_entry_manual_overrides.ledger_entry_id = ledger_entries.id
+        WHERE ledger_entries.profile = ? AND ledger_entries.id = ?
+      `,
+    );
+    const selectCounterpart = this.#database.prepare(
+      `
+        SELECT
+          ledger_entries.id,
+          ledger_entries.account_id,
+          ledger_entries.time,
+          ledger_entries.amount,
+          ledger_entries.currency_code,
+          ledger_entries.category_id,
+          ledger_entries.hold,
+          ledger_entry_manual_overrides.has_category_override
+        FROM ledger_entries
+        LEFT JOIN ledger_entry_manual_overrides
+          ON ledger_entry_manual_overrides.profile = ledger_entries.profile
+          AND ledger_entry_manual_overrides.ledger_entry_id = ledger_entries.id
+        WHERE ledger_entries.profile = @profile
+          AND ledger_entries.id <> @id
+          AND ledger_entries.account_id <> @accountId
+          AND ledger_entries.currency_code = @currencyCode
+          AND ledger_entries.amount = @oppositeAmount
+          AND ledger_entries.amount <> 0
+          AND ledger_entries.hold = 0
+          AND ledger_entries.time BETWEEN @from AND @to
+          AND COALESCE(ledger_entry_manual_overrides.has_category_override, 0) = 0
+        ORDER BY ABS(ledger_entries.time - @time), ledger_entries.id
+        LIMIT 1
+      `,
+    );
+    const updateTransferCategory = this.#database.prepare(
+      `
+        UPDATE ledger_entries
+        SET
+          category_id = @categoryId,
+          category_name = @categoryName,
+          category_source = @categorySource,
+          category_rule_id = @categoryRuleId,
+          category_rule_version = @categoryRuleVersion,
+          updated_at = @updatedAt
+        WHERE profile = @profile
+          AND id = @id
+          AND category_id IS NOT @categoryId
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ledger_entry_manual_overrides
+            WHERE ledger_entry_manual_overrides.profile = ledger_entries.profile
+              AND ledger_entry_manual_overrides.ledger_entry_id = ledger_entries.id
+              AND ledger_entry_manual_overrides.has_category_override = 1
+          )
+      `,
+    );
+    const pairedIds = new Set<string>();
+    let updated = 0;
+
+    const markTransfer = (row: InternalTransferCandidateRow): void => {
+      if (
+        row.category_id === internalTransferCategoryId ||
+        row.has_category_override === 1
+      ) {
+        return;
+      }
+
+      const result = updateTransferCategory.run({
+        profile: this.profile,
+        id: row.id,
+        categoryId: internalTransferCategoryId,
+        categoryName: internalTransferCategoryName,
+        categorySource: "system_rule",
+        categoryRuleId: internalTransferRuleId,
+        categoryRuleVersion: updatedAt,
+        updatedAt,
+      });
+
+      updated += result.changes;
+    };
+
+    for (const id of normalizedIds) {
+      if (pairedIds.has(id)) {
+        continue;
+      }
+
+      const row = selectEntry.get(this.profile, id) as
+        | InternalTransferCandidateRow
+        | undefined;
+
+      if (
+        row === undefined ||
+        row.amount === 0 ||
+        row.hold === 1 ||
+        row.has_category_override === 1
+      ) {
+        continue;
+      }
+
+      const counterpart = selectCounterpart.get({
+        profile: this.profile,
+        id: row.id,
+        accountId: row.account_id,
+        currencyCode: row.currency_code,
+        oppositeAmount: -row.amount,
+        from: row.time - internalTransferWindowSeconds,
+        to: row.time + internalTransferWindowSeconds,
+        time: row.time,
+      }) as InternalTransferCandidateRow | undefined;
+
+      if (counterpart === undefined) {
+        continue;
+      }
+
+      markTransfer(row);
+      markTransfer(counterpart);
+      pairedIds.add(row.id);
+      pairedIds.add(counterpart.id);
+    }
+
+    return {
+      inserted: 0,
+      updated,
+      skipped: 0,
+    };
+  }
+
   async listAccounts(
     profile = this.profile,
   ): Promise<readonly LedgerAccount[]> {
+    const settings = await this.getLocalAppSettings(profile);
+    const excludedAccountIds = new Set(settings?.excludedAccountIds ?? []);
     const rows = this.#database
       .prepare(
         `
@@ -2798,7 +3345,11 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       )
       .all(profile) as SqliteAccountRow[];
 
-    return rows.map(mapAccountRow);
+    return rows.map((row) => {
+      const account = mapAccountRow(row);
+      account.includedInReports = !excludedAccountIds.has(account.id);
+      return account;
+    });
   }
 
   async listJars(profile = this.profile): Promise<readonly LedgerJar[]> {
@@ -2848,6 +3399,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   async listCategorySpending(
     profile = this.profile,
   ): Promise<readonly LedgerCategorySpending[]> {
+    const settings = await this.getLocalAppSettings(profile);
+    const exclusions = accountExclusionClause(settings?.excludedAccountIds);
     const rows = this.#database
       .prepare(
         `
@@ -2858,8 +3411,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             SUM(-amount) AS amount,
             COUNT(*) AS transaction_count
           FROM ledger_entries
-          WHERE profile = ?
+          WHERE profile = @profile
             AND amount < 0
+            ${exclusions.sql}
           GROUP BY
             COALESCE(category_id, 'uncategorized'),
             COALESCE(NULLIF(category_name, ''), 'Uncategorized'),
@@ -2867,7 +3421,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           ORDER BY amount DESC, category_name, currency_code
         `,
       )
-      .all(profile) as SqliteCategorySpendingRow[];
+      .all({ profile, ...exclusions.params }) as SqliteCategorySpendingRow[];
 
     return rows.map(mapCategorySpendingRow);
   }
@@ -2900,6 +3454,110 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteCategoryRuleRow[];
 
     return rows.map(mapCategoryRuleRow);
+  }
+
+  async upsertCategoryRule(
+    profile: string,
+    rule: CategoryRule,
+  ): Promise<CategoryRule> {
+    const normalizedProfile = profile.trim() || this.profile;
+    const timestamp = rule.updatedAt ?? rule.createdAt;
+
+    this.ensureProfileName(normalizedProfile);
+    this.#database
+      .prepare(
+        `
+          INSERT INTO category_rules (
+            profile,
+            id,
+            category_id,
+            name,
+            priority,
+            match_type,
+            merchant_contains,
+            description_contains,
+            mcc,
+            amount_direction,
+            is_system,
+            is_enabled,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            @profile,
+            @id,
+            @categoryId,
+            @name,
+            @priority,
+            @matchType,
+            @merchantContains,
+            @descriptionContains,
+            @mcc,
+            @amountDirection,
+            @isSystem,
+            @isEnabled,
+            @createdAt,
+            @updatedAt
+          )
+          ON CONFLICT(profile, id) DO UPDATE SET
+            category_id = excluded.category_id,
+            name = excluded.name,
+            priority = excluded.priority,
+            match_type = excluded.match_type,
+            merchant_contains = excluded.merchant_contains,
+            description_contains = excluded.description_contains,
+            mcc = excluded.mcc,
+            amount_direction = excluded.amount_direction,
+            is_system = excluded.is_system,
+            is_enabled = excluded.is_enabled,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run({
+        profile: normalizedProfile,
+        id: rule.id,
+        categoryId: rule.categoryId,
+        name: rule.name,
+        priority: rule.priority,
+        matchType: rule.matchType,
+        merchantContains: rule.merchantContains ?? null,
+        descriptionContains: rule.descriptionContains ?? null,
+        mcc: rule.mcc ?? null,
+        amountDirection: rule.amountDirection ?? null,
+        isSystem: rule.isSystem ? 1 : 0,
+        isEnabled: rule.isEnabled === false ? 0 : 1,
+        createdAt: rule.createdAt,
+        updatedAt: timestamp,
+      });
+
+    const row = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            category_id,
+            name,
+            priority,
+            match_type,
+            merchant_contains,
+            description_contains,
+            mcc,
+            amount_direction,
+            is_system,
+            is_enabled,
+            created_at,
+            updated_at
+          FROM category_rules
+          WHERE profile = ? AND id = ?
+        `,
+      )
+      .get(normalizedProfile, rule.id) as SqliteCategoryRuleRow | undefined;
+
+    if (!row) {
+      throw new Error("Category rule could not be saved.");
+    }
+
+    return mapCategoryRuleRow(row);
   }
 
   async listMerchants(profile = this.profile): Promise<readonly Merchant[]> {
@@ -3373,23 +4031,62 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
-    const where = buildLedgerEntryWhereClause(query);
-    const orderBy = buildLedgerEntryOrderByClause(query);
+    const settings =
+      query.excludedAccountIds === undefined
+        ? await this.getLocalAppSettings(query.profile)
+        : undefined;
+    const resolvedQuery: LedgerEntryQuery = {
+      ...(settings?.excludedAccountIds === undefined
+        ? {}
+        : { excludedAccountIds: settings.excludedAccountIds }),
+      ...query,
+    };
+    const where = buildLedgerEntryWhereClause(resolvedQuery);
+    const orderBy = buildLedgerEntryOrderByClause(resolvedQuery);
     const totalRow = this.#database
       .prepare(
-        `SELECT COUNT(*) AS total FROM ledger_entries WHERE ${where.sql}`,
+        `
+          SELECT COUNT(*) AS total
+          FROM ledger_entries
+          LEFT JOIN ledger_entry_review_states
+            ON ledger_entry_review_states.profile = ledger_entries.profile
+            AND ledger_entry_review_states.ledger_entry_id = ledger_entries.id
+          WHERE ${where.sql}
+        `,
       )
       .get(where.params) as { total: number };
     const rows = this.#database
       .prepare(
         `
           SELECT
-            id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, category_source,
-            category_rule_id, category_rule_version, merchant_name,
-            raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
-            created_at, updated_at
+            ledger_entries.id,
+            ledger_entries.account_id,
+            ledger_entries.time,
+            ledger_entries.description,
+            ledger_entries.amount,
+            ledger_entries.operation_amount,
+            ledger_entries.currency_code,
+            ledger_entries.category_id,
+            ledger_entries.category_name,
+            ledger_entries.category_source,
+            ledger_entries.category_rule_id,
+            ledger_entries.category_rule_version,
+            ledger_entries.merchant_name,
+            ledger_entries.raw_statement_item_id,
+            ledger_entries.hold,
+            ledger_entries.balance,
+            ledger_entries.note,
+            ledger_entries.tags_json,
+            ledger_entries.split_plan_json,
+            ledger_entry_review_states.state AS review_state,
+            ledger_entry_review_states.reviewed_at,
+            ledger_entry_review_states.reviewed_source,
+            ledger_entries.created_at,
+            ledger_entries.updated_at
           FROM ledger_entries
+          LEFT JOIN ledger_entry_review_states
+            ON ledger_entry_review_states.profile = ledger_entries.profile
+            AND ledger_entry_review_states.ledger_entry_id = ledger_entries.id
           WHERE ${where.sql}
           ORDER BY ${orderBy}
           LIMIT @limit OFFSET @offset
@@ -3411,23 +4108,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     update: LedgerEntryAnnotationUpdate,
   ): Promise<LedgerEntry | undefined> {
     const annotation = normalizeLedgerEntryAnnotation(update);
-    const selectEntry = this.#database.prepare(
-      `
-          SELECT
-            id, account_id, time, description, amount, operation_amount,
-            currency_code, category_id, category_name, category_source,
-            category_rule_id, category_rule_version, merchant_name,
-          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
-          created_at, updated_at
-        FROM ledger_entries
-        WHERE profile = ? AND id = ?
-      `,
-    );
 
     if (annotation.note === undefined && annotation.tagsJson === undefined) {
-      const existingRow = selectEntry.get(profile, id) as
-        | SqliteLedgerEntryRow
-        | undefined;
+      const existingRow = this.selectLedgerEntryRow(profile, id);
 
       return existingRow ? mapLedgerEntryRow(existingRow) : undefined;
     }
@@ -3453,9 +4136,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         updatedAt: nowIso(),
       });
 
-    const row = selectEntry.get(profile, id) as
-      | SqliteLedgerEntryRow
-      | undefined;
+    const row = this.selectLedgerEntryRow(profile, id);
 
     if (row && annotation.tagsJson !== undefined) {
       this.upsertTagsFromLedgerEntry(profile, row, nowIso());
@@ -3491,18 +4172,6 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
               | { name: string }
               | undefined
           )?.name ?? normalizedUpdate.categoryId);
-    const selectEntry = this.#database.prepare(
-      `
-        SELECT
-          id, account_id, time, description, amount, operation_amount,
-          currency_code, category_id, category_name, category_source,
-          category_rule_id, category_rule_version, merchant_name,
-          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
-          created_at, updated_at
-        FROM ledger_entries
-        WHERE profile = ? AND id = ?
-      `,
-    );
     const setClauses: string[] = [];
 
     if (normalizedUpdate.categoryId !== undefined) {
@@ -3521,29 +4190,31 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       setClauses.push("tags_json = @tagsJson");
     }
 
+    const hasReviewUpdate = normalizedUpdate.reviewState !== undefined;
+
     if (normalizedIds.length === 0) {
       return [];
     }
 
-    if (setClauses.length === 0) {
+    if (setClauses.length === 0 && !hasReviewUpdate) {
       return normalizedIds
-        .map(
-          (id) =>
-            selectEntry.get(profile, id) as SqliteLedgerEntryRow | undefined,
-        )
+        .map((id) => this.selectLedgerEntryRow(profile, id))
         .filter((row): row is SqliteLedgerEntryRow => row !== undefined)
         .map(mapLedgerEntryRow);
     }
 
-    const updateEntry = this.#database.prepare(
-      `
-        UPDATE ledger_entries
-        SET
-          ${setClauses.join(",\n          ")},
-          updated_at = @updatedAt
-        WHERE profile = @profile AND id = @id
-      `,
-    );
+    const updateEntry =
+      setClauses.length === 0
+        ? undefined
+        : this.#database.prepare(
+            `
+              UPDATE ledger_entries
+              SET
+                ${setClauses.join(",\n                ")},
+                updated_at = @updatedAt
+              WHERE profile = @profile AND id = @id
+            `,
+          );
     const upsertManualOverride = this.#database.prepare(
       `
         INSERT INTO ledger_entry_manual_overrides (
@@ -3572,45 +4243,91 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           updated_at = excluded.updated_at
       `,
     );
+    const upsertReviewState = this.#database.prepare(
+      `
+        INSERT INTO ledger_entry_review_states (
+          profile,
+          ledger_entry_id,
+          state,
+          reviewed_at,
+          reviewed_source,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @profile,
+          @id,
+          @state,
+          @reviewedAt,
+          @reviewedSource,
+          @updatedAt,
+          @updatedAt
+        )
+        ON CONFLICT(profile, ledger_entry_id) DO UPDATE SET
+          state = excluded.state,
+          reviewed_at = excluded.reviewed_at,
+          reviewed_source = excluded.reviewed_source,
+          updated_at = excluded.updated_at
+      `,
+    );
 
     const applyBulkEdit = () => {
       const updatedRows: SqliteLedgerEntryRow[] = [];
 
       for (const id of normalizedIds) {
-        const updateResult = updateEntry.run({
-          profile,
-          id,
-          categoryId: normalizedUpdate.categoryId ?? null,
-          categoryName: categoryName ?? null,
-          categorySource:
-            normalizedUpdate.categoryId === undefined ? null : "manual",
-          merchantName: normalizedUpdate.merchantName ?? null,
-          tagsJson: normalizedUpdate.tagsJson ?? null,
-          updatedAt: timestamp,
-        });
+        const existingRow = this.selectLedgerEntryRow(profile, id);
 
-        if (updateResult.changes === 0) {
+        if (existingRow === undefined) {
           continue;
         }
 
-        if (
-          normalizedUpdate.categoryId !== undefined ||
-          normalizedUpdate.merchantName !== undefined
-        ) {
-          upsertManualOverride.run({
+        if (updateEntry !== undefined) {
+          updateEntry.run({
             profile,
             id,
-            hasCategoryOverride:
-              normalizedUpdate.categoryId === undefined ? 0 : 1,
-            hasMerchantOverride:
-              normalizedUpdate.merchantName === undefined ? 0 : 1,
+            categoryId: normalizedUpdate.categoryId ?? null,
+            categoryName: categoryName ?? null,
+            categorySource:
+              normalizedUpdate.categoryId === undefined ? null : "manual",
+            merchantName: normalizedUpdate.merchantName ?? null,
+            tagsJson: normalizedUpdate.tagsJson ?? null,
+            updatedAt: timestamp,
+          });
+
+          if (
+            normalizedUpdate.categoryId !== undefined ||
+            normalizedUpdate.merchantName !== undefined
+          ) {
+            upsertManualOverride.run({
+              profile,
+              id,
+              hasCategoryOverride:
+                normalizedUpdate.categoryId === undefined ? 0 : 1,
+              hasMerchantOverride:
+                normalizedUpdate.merchantName === undefined ? 0 : 1,
+              updatedAt: timestamp,
+            });
+          }
+        }
+
+        if (normalizedUpdate.reviewState !== undefined) {
+          const decisionAt =
+            normalizedUpdate.reviewState === "needs_review" ? null : timestamp;
+
+          upsertReviewState.run({
+            profile,
+            id,
+            state: normalizedUpdate.reviewState,
+            reviewedAt: decisionAt,
+            reviewedSource:
+              decisionAt === null
+                ? null
+                : (normalizedUpdate.reviewedSource ?? "manual"),
             updatedAt: timestamp,
           });
         }
 
-        const row = selectEntry.get(profile, id) as
-          | SqliteLedgerEntryRow
-          | undefined;
+        const row = this.selectLedgerEntryRow(profile, id);
 
         if (row) {
           if (normalizedUpdate.tagsJson !== undefined) {
@@ -3645,18 +4362,6 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     }
 
     const timestamp = nowIso();
-    const selectEntry = this.#database.prepare(
-      `
-        SELECT
-          id, account_id, time, description, amount, operation_amount,
-          currency_code, category_id, category_name, category_source,
-          category_rule_id, category_rule_version, merchant_name,
-          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
-          created_at, updated_at
-        FROM ledger_entries
-        WHERE profile = ? AND id = ?
-      `,
-    );
     const updateEntry = this.#database.prepare(
       `
         UPDATE ledger_entries
@@ -3734,9 +4439,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           });
         }
 
-        const row = selectEntry.get(profile, entry.id) as
-          | SqliteLedgerEntryRow
-          | undefined;
+        const row = this.selectLedgerEntryRow(profile, entry.id);
 
         if (row) {
           updatedRows.push(row);
@@ -3757,23 +4460,9 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     update: LedgerEntrySplitPlanUpdate,
   ): Promise<LedgerEntry | undefined> {
     const splitPlan = normalizeLedgerEntrySplitPlan(update);
-    const selectEntry = this.#database.prepare(
-      `
-        SELECT
-          id, account_id, time, description, amount, operation_amount,
-          currency_code, category_id, category_name, category_source,
-          category_rule_id, category_rule_version, merchant_name,
-          raw_statement_item_id, hold, balance, note, tags_json, split_plan_json,
-          created_at, updated_at
-        FROM ledger_entries
-        WHERE profile = ? AND id = ?
-      `,
-    );
 
     if (splitPlan.splitPlanJson === undefined) {
-      const existingRow = selectEntry.get(profile, id) as
-        | SqliteLedgerEntryRow
-        | undefined;
+      const existingRow = this.selectLedgerEntryRow(profile, id);
 
       return existingRow ? mapLedgerEntryRow(existingRow) : undefined;
     }
@@ -3795,14 +4484,14 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         updatedAt: nowIso(),
       });
 
-    const row = selectEntry.get(profile, id) as
-      | SqliteLedgerEntryRow
-      | undefined;
+    const row = this.selectLedgerEntryRow(profile, id);
 
     return row ? mapLedgerEntryRow(row) : undefined;
   }
 
   async getLedgerSummary(profile = this.profile): Promise<LedgerSummary> {
+    const settings = await this.getLocalAppSettings(profile);
+    const exclusions = accountExclusionClause(settings?.excludedAccountIds);
     const row = this.#database
       .prepare(
         `
@@ -3829,19 +4518,21 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             ) AS oldest_sync_cursor_updated_at
           FROM ledger_entries
           WHERE profile = @profile
+            ${exclusions.sql}
         `,
       )
-      .get({ profile }) as SqliteSummaryRow;
+      .get({ profile, ...exclusions.params }) as SqliteSummaryRow;
     const currencies = JSON.parse(row.currencies_json) as unknown;
     const latestEntryTimeRow = this.#database
       .prepare(
         `
           SELECT MAX(time) AS latest_entry_time
           FROM ledger_entries
-          WHERE profile = ?
+          WHERE profile = @profile
+            ${exclusions.sql}
         `,
       )
-      .get(profile) as SqliteLatestEntryTimeRow;
+      .get({ profile, ...exclusions.params }) as SqliteLatestEntryTimeRow;
     const anchorTime =
       latestEntryTimeRow.latest_entry_time ?? Math.floor(Date.now() / 1000);
     const anchorDate = new Date(anchorTime * 1000);
@@ -3857,9 +4548,15 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           WHERE profile = @profile
             AND time >= @monthStart
             AND time <= @anchorTime
+            ${exclusions.sql}
         `,
       )
-      .get({ profile, monthStart, anchorTime }) as SqliteCashflowRow;
+      .get({
+        profile,
+        monthStart,
+        anchorTime,
+        ...exclusions.params,
+      }) as SqliteCashflowRow;
 
     return {
       profile,
@@ -3929,6 +4626,145 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile, normalizeLimit(limit)) as SqliteWebhookEventRow[];
 
     return rows.map(mapWebhookEventRow);
+  }
+
+  async recordLocalExport(
+    record: LocalExportRecord,
+  ): Promise<LocalExportRecord> {
+    this.ensureProfileName(record.profile);
+
+    this.#database
+      .prepare(
+        `
+          INSERT INTO local_exports (
+            id,
+            profile,
+            format,
+            preset,
+            filters_json,
+            row_count,
+            destination,
+            file_path,
+            status,
+            created_at,
+            completed_at,
+            error_message
+          )
+          VALUES (
+            @id,
+            @profile,
+            @format,
+            @preset,
+            @filtersJson,
+            @rowCount,
+            @destination,
+            @filePath,
+            @status,
+            @createdAt,
+            @completedAt,
+            @errorMessage
+          )
+          ON CONFLICT(profile, id) DO UPDATE SET
+            format = excluded.format,
+            preset = excluded.preset,
+            filters_json = excluded.filters_json,
+            row_count = excluded.row_count,
+            destination = excluded.destination,
+            file_path = excluded.file_path,
+            status = excluded.status,
+            completed_at = excluded.completed_at,
+            error_message = excluded.error_message
+        `,
+      )
+      .run({
+        id: record.id,
+        profile: record.profile,
+        format: record.format,
+        preset: record.preset ?? null,
+        filtersJson: stableStringify(record.filters),
+        rowCount: record.rowCount,
+        destination: record.destination,
+        filePath: record.filePath ?? null,
+        status: record.status,
+        createdAt: record.createdAt,
+        completedAt: record.completedAt ?? null,
+        errorMessage: record.errorMessage ?? null,
+      });
+
+    return record;
+  }
+
+  async listLocalExports(
+    profile = this.profile,
+    limit = 20,
+  ): Promise<readonly LocalExportRecord[]> {
+    const rows = this.#database
+      .prepare(
+        `
+          SELECT
+            id,
+            profile,
+            format,
+            preset,
+            filters_json,
+            row_count,
+            destination,
+            file_path,
+            status,
+            created_at,
+            completed_at,
+            error_message
+          FROM local_exports
+          WHERE profile = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(profile, normalizeLimit(limit)) as SqliteLocalExportRow[];
+
+    return rows.map(mapLocalExportRow);
+  }
+
+  async clearProfileLedgerData(
+    profile: string,
+  ): Promise<Record<string, number>> {
+    const normalizedProfile = profile.trim() || this.profile;
+    this.ensureProfileName(normalizedProfile);
+    const tables = [
+      "ledger_entry_review_states",
+      "ledger_entry_manual_overrides",
+      "recurring_detection_decisions",
+      "recurring_items",
+      "raw_statement_items",
+      "ledger_entries",
+      "sync_cursors",
+      "sync_runs",
+      "webhook_events",
+      "merchants",
+      "tags",
+      "currency_rates",
+      "jars",
+      "accounts",
+    ] as const;
+    const deleteStatements = tables.map((table) => {
+      return [
+        table,
+        this.#database.prepare(`DELETE FROM ${table} WHERE profile = ?`),
+      ] as const;
+    });
+    const clear = () => {
+      const deleted: Record<string, number> = {};
+
+      for (const [table, statement] of deleteStatements) {
+        deleted[table] = statement.run(normalizedProfile).changes;
+      }
+
+      return deleted;
+    };
+
+    return this.#database.inTransaction
+      ? clear()
+      : this.#database.transaction(clear)();
   }
 
   async importLocalConfiguration(
@@ -4513,6 +5349,10 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
     this.#database.exec("VACUUM");
   }
 
+  async checkpoint(): Promise<void> {
+    this.#database.pragma("wal_checkpoint(TRUNCATE)");
+  }
+
   async close(): Promise<void> {
     this.#database.close();
   }
@@ -5084,6 +5924,28 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           hasCategoryOverride: row.has_category_override === 1,
           hasMerchantOverride: row.has_merchant_override === 1,
         };
+  }
+
+  private selectLedgerEntryRow(
+    profile: string,
+    id: string,
+  ): SqliteLedgerEntryRow | undefined {
+    return this.#database
+      .prepare(
+        `
+          SELECT
+            ledger_entries.*,
+            ledger_entry_review_states.state AS review_state,
+            ledger_entry_review_states.reviewed_at,
+            ledger_entry_review_states.reviewed_source
+          FROM ledger_entries
+          LEFT JOIN ledger_entry_review_states
+            ON ledger_entry_review_states.profile = ledger_entries.profile
+            AND ledger_entry_review_states.ledger_entry_id = ledger_entries.id
+          WHERE ledger_entries.profile = ? AND ledger_entries.id = ?
+        `,
+      )
+      .get(profile, id) as SqliteLedgerEntryRow | undefined;
   }
 
   private mergeManualLedgerEntryOverrides(

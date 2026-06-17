@@ -52,6 +52,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Install browser smoke dependencies
+        run: npx playwright install --with-deps chromium
+      - run: npm run smoke:web
       - run: npm run format
       - name: npm publish dry-run (validates the manifest and tarball without publishing)
         run: npm publish --dry-run

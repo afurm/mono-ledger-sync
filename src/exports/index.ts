@@ -25,13 +25,24 @@ export interface ExportRequest {
   to?: number;
   accountIds?: readonly string[];
   categoryIds?: readonly string[];
+  merchantName?: string;
+  status?: "hold" | "posted";
+  reviewState?: LedgerEntry["reviewState"];
+  currencyCode?: number;
+  amountMin?: number;
+  amountMax?: number;
   tag?: string;
+  includeExcludedAccounts?: boolean;
 }
 
 export interface LedgerExport {
   fileName: string;
   contentType: string;
   body: string;
+  format: Exclude<ExportFormat, "sqlite">;
+  preset?: ExportPreset;
+  filters: Record<string, unknown>;
+  rowCount: number;
 }
 
 export interface LocalConfigurationExportRequest {
@@ -226,8 +237,36 @@ function createEntryQuery(request: ExportRequest): LedgerEntryQuery {
     }
   }
 
+  if (request.merchantName?.trim()) {
+    query.merchantName = request.merchantName.trim();
+  }
+
+  if (request.status) {
+    query.status = request.status;
+  }
+
+  if (request.reviewState) {
+    query.reviewState = request.reviewState;
+  }
+
+  if (request.currencyCode !== undefined) {
+    query.currencyCode = request.currencyCode;
+  }
+
+  if (request.amountMin !== undefined) {
+    query.amountMin = request.amountMin;
+  }
+
+  if (request.amountMax !== undefined) {
+    query.amountMax = request.amountMax;
+  }
+
   if (request.tag?.trim()) {
     query.tag = request.tag.trim();
+  }
+
+  if (request.includeExcludedAccounts) {
+    query.includeExcludedAccounts = true;
   }
 
   return query;
@@ -288,7 +327,48 @@ function exportFilters(request: ExportRequest): Record<string, unknown> {
     filters.tag = request.tag.trim();
   }
 
+  if (request.merchantName?.trim()) {
+    filters.merchantName = request.merchantName.trim();
+  }
+
+  if (request.status) {
+    filters.status = request.status;
+  }
+
+  if (request.reviewState) {
+    filters.reviewState = request.reviewState;
+  }
+
+  if (request.currencyCode !== undefined) {
+    filters.currencyCode = request.currencyCode;
+  }
+
+  if (request.amountMin !== undefined) {
+    filters.amountMin = request.amountMin;
+  }
+
+  if (request.amountMax !== undefined) {
+    filters.amountMax = request.amountMax;
+  }
+
+  if (request.includeExcludedAccounts) {
+    filters.includeExcludedAccounts = true;
+  }
+
   return filters;
+}
+
+function ledgerExportMetadata(
+  request: ExportRequest,
+  format: Exclude<ExportFormat, "sqlite">,
+  page: { total: number },
+): Pick<LedgerExport, "format" | "preset" | "filters" | "rowCount"> {
+  return {
+    format,
+    ...(request.preset ? { preset: request.preset } : {}),
+    filters: exportFilters(request),
+    rowCount: page.total,
+  };
 }
 
 function formatMinorUnits(value: number): string {
@@ -650,11 +730,13 @@ export async function createLedgerExport(
   const format = resolveExportFormat(request);
   const page = await listAllLedgerEntries(db, request);
   const fileName = createExportFileName(request, format);
+  const metadata = ledgerExportMetadata(request, format, page);
 
   if (format === "json") {
     return {
       fileName,
       contentType: "application/json; charset=utf-8",
+      ...metadata,
       body: JSON.stringify(
         {
           profile: request.profile,
@@ -674,6 +756,7 @@ export async function createLedgerExport(
     return {
       fileName,
       contentType: "application/x-ndjson; charset=utf-8",
+      ...metadata,
       body: page.entries.map((entry) => JSON.stringify(entry)).join("\n"),
     };
   }
@@ -681,6 +764,7 @@ export async function createLedgerExport(
   return {
     fileName,
     contentType: "text/csv; charset=utf-8",
+    ...metadata,
     body:
       format === "journal-csv"
         ? renderJournalCsv(page.entries)
@@ -721,6 +805,14 @@ export async function createLocalConfigurationExport(
   return {
     fileName: createLocalConfigurationFileName(request),
     contentType: "application/json; charset=utf-8",
+    format: "json",
+    filters: {},
+    rowCount:
+      body.totals.categories +
+      body.totals.categoryRules +
+      body.totals.budgets +
+      body.totals.budgetPeriods +
+      body.totals.tags,
     body: JSON.stringify(body, null, 2),
   };
 }

@@ -22,6 +22,7 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 ## Release notes
 
+- [v0.3.0](docs/release/0.3.0.md): modularization of the local API server (`src/server/index.ts` 4419 → 1765 lines, 11 route modules under `src/server/routes/`) and the Vite web app (`src/web/App.tsx` 11154 → 1111 lines, 10 per-route components under `src/web/routes/`, new `src/web/api-types.ts`). Adds manual recurring items, on-the-fly category-rule creation, ledger review states (migration `0022`), local cockpit workflow settings (migration `0023`), the `local_exports` audit log (migration `0024`), richer ledger export filters, an `includedInReports` account toggle, and transfer-aware cashflow and savings-rate reports. Release workflow now runs `npm run smoke:web` (Playwright) as a gate. Test count 232 pass / 0 fail / 4 skipped.
 - [v0.2.0](docs/release/0.2.0.md): live-by-default sign-in flow, bulk edit, category version history, diagnostics endpoint, reporting suite, recurring-payments engine, and a long-running privacy/security hardening pass. 228 commits since `v0.1.1`; test count 226 pass / 0 fail / 4 skipped.
 - v0.1.1: GitHub Release `v0.1.1`; `mono-ledger-sync@0.1.1` on npm. Public discoverability metadata follow-up.
 - v0.1.0: Initial public package release. `mono-ledger-sync@0.1.0`; initial commit `5b1b6c2`.

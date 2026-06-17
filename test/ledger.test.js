@@ -344,6 +344,24 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         profile,
         limit: 20,
       });
+      const reviewedRows = await db.updateLedgerEntriesBulkEdit(
+        profile,
+        [transactions.entries[0].id],
+        {
+          reviewState: "reviewed",
+          reviewedSource: "test",
+        },
+      );
+      const needsReviewTransactions = await db.listLedgerEntries({
+        profile,
+        reviewState: "needs_review",
+        limit: 20,
+      });
+      const explicitlyReviewedTransactions = await db.listLedgerEntries({
+        profile,
+        reviewState: "reviewed",
+        limit: 20,
+      });
       const merchants = await db.listMerchants(profile);
       const annotated = await db.updateLedgerEntryAnnotation(
         profile,
@@ -416,6 +434,16 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
       assert.equal(result.summary.ledgerEntries, 7);
       assert.equal(accounts.length, 2);
       assert.equal(transactions.total, 7);
+      assert.equal(transactions.entries[0].reviewState, "needs_review");
+      assert.equal(reviewedRows[0].reviewState, "reviewed");
+      assert.equal(reviewedRows[0].reviewedSource, "test");
+      assert.ok(reviewedRows[0].reviewedAt);
+      assert.equal(needsReviewTransactions.total, 6);
+      assert.equal(explicitlyReviewedTransactions.total, 1);
+      assert.equal(
+        explicitlyReviewedTransactions.entries[0].id,
+        transactions.entries[0].id,
+      );
       assert.equal(merchants.length > 0, true);
       assert.ok(
         merchants.some((merchant) => merchant.name === "Fixture Grocery LLC"),
@@ -436,6 +464,7 @@ test("syncs bundled fixture statements into a local SQLite ledger", async () => 
         }),
       );
       assert.equal(annotated.note, "Review with accountant");
+      assert.equal(annotated.reviewState, "reviewed");
       assert.deepEqual(annotated.tags, ["tax", "reimbursable"]);
       assert.deepEqual(
         tags.map((tag) => tag.name),
@@ -2955,6 +2984,9 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0019_recurring_detection_decisions",
         "0020_remove_fixture_merchant_cleanup_seed",
         "0021_sync_run_error_message",
+        "0022_ledger_entry_review_states",
+        "0023_local_app_cockpit_settings",
+        "0024_local_exports",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -2999,10 +3031,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         const afterMigration = await db.getDatabaseInfo(profile);
         assert.equal(afterMigration.ledgerEntries, 2);
         assert.equal(afterMigration.syncRuns, 1);
-        assert.equal(
-          afterMigration.migrations.at(-1),
-          "0021_sync_run_error_message",
-        );
+        assert.equal(afterMigration.migrations.at(-1), "0024_local_exports");
 
         const summary = await db.getLedgerSummary(profile);
         assert.equal(summary.ledgerEntries, 2);
@@ -3964,10 +3993,22 @@ test("exports synced ledger entries as CSV and JSON", async () => {
       await db.updateLedgerEntryAnnotation(profile, firstTransaction.id, {
         tags: ["reviewed"],
       });
+      await db.updateLedgerEntriesBulkEdit(profile, [firstTransaction.id], {
+        reviewState: "reviewed",
+        reviewedSource: "test",
+      });
       const taggedJsonExport = await createLedgerExport(db, {
         profile,
         format: "json",
         tag: "reviewed",
+      });
+      const reviewedPostedExpenseExport = await createLedgerExport(db, {
+        profile,
+        format: "json",
+        reviewState: "reviewed",
+        status: "posted",
+        amountMax: -1,
+        currencyCode: firstTransaction.currencyCode,
       });
       const json = await createLedgerExport(db, {
         profile,
@@ -4006,6 +4047,15 @@ test("exports synced ledger entries as CSV and JSON", async () => {
       assert.equal(parsedTagged.total, 1);
       assert.equal(parsedTagged.entries.length, 1);
       assert.equal(parsedTagged.entries[0].id, firstTransaction.id);
+      const parsedReviewed = JSON.parse(reviewedPostedExpenseExport.body);
+      assert.equal(parsedReviewed.filters.reviewState, "reviewed");
+      assert.equal(parsedReviewed.filters.status, "posted");
+      assert.equal(parsedReviewed.filters.amountMax, -1);
+      assert.equal(
+        parsedReviewed.filters.currencyCode,
+        firstTransaction.currencyCode,
+      );
+      assert.equal(parsedReviewed.total, firstTransaction.amount < 0 ? 1 : 0);
       assert.equal(jsonl.contentType, "application/x-ndjson; charset=utf-8");
       assert.match(
         jsonl.fileName,
@@ -4345,6 +4395,19 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "GET",
         url: "/api/ledger/recurring-calendar?from=2026-05-01&to=2026-04-01",
       });
+      const manualRecurringItemResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/recurring-items",
+        body: {
+          accountId: "fixture-account-uah-main",
+          categoryId: "utilities",
+          merchantName: "Fixture Utilities",
+          frequency: "monthly",
+          expectedAmountMin: -250000,
+          expectedAmountMax: -250000,
+          startedAt: "2026-04-01",
+        },
+      });
       const jarsResponse = await server.inject({
         method: "GET",
         url: "/api/ledger/jars",
@@ -4387,7 +4450,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
           categoryId: "subscriptions",
           merchantName: "Bulk Merchant",
           tags: ["bulk", "bulk", "queued"],
+          reviewState: "reviewed",
+          reviewedSource: "test",
         },
+      });
+      const reviewedTransactionsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/transactions?reviewState=reviewed",
       });
       const categoryRestoreResponse = await server.inject({
         method: "PATCH",
@@ -4548,19 +4617,19 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       );
       assert.equal(monthlySpendingReportResponse.statusCode, 200);
       assert.equal(monthlySpendingReportResponse.json().month, "2026-04");
-      assert.equal(monthlySpendingReportResponse.json().totalExpenses, 408650);
-      assert.equal(monthlySpendingReportResponse.json().transactionCount, 5);
+      assert.equal(monthlySpendingReportResponse.json().totalExpenses, 158650);
+      assert.equal(monthlySpendingReportResponse.json().transactionCount, 4);
       assert.equal(
         monthlySpendingReportResponse.json().convertedTotals.totalExpenses,
-        3304815,
+        3054815,
       );
       assert.equal(cashflowReportResponse.statusCode, 200);
       assert.equal(cashflowReportResponse.json().months, 6);
       assert.equal(cashflowReportResponse.json().from, "2025-11-01");
       assert.equal(cashflowReportResponse.json().to, "2026-04-30");
       assert.equal(cashflowReportResponse.json().totalIncome, 8520000);
-      assert.equal(cashflowReportResponse.json().totalExpenses, 408650);
-      assert.equal(cashflowReportResponse.json().netCashflow, 8111350);
+      assert.equal(cashflowReportResponse.json().totalExpenses, 158650);
+      assert.equal(cashflowReportResponse.json().netCashflow, 8361350);
       assert.deepEqual(
         cashflowReportResponse
           .json()
@@ -4571,7 +4640,7 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             row.net,
           ]),
         [
-          [980, 8500000, 335750, 8164250],
+          [980, 8500000, 85750, 8414250],
           [840, 0, 52900, -52900],
           [978, 20000, 20000, 0],
         ],
@@ -4579,8 +4648,8 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.deepEqual(cashflowReportResponse.json().convertedTotals, {
         baseCurrencyCode: 980,
         totalIncome: 9361000,
-        totalExpenses: 3304815,
-        netCashflow: 6056185,
+        totalExpenses: 3054815,
+        netCashflow: 6306185,
         missingCurrencyCodes: [],
         rates: [
           {
@@ -4607,9 +4676,9 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(savingsRateReportResponse.statusCode, 200);
       assert.equal(savingsRateReportResponse.json().months, 6);
       assert.equal(savingsRateReportResponse.json().totalIncome, 8520000);
-      assert.equal(savingsRateReportResponse.json().totalExpenses, 408650);
-      assert.equal(savingsRateReportResponse.json().totalSavings, 8111350);
-      assert.equal(savingsRateReportResponse.json().savingsRate, 95.2);
+      assert.equal(savingsRateReportResponse.json().totalExpenses, 158650);
+      assert.equal(savingsRateReportResponse.json().totalSavings, 8361350);
+      assert.equal(savingsRateReportResponse.json().savingsRate, 98.14);
       assert.deepEqual(
         savingsRateReportResponse
           .json()
@@ -4622,7 +4691,7 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             row.averageMonthlySavings,
           ]),
         [
-          [980, 8500000, 335750, 8164250, 96.05, 1360708],
+          [980, 8500000, 85750, 8414250, 98.99, 1402375],
           [840, 0, 52900, -52900, 0, -8817],
           [978, 20000, 20000, 0, 0, 0],
         ],
@@ -4650,7 +4719,7 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       );
       assert.equal(categoryTrendReportResponse.statusCode, 200);
       assert.equal(categoryTrendReportResponse.json().months, 6);
-      assert.equal(categoryTrendReportResponse.json().totalExpenses, 408650);
+      assert.equal(categoryTrendReportResponse.json().totalExpenses, 158650);
       assert.deepEqual(
         categoryTrendReportResponse
           .json()
@@ -4661,7 +4730,6 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             row.averageMonthlyAmount,
           ]),
         [
-          ["transfers", 980, 250000, 41667],
           ["groceries", 980, 84250, 14042],
           ["subscriptions", 840, 52900, 8817],
           ["travel", 978, 20000, 3333],
@@ -4675,7 +4743,7 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       );
       assert.equal(merchantTrendReportResponse.statusCode, 200);
       assert.equal(merchantTrendReportResponse.json().months, 6);
-      assert.equal(merchantTrendReportResponse.json().totalExpenses, 408650);
+      assert.equal(merchantTrendReportResponse.json().totalExpenses, 158650);
       assert.deepEqual(
         merchantTrendReportResponse
           .json()
@@ -4686,7 +4754,6 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             row.averageMonthlyAmount,
           ]),
         [
-          ["Emergency fund top-up", 980, 250000, 41667],
           ["Fixture Grocery LLC", 980, 84250, 14042],
           ["Cloud Subscription", 840, 52900, 8817],
           ["Travel booking", 978, 20000, 3333],
@@ -4707,7 +4774,7 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             row.transactionCount,
           ]),
         [
-          [980, 335750, 3],
+          [980, 85750, 2],
           [840, 52900, 1],
           [978, 20000, 1],
         ],
@@ -4747,6 +4814,85 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         method: "PATCH",
         url: "/api/ledger/budgets/monthly/non-existent/close",
       });
+      const exportDirectory = path.join(tempRoot, "exports");
+      const appSettingsResponse = await server.inject({
+        method: "PATCH",
+        url: "/api/app/settings",
+        body: {
+          syncSchedule: "daily",
+          excludedAccountIds: ["fixture-account-uah-main"],
+          exportDirectory,
+          budgetWarningThreshold: 70,
+        },
+      });
+      const appConfigAfterSettingsResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/config",
+      });
+      const accountsAfterSettingsResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/accounts",
+      });
+      const excludedSummaryResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/summary",
+      });
+      const folderExportResponse = await server.inject({
+        method: "POST",
+        url: "/api/exports/ledger",
+        body: {
+          format: "json",
+          preset: "raw-transaction-archive",
+          includeExcludedAccounts: true,
+        },
+      });
+      const exportHistoryResponse = await server.inject({
+        method: "GET",
+        url: "/api/exports/history",
+      });
+      const storageResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/storage",
+      });
+      const backupResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/storage/backup",
+      });
+      const compactResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/storage/compact",
+      });
+      const rejectedRestoreResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/storage/restore",
+        body: {
+          backupPath: backupResponse.json().backupPath,
+          confirmProfile: "wrong",
+          confirmDatabasePath: backupResponse.json().databasePath,
+        },
+      });
+      const restoreResponse = await server.inject({
+        method: "POST",
+        url: "/api/app/storage/restore",
+        body: {
+          backupPath: backupResponse.json().backupPath,
+          confirmProfile: "demo",
+          confirmDatabasePath: backupResponse.json().databasePath,
+        },
+      });
+      const storageAfterRestoreResponse = await server.inject({
+        method: "GET",
+        url: "/api/app/storage",
+      });
+      const rejectedLocalDataDeleteResponse = await server.inject({
+        method: "DELETE",
+        url: "/api/app/local-data",
+        body: {
+          confirmProfile: "wrong",
+          confirmDatabasePath: "wrong",
+          ledgerData: true,
+        },
+      });
 
       assert.equal(createBudgetResponse.statusCode, 200);
       assert.equal(createBudgetResponse.json().actualAmount, 84250);
@@ -4784,6 +4930,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
         ignoreRecurringDetectionResponse.json().error,
         "recurring_detection_not_found",
       );
+      assert.equal(manualRecurringItemResponse.statusCode, 200);
+      assert.match(manualRecurringItemResponse.json().id, /^manual-/);
+      assert.equal(
+        manualRecurringItemResponse.json().merchantName,
+        "Fixture Utilities",
+      );
+      assert.equal(manualRecurringItemResponse.json().frequency, "monthly");
       assert.equal(recurringCalendarResponse.statusCode, 200);
       assert.deepEqual(recurringCalendarResponse.json(), []);
       assert.equal(invalidRecurringCalendarResponse.statusCode, 400);
@@ -4858,6 +5011,8 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             entry.categoryName,
             entry.merchantName,
             entry.tags,
+            entry.reviewState,
+            entry.reviewedSource,
           ]),
         [
           [
@@ -4866,6 +5021,8 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             "Subscriptions",
             "Bulk Merchant",
             ["bulk", "queued"],
+            "reviewed",
+            "test",
           ],
           [
             secondTransaction.id,
@@ -4873,9 +5030,13 @@ test("local API runs fixture sync and exposes ledger data", async () => {
             "Subscriptions",
             "Bulk Merchant",
             ["bulk", "queued"],
+            "reviewed",
+            "test",
           ],
         ],
       );
+      assert.equal(reviewedTransactionsResponse.statusCode, 200);
+      assert.equal(reviewedTransactionsResponse.json().total, 2);
       assert.equal(categoryRestoreResponse.statusCode, 200);
       assert.deepEqual(
         categoryRestoreResponse
@@ -4928,6 +5089,65 @@ test("local API runs fixture sync and exposes ledger data", async () => {
       assert.equal(taggedExportBody.total, 1);
       assert.equal(taggedExportBody.entries[0].id, firstTransaction.id);
       assert.equal(taggedExportBody.entries[0].tags?.[0], "reviewed");
+      assert.equal(appSettingsResponse.statusCode, 200);
+      assert.equal(appSettingsResponse.json().settings.syncSchedule, "daily");
+      assert.deepEqual(appSettingsResponse.json().settings.excludedAccountIds, [
+        "fixture-account-uah-main",
+      ]);
+      assert.equal(
+        appSettingsResponse.json().settings.exportDirectory,
+        exportDirectory,
+      );
+      assert.equal(
+        appSettingsResponse.json().settings.budgetWarningThreshold,
+        70,
+      );
+      assert.equal(appConfigAfterSettingsResponse.statusCode, 200);
+      assert.equal(
+        appConfigAfterSettingsResponse.json().sync.schedule,
+        "daily",
+      );
+      assert.equal(accountsAfterSettingsResponse.statusCode, 200);
+      assert.equal(
+        accountsAfterSettingsResponse
+          .json()
+          .find((account) => account.id === "fixture-account-uah-main")
+          ?.includedInReports,
+        false,
+      );
+      assert.equal(excludedSummaryResponse.statusCode, 200);
+      assert.ok(excludedSummaryResponse.json().ledgerEntries < 7);
+      assert.equal(folderExportResponse.statusCode, 200);
+      assert.equal(folderExportResponse.json().destination, "local_folder");
+      assert.equal(folderExportResponse.json().rowCount, 7);
+      assert.match(folderExportResponse.json().filePath, /exports/);
+      assert.equal(exportHistoryResponse.statusCode, 200);
+      assert.equal(exportHistoryResponse.json().length, 3);
+      assert.deepEqual(
+        exportHistoryResponse.json().map((record) => record.destination),
+        ["local_folder", "browser_download", "browser_download"],
+      );
+      assert.equal(storageResponse.statusCode, 200);
+      assert.equal(storageResponse.json().profile, "demo");
+      assert.equal(storageResponse.json().ledgerEntries, 7);
+      assert.equal(backupResponse.statusCode, 200);
+      assert.match(backupResponse.json().backupPath, /backups/);
+      assert.equal(compactResponse.statusCode, 200);
+      assert.equal(compactResponse.json().integrityCheck, "ok");
+      assert.equal(rejectedRestoreResponse.statusCode, 400);
+      assert.equal(
+        rejectedRestoreResponse.json().error,
+        "confirmation_required",
+      );
+      assert.equal(restoreResponse.statusCode, 200);
+      assert.equal(restoreResponse.json().ledgerEntries, 7);
+      assert.equal(storageAfterRestoreResponse.statusCode, 200);
+      assert.ok(storageAfterRestoreResponse.json().backups.length >= 1);
+      assert.equal(rejectedLocalDataDeleteResponse.statusCode, 400);
+      assert.equal(
+        rejectedLocalDataDeleteResponse.json().error,
+        "confirmation_required",
+      );
       assert.equal(syncRunsResponse.statusCode, 200);
       assert.equal(syncRunsResponse.json()[0].id, syncBody.run.id);
       assert.equal(
@@ -4984,6 +5204,81 @@ test("local API returns auth_required for monobank sync without token", async ()
         message:
           "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
       });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("local API creates user category rules from manual edits", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const server = createLocalApiServer({
+      profile: "rules",
+      source: "fixture",
+      dataDir: tempRoot,
+    });
+
+    try {
+      const createResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/category-rules",
+        body: {
+          categoryId: "dining",
+          name: "Cafe dining override",
+          merchantContains: "cafe",
+          amountDirection: "expense",
+        },
+      });
+
+      assert.equal(createResponse.statusCode, 200);
+      assert.match(createResponse.json().id, /^manual-[0-9a-f]{12}$/);
+      assert.equal(createResponse.json().categoryId, "dining");
+      assert.equal(createResponse.json().name, "Cafe dining override");
+      assert.equal(createResponse.json().merchantContains, "cafe");
+      assert.equal(createResponse.json().amountDirection, "expense");
+      assert.equal(createResponse.json().isEnabled, true);
+      assert.equal(createResponse.json().isSystem, undefined);
+      assert.ok(createResponse.json().priority < 100);
+
+      const updateResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/category-rules",
+        body: {
+          categoryId: "dining",
+          name: "Cafe dining updated",
+          merchantContains: "cafe",
+          amountDirection: "expense",
+        },
+      });
+
+      assert.equal(updateResponse.statusCode, 200);
+      assert.equal(updateResponse.json().id, createResponse.json().id);
+      assert.equal(updateResponse.json().name, "Cafe dining updated");
+
+      const listResponse = await server.inject({
+        method: "GET",
+        url: "/api/ledger/category-rules",
+      });
+
+      assert.equal(listResponse.statusCode, 200);
+      assert.equal(
+        listResponse
+          .json()
+          .filter((rule) => rule.id === createResponse.json().id).length,
+        1,
+      );
+
+      const invalidResponse = await server.inject({
+        method: "POST",
+        url: "/api/ledger/category-rules",
+        body: {
+          categoryId: "dining",
+          amountDirection: "expense",
+        },
+      });
+
+      assert.equal(invalidResponse.statusCode, 400);
+      assert.equal(invalidResponse.json().error, "invalid_category_rule");
     } finally {
       await server.close();
     }

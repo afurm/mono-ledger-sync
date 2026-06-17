@@ -10,6 +10,7 @@ Closes #
 
 - [ ] `npm run typecheck`
 - [ ] `npm test`
+- [ ] `npm run smoke:web`
 - [ ] `npm run format`
 - [ ] Not run, with reason:
 
