@@ -66,6 +66,7 @@ export interface LocalAppSettings {
   excludedAccountIds?: readonly string[];
   exportDirectory?: string;
   budgetWarningThreshold?: number;
+  rawStatementRetentionDays?: number;
   lastBackupAt?: string;
   lastCompactAt?: string;
   updatedAt: string;
@@ -78,6 +79,7 @@ export type LocalAppSettingsUpdate = Partial<
     | "excludedAccountIds"
     | "exportDirectory"
     | "budgetWarningThreshold"
+    | "rawStatementRetentionDays"
   >
 >;
 
@@ -169,7 +171,7 @@ export interface LocalExportRecord {
 }
 
 export interface LedgerExportRequest {
-  format?: "csv" | "json" | "jsonl" | "journal-csv";
+  format?: "csv" | "json" | "jsonl" | "journal-csv" | "parquet" | "sqlite";
   preset?: string;
   from?: number;
   to?: number;
@@ -183,6 +185,7 @@ export interface LedgerExportRequest {
   amountMax?: number;
   tag?: string;
   includeExcludedAccounts?: boolean;
+  redacted?: boolean;
 }
 
 export interface LedgerSummary {

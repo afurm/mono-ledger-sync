@@ -135,6 +135,55 @@ function maskTokenPreview(value: string): string {
   return `•••• ${normalized.slice(-4)}`;
 }
 
+const providerSpikeFlagKey = "mono-ledger-provider-spike";
+const secp256k1Order = BigInt(
+  "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+);
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+function isProviderSpikeEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return (
+    params.get("provider_spike") === "1" ||
+    window.localStorage.getItem(providerSpikeFlagKey) === "1"
+  );
+}
+
+function randomProviderPrivateKeyHex(): string {
+  const bytes = new Uint8Array(32);
+
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    globalThis.crypto.getRandomValues(bytes);
+
+    const keyHex = bytesToHex(bytes);
+    const candidate = BigInt(`0x${keyHex}`);
+
+    if (candidate > 0n && candidate < secp256k1Order) {
+      return keyHex;
+    }
+  }
+
+  throw new Error("Unable to generate a provider spike key.");
+}
+
+function maskProviderPrivateKey(value: string): string {
+  if (!value) {
+    return "No key generated";
+  }
+
+  return `session-only •••• ${value.slice(-8)}`;
+}
+
 function localConfigurationPreview(input: string):
   | {
       status: "empty";
@@ -511,6 +560,8 @@ export function SettingsRoute({
   const [exportDirectoryInput, setExportDirectoryInput] = useState("");
   const [budgetWarningThresholdInput, setBudgetWarningThresholdInput] =
     useState("80");
+  const [rawStatementRetentionDaysInput, setRawStatementRetentionDaysInput] =
+    useState("90");
   const [settingsActionError, setSettingsActionError] = useState<
     string | undefined
   >();
@@ -533,6 +584,12 @@ export function SettingsRoute({
   const [configurationImportInput, setConfigurationImportInput] = useState("");
   const [isImportingConfiguration, setIsImportingConfiguration] =
     useState(false);
+  const [providerSpikeEnabled, setProviderSpikeEnabled] = useState(false);
+  const [providerPrivateKeyHex, setProviderPrivateKeyHex] = useState("");
+  const [providerAccessRequestId, setProviderAccessRequestId] = useState("");
+  const [providerSpikeMessage, setProviderSpikeMessage] = useState<
+    string | undefined
+  >();
 
   useEffect(() => {
     if (!snapshot) {
@@ -545,6 +602,10 @@ export function SettingsRoute({
     setBudgetWarningThresholdInput(
       String(snapshot.config.settings.budgetWarningThreshold ?? 80),
     );
+    setRawStatementRetentionDaysInput(
+      String(snapshot.config.settings.rawStatementRetentionDays ?? 90),
+    );
+    setProviderSpikeEnabled(isProviderSpikeEnabled());
   }, [snapshot]);
 
   if (loading && !snapshot) {
@@ -663,6 +724,10 @@ export function SettingsRoute({
     event.preventDefault();
 
     const threshold = Number.parseInt(budgetWarningThresholdInput, 10);
+    const rawStatementRetentionDays = Number.parseInt(
+      rawStatementRetentionDaysInput,
+      10,
+    );
     const update: LocalAppSettingsUpdate = {
       syncSchedule:
         syncSchedule === "hourly" ||
@@ -676,6 +741,13 @@ export function SettingsRoute({
 
     if (Number.isInteger(threshold) && threshold > 0 && threshold <= 100) {
       update.budgetWarningThreshold = threshold;
+    }
+
+    if (
+      Number.isInteger(rawStatementRetentionDays) &&
+      rawStatementRetentionDays >= 0
+    ) {
+      update.rawStatementRetentionDays = rawStatementRetentionDays;
     }
 
     setIsSavingSettings(true);
@@ -822,6 +894,28 @@ export function SettingsRoute({
     }
   }
 
+  function generateProviderSpikeKey(): void {
+    setProviderPrivateKeyHex(randomProviderPrivateKeyHex());
+    setProviderAccessRequestId("");
+    setProviderSpikeMessage(
+      "Session-only provider key generated. It is not persisted and will be lost when this Settings view reloads.",
+    );
+  }
+
+  function prepareProviderAccessRequest(): void {
+    if (!providerPrivateKeyHex) {
+      setProviderSpikeMessage("Generate a session-only provider key first.");
+      return;
+    }
+
+    const requestId = globalThis.crypto.randomUUID();
+
+    setProviderAccessRequestId(requestId);
+    setProviderSpikeMessage(
+      `Mock access request ${requestId} prepared. Granted user tokens must use the existing token-store boundary before provider mode can graduate.`,
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <FirstRunSignInCard
@@ -829,6 +923,73 @@ export function SettingsRoute({
         profile={activeProfile}
         onRecheckRefresh={onRefresh}
       />
+      {providerSpikeEnabled && (
+        <Card data-testid="provider-spike-card">
+          <CardHeader>
+            <CardTitle>Provider mode spike</CardTitle>
+            <CardDescription>
+              Hidden mock-only prototype for provider registration and access
+              request planning. Live provider API calls stay disabled.
+            </CardDescription>
+            <CardAction>
+              <Badge variant="secondary">Experimental</Badge>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-sm">
+            <Alert>
+              <ShieldCheckIcon />
+              <AlertTitle>Not a supported product path</AlertTitle>
+              <AlertDescription>
+                Provider mode remains a spike. Keys are generated for this
+                session only, private material is not logged or persisted, and
+                granted user tokens must go through the existing secure token
+                store before this can become production behavior.
+              </AlertDescription>
+            </Alert>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md border border-border p-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Registration key
+                </p>
+                <p className="font-mono text-sm">
+                  {maskProviderPrivateKey(providerPrivateKeyHex)}
+                </p>
+              </div>
+              <div className="rounded-md border border-border p-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Access request
+                </p>
+                <p className="font-mono text-sm">
+                  {providerAccessRequestId || "No mock request prepared"}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={generateProviderSpikeKey}
+              >
+                <KeyRoundIcon data-icon="inline-start" />
+                Generate session key
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={prepareProviderAccessRequest}
+              >
+                <ShieldCheckIcon data-icon="inline-start" />
+                Prepare mock access request
+              </Button>
+            </div>
+            {providerSpikeMessage && (
+              <p className="rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
+                {providerSpikeMessage}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>Workspace setup</CardTitle>
@@ -938,6 +1099,26 @@ export function SettingsRoute({
                   setExportDirectoryInput(event.target.value)
                 }
               />
+            </Label>
+            <Label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Raw payload retention days
+              </span>
+              <Input
+                value={rawStatementRetentionDaysInput}
+                inputMode="numeric"
+                aria-describedby="raw-payload-retention-help"
+                onChange={(event) =>
+                  setRawStatementRetentionDaysInput(event.target.value)
+                }
+              />
+              <span
+                id="raw-payload-retention-help"
+                className="text-xs text-muted-foreground"
+              >
+                Default is 90 days. Use 0 to keep raw Monobank statement
+                payloads until you delete them manually.
+              </span>
             </Label>
             <div className="grid gap-2">
               <span className="text-xs font-medium text-muted-foreground">

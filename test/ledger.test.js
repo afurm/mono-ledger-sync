@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -10,8 +10,10 @@ import test from "node:test";
 import {
   createLedgerExport,
   createLocalConfigurationExport,
+  createSqliteSnapshotExport,
   exportPresetDefinitions,
 } from "../dist/exports/index.js";
+import { parquetMetadataAsync, parquetReadObjects } from "hyparquet";
 import {
   createBundledFixtureMonobankAdapter,
   loadMonobankFixtureSet,
@@ -2987,6 +2989,8 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0022_ledger_entry_review_states",
         "0023_local_app_cockpit_settings",
         "0024_local_exports",
+        "0025_raw_statement_retention",
+        "0026_bi_views",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -3031,7 +3035,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         const afterMigration = await db.getDatabaseInfo(profile);
         assert.equal(afterMigration.ledgerEntries, 2);
         assert.equal(afterMigration.syncRuns, 1);
-        assert.equal(afterMigration.migrations.at(-1), "0024_local_exports");
+        assert.equal(afterMigration.migrations.at(-1), "0026_bi_views");
 
         const summary = await db.getLedgerSummary(profile);
         assert.equal(summary.ledgerEntries, 2);
@@ -3963,6 +3967,128 @@ test("creates ledger and budget query performance indexes", async () => {
   });
 });
 
+test("creates DuckDB-friendly BI views over synced ledger data", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+      });
+      await db.checkpoint();
+    } finally {
+      await db.close();
+    }
+
+    const database = new Database(databasePath, { readonly: true });
+
+    try {
+      const views = database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name",
+        )
+        .all()
+        .map((row) => row.name);
+
+      assert.deepEqual(views, [
+        "v_budget_progress",
+        "v_daily_balance",
+        "v_monthly_spending",
+        "v_recurring_commitments",
+        "v_transactions_long",
+      ]);
+
+      const transactions = database
+        .prepare(
+          "SELECT COUNT(*) AS total FROM v_transactions_long WHERE profile = ?",
+        )
+        .get(profile);
+      const monthlySpending = database
+        .prepare(
+          "SELECT SUM(transaction_count) AS total FROM v_monthly_spending WHERE profile = ?",
+        )
+        .get(profile);
+      const dailyBalance = database
+        .prepare(
+          "SELECT COUNT(*) AS total FROM v_daily_balance WHERE profile = ?",
+        )
+        .get(profile);
+      const recurring = database
+        .prepare(
+          "SELECT COUNT(*) AS total FROM v_recurring_commitments WHERE profile = ?",
+        )
+        .get(profile);
+
+      assert.equal(transactions.total, 7);
+      assert.equal(monthlySpending.total > 0, true);
+      assert.equal(dailyBalance.total > 0, true);
+      assert.equal(recurring.total >= 0, true);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+test("raw statement retention prunes payload rows without deleting ledger entries", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await db.migrate();
+      await db.updateLocalAppSettings(profile, {
+        rawStatementRetentionDays: 0,
+      });
+      await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+      });
+      await db.checkpoint();
+
+      const database = new Database(databasePath);
+
+      try {
+        const rawBefore = database
+          .prepare(
+            "SELECT COUNT(*) AS total FROM raw_statement_items WHERE profile = ?",
+          )
+          .get(profile).total;
+
+        assert.equal(rawBefore > 0, true);
+      } finally {
+        database.close();
+      }
+
+      const deleted = await db.pruneRawStatementItems(
+        profile,
+        Number.MAX_SAFE_INTEGER,
+      );
+      const ledgerPage = await db.listLedgerEntries({ profile, limit: 100 });
+
+      assert.equal(deleted > 0, true);
+      assert.equal(ledgerPage.total, 7);
+      assert.equal(
+        (await db.getLocalAppSettings(profile))?.rawStatementRetentionDays,
+        0,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 test("exports synced ledger entries as CSV and JSON", async () => {
   await withTempLedger(async ({ databasePath }) => {
     const profile = "demo";
@@ -4027,11 +4153,23 @@ test("exports synced ledger entries as CSV and JSON", async () => {
         profile,
         preset: "accountant-handoff",
       });
+      const parquet = await createLedgerExport(db, {
+        profile,
+        format: "parquet",
+      });
       const parsed = JSON.parse(json.body);
       const jsonlRows = jsonl.body
         .split("\n")
         .filter(Boolean)
         .map((row) => JSON.parse(row));
+      const parquetBody = parquet.body;
+      assert.ok(parquetBody instanceof Uint8Array);
+      const parquetBuffer = parquetBody.buffer.slice(
+        parquetBody.byteOffset,
+        parquetBody.byteOffset + parquetBody.byteLength,
+      );
+      const parquetMetadata = await parquetMetadataAsync(parquetBuffer);
+      const parquetRows = await parquetReadObjects({ file: parquetBuffer });
 
       assert.equal(csv.contentType, "text/csv; charset=utf-8");
       assert.match(csv.body, /fixture-stmt-2026-04-01-salary/);
@@ -4077,10 +4215,105 @@ test("exports synced ledger entries as CSV and JSON", async () => {
         /^date,accountId,description,debit,credit,currencyCode,category,merchant,sourceId/,
       );
       assert.match(journal.body, /Salary payment/);
+      assert.equal(parquet.contentType, "application/vnd.apache.parquet");
+      assert.match(parquet.fileName, /^mono-ledger-demo-parquet\.parquet$/);
+      assert.equal(Number(parquetMetadata.num_rows), 7);
+      assert.equal(parquetRows.length, 7);
+      assert.ok(
+        parquetRows.some((row) => row.description === "Salary payment"),
+      );
+      assert.ok(
+        Object.hasOwn(parquetRows[0], "review_state"),
+        "Parquet rows should include review state for BI filters",
+      );
       assert.equal(
         exportPresetDefinitions["raw-transaction-archive"].format,
         "jsonl",
       );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("exports redacted sqlite snapshots without raw payload tables", async () => {
+  await withTempLedger(async ({ tempRoot, databasePath }) => {
+    const profile = "demo";
+    const db = createSqliteLedgerDb({
+      filePath: databasePath,
+      profile,
+    });
+
+    try {
+      await syncLedgerWithMonobank({
+        profile,
+        source: "fixture",
+        adapter: await createBundledFixtureMonobankAdapter(),
+        db,
+      });
+      await db.updateLocalAppSettings(profile, {
+        exportDirectory: path.join(tempRoot, "sensitive-local-export-path"),
+      });
+      await db.checkpoint();
+
+      const snapshot = await createSqliteSnapshotExport({
+        profile,
+        databasePath,
+        redacted: true,
+      });
+      const snapshotPath = path.join(tempRoot, "redacted-snapshot.sqlite");
+      await writeFile(snapshotPath, snapshot.body);
+
+      const snapshotDb = new Database(snapshotPath, { readonly: true });
+
+      try {
+        const ledgerRows = snapshotDb
+          .prepare(
+            "SELECT COUNT(*) AS total FROM ledger_entries WHERE profile = ?",
+          )
+          .get(profile).total;
+        const rawRows = snapshotDb
+          .prepare(
+            "SELECT COUNT(*) AS total FROM raw_statement_items WHERE profile = ?",
+          )
+          .get(profile).total;
+        const webhookRows = snapshotDb
+          .prepare(
+            "SELECT COUNT(*) AS total FROM webhook_events WHERE profile = ?",
+          )
+          .get(profile).total;
+        const accountRawValues = snapshotDb
+          .prepare(
+            "SELECT raw_json, masked_pan_json FROM accounts WHERE profile = ?",
+          )
+          .all(profile);
+        const settings = snapshotDb
+          .prepare(
+            "SELECT export_directory FROM local_app_settings WHERE profile = ?",
+          )
+          .get(profile);
+
+        assert.equal(snapshot.contentType, "application/vnd.sqlite3");
+        assert.match(
+          snapshot.fileName,
+          /^mono-ledger-demo-sqlite-snapshot-redacted\.sqlite$/,
+        );
+        assert.equal(snapshot.format, "sqlite");
+        assert.deepEqual(snapshot.filters, { redacted: true });
+        assert.equal(snapshot.rowCount, 7);
+        assert.equal(ledgerRows, 7);
+        assert.equal(rawRows, 0);
+        assert.equal(webhookRows, 0);
+        assert.ok(accountRawValues.length > 0);
+        assert.ok(
+          accountRawValues.every(
+            (row) => row.raw_json === "{}" && row.masked_pan_json === null,
+          ),
+        );
+        assert.equal(settings.export_directory, null);
+      } finally {
+        snapshotDb.close();
+      }
     } finally {
       await db.close();
     }
@@ -6149,7 +6382,7 @@ test("local API validates query strings and webhook payloads", async () => {
       });
       const unsupportedFormatResponse = await server.inject({
         method: "GET",
-        url: "/api/exports/ledger?format=sqlite",
+        url: "/api/exports/ledger?format=xlsx",
       });
       const unsupportedPresetResponse = await server.inject({
         method: "GET",
@@ -6202,7 +6435,8 @@ test("local API validates query strings and webhook payloads", async () => {
       assert.equal(unsupportedFormatResponse.statusCode, 400);
       assert.deepEqual(unsupportedFormatResponse.json(), {
         error: "unsupported_export_format",
-        message: "Supported export formats: csv, json, jsonl, journal-csv",
+        message:
+          "Supported export formats: csv, json, jsonl, journal-csv, parquet, sqlite",
       });
       assert.equal(unsupportedPresetResponse.statusCode, 400);
       assert.deepEqual(unsupportedPresetResponse.json(), {

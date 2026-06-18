@@ -6,7 +6,7 @@ export interface RedactSensitiveTextOptions {
 const sensitiveHeaderPattern =
   /\b(X-Token|X-Sign|X-Key-Id|Authorization)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|Bearer\s+[^"\s,;}]+|[^"\s,;}]+)/gi;
 const sensitiveJsonFieldPattern =
-  /"((?:counter)?Iban|counterEdrpou|counterName|iban|maskedPan|rawJson|payloadJson)"\s*:\s*("[^"]*"|\[[^\]]*\]|\{[^}]*\})/gi;
+  /"((?:counter)?Iban|counterEdrpou|counterName|iban|maskedPan|privateKey|privateKeyHex|privateKeyPem|providerPrivateKey|rawJson|payloadJson)"\s*:\s*("[^"]*"|\[[^\]]*\]|\{[^}]*\})/gi;
 const ukrainianIbanPattern = /\bUA\d{27}\b/g;
 const likelyPanPattern = /\b(?:\d[ -]?){13,19}\b/g;
 

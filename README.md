@@ -22,6 +22,7 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 ## Release notes
 
+- [v0.4.0](docs/release/0.4.0.md): adds Parquet ledger exports, redacted SQLite snapshots, DuckDB-friendly BI views, local BI/accountant handoff docs, raw payload retention controls, and a mock-only Monobank provider/FOP spike behind an experimental Settings flag. Provider mode does not graduate; the personal-token local app remains the default path. Test count 239 pass / 0 fail / 4 skipped.
 - [v0.3.0](docs/release/0.3.0.md): modularization of the local API server (`src/server/index.ts` 4419 → 1765 lines, 11 route modules under `src/server/routes/`) and the Vite web app (`src/web/App.tsx` 11154 → 1111 lines, 10 per-route components under `src/web/routes/`, new `src/web/api-types.ts`). Adds manual recurring items, on-the-fly category-rule creation, ledger review states (migration `0022`), local cockpit workflow settings (migration `0023`), the `local_exports` audit log (migration `0024`), richer ledger export filters, an `includedInReports` account toggle, and transfer-aware cashflow and savings-rate reports. Release workflow now runs `npm run smoke:web` (Playwright) as a gate. Test count 232 pass / 0 fail / 4 skipped.
 - [v0.2.0](docs/release/0.2.0.md): live-by-default sign-in flow, bulk edit, category version history, diagnostics endpoint, reporting suite, recurring-payments engine, and a long-running privacy/security hardening pass. 228 commits since `v0.1.1`; test count 226 pass / 0 fail / 4 skipped.
 - v0.1.1: GitHub Release `v0.1.1`; `mono-ledger-sync@0.1.1` on npm. Public discoverability metadata follow-up.
@@ -53,9 +54,12 @@ statements, and currency rates into the local SQLite ledger.
 
 Export presets are available through the local API and browser UI for
 `accountant-handoff`, `monthly-personal-finance`, `bookkeeping`,
-`budget-analysis`, and `raw-transaction-archive`. Export file contents are
-deterministic for the same database state and filters so users can diff or
-version their own local data.
+`budget-analysis`, and `raw-transaction-archive`. CSV, JSON, JSONL, journal
+CSV, Parquet, and redacted SQLite snapshot exports are deterministic for the
+same database state and filters so users can diff or version their own local
+data. See [DuckDB workflow](docs/integrations/duckdb.md),
+[local BI](docs/integrations/local-bi.md), and
+[accountant handoff](docs/accountant-handoff.md).
 
 The in-app sign-in flow is the supported way to start syncing a real Monobank account: open `http://127.0.0.1:3000`, paste a personal API token from `https://api.monobank.ua/`, and the local server validates it before saving. `MONOBANK_TOKEN` is for the opt-in live smoke test only — see **Live by default** above.
 
@@ -84,6 +88,9 @@ const plan = createSyncPlan({
   use OS credential stores for packaged builds, keep SQLite out of token
   storage, and fall back to session-only handling when no secure provider is
   available.
+- Raw statement payload retention defaults to 90 days and can be set to `0` to
+  keep raw payloads indefinitely. See
+  [privacy and retention review](docs/privacy-retention-review.md).
 
 ## Webhook endpoint safety
 

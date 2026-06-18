@@ -4,6 +4,7 @@ export function createMonobankMockHttpHandler({
   clientInfo,
   currencyRates,
   statementByAccount = {},
+  provider = {},
   onWebhook,
   onRequest,
 }) {
@@ -11,6 +12,9 @@ export function createMonobankMockHttpHandler({
     const requestUrl = new URL(request.url, "http://127.0.0.1");
     const pathname = requestUrl.pathname;
     const endpoint = `${request.method} ${pathname}`;
+    const hasProviderHeaders = Boolean(
+      request.headers["x-sign"] || request.headers["x-key-id"],
+    );
 
     onRequest?.({
       endpoint,
@@ -18,6 +22,109 @@ export function createMonobankMockHttpHandler({
       path: pathname,
       headers: request.headers,
     });
+
+    function requireProviderSignature() {
+      if (
+        !request.headers["x-time"] ||
+        !request.headers["x-sign"] ||
+        (provider.requireKeyId !== false && !request.headers["x-key-id"])
+      ) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end('{"message":"missing provider signature headers"}');
+        return false;
+      }
+
+      return true;
+    }
+
+    function writeJson(statusCode, payload) {
+      response.writeHead(statusCode, { "content-type": "application/json" });
+      response.end(JSON.stringify(payload));
+    }
+
+    if (
+      pathname === "/personal/auth/registration" &&
+      request.method === "POST"
+    ) {
+      if (!request.headers["x-time"] || !request.headers["x-sign"]) {
+        writeJson(401, { message: "missing provider registration signature" });
+        return;
+      }
+
+      writeJson(
+        200,
+        provider.registration ?? {
+          status: "New",
+        },
+      );
+      return;
+    }
+
+    if (
+      pathname === "/personal/auth/registration/status" &&
+      (request.method === "GET" || request.method === "POST")
+    ) {
+      if (!request.headers["x-time"] || !request.headers["x-sign"]) {
+        writeJson(401, { message: "missing provider registration signature" });
+        return;
+      }
+
+      writeJson(
+        200,
+        provider.registrationStatus ?? {
+          status: "Approved",
+          keyId: "mock-provider-key",
+        },
+      );
+      return;
+    }
+
+    if (pathname === "/personal/corp/settings" && request.method === "GET") {
+      if (!requireProviderSignature()) {
+        return;
+      }
+
+      writeJson(
+        200,
+        provider.settings ?? {
+          id: "mock-provider",
+          pubkey: "mock-provider-public-key",
+          name: "Mock provider",
+          permission: "psf",
+          logo: "",
+        },
+      );
+      return;
+    }
+
+    if (pathname === "/personal/auth/request") {
+      if (!requireProviderSignature()) {
+        return;
+      }
+
+      writeJson(
+        200,
+        request.method === "POST"
+          ? (provider.accessRequest ?? {
+              tokenRequestId: "mock-token-request",
+              acceptUrl: "https://mbnk.app/auth/mock-token-request",
+            })
+          : (provider.accessRequestStatus ?? {
+              requestId: "mock-access-request",
+              status: "Approved",
+            }),
+      );
+      return;
+    }
+
+    if (pathname === "/personal/client-info" && hasProviderHeaders) {
+      if (!requireProviderSignature()) {
+        return;
+      }
+
+      writeJson(200, provider.clientInfo ?? clientInfo);
+      return;
+    }
 
     if (pathname === "/personal/client-info") {
       response.writeHead(200, { "content-type": "application/json" });
@@ -51,12 +158,19 @@ export function createMonobankMockHttpHandler({
 
       const fromSec = Number(from);
       const toSec = Number(to);
-      const sourceStatements =
-        statementByAccount[decodeURIComponent(accountId)] ?? [];
+      const sourceStatements = hasProviderHeaders
+        ? (provider.statementByAccount?.[decodeURIComponent(accountId)] ??
+          statementByAccount[decodeURIComponent(accountId)] ??
+          [])
+        : (statementByAccount[decodeURIComponent(accountId)] ?? []);
       const filtered = sourceStatements.filter(
         (statementItem) =>
           statementItem.time >= fromSec && statementItem.time <= toSec,
       );
+
+      if (hasProviderHeaders && !requireProviderSignature()) {
+        return;
+      }
 
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(filtered));

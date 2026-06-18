@@ -1,3 +1,11 @@
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
+
+import { parquetWriteBuffer, type ColumnSource } from "hyparquet-writer";
+import type BetterSqlite3 from "better-sqlite3";
+
 import type { SqliteLedgerDb } from "../sqlite/index.js";
 import type {
   Budget,
@@ -9,7 +17,16 @@ import type {
   Tag,
 } from "../storage/index.js";
 
-export type ExportFormat = "csv" | "json" | "jsonl" | "journal-csv" | "sqlite";
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3") as typeof BetterSqlite3;
+
+export type ExportFormat =
+  | "csv"
+  | "json"
+  | "jsonl"
+  | "journal-csv"
+  | "parquet"
+  | "sqlite";
 export type ExportPreset =
   | "accountant-handoff"
   | "monthly-personal-finance"
@@ -38,9 +55,24 @@ export interface ExportRequest {
 export interface LedgerExport {
   fileName: string;
   contentType: string;
-  body: string;
+  body: string | Uint8Array;
   format: Exclude<ExportFormat, "sqlite">;
   preset?: ExportPreset;
+  filters: Record<string, unknown>;
+  rowCount: number;
+}
+
+export interface SqliteSnapshotExportRequest {
+  profile: string;
+  databasePath: string;
+  redacted?: boolean;
+}
+
+export interface SqliteSnapshotExport {
+  fileName: string;
+  contentType: "application/vnd.sqlite3";
+  body: Uint8Array;
+  format: "sqlite";
   filters: Record<string, unknown>;
   rowCount: number;
 }
@@ -77,7 +109,7 @@ export const exportPresetDefinitions: Readonly<
     ExportPreset,
     {
       label: string;
-      format: Exclude<ExportFormat, "sqlite">;
+      format: Exclude<ExportFormat, "sqlite" | "parquet">;
       description: string;
     }
   >
@@ -119,6 +151,7 @@ export function isExportFormat(value: string): value is ExportFormat {
     value === "json" ||
     value === "jsonl" ||
     value === "journal-csv" ||
+    value === "parquet" ||
     value === "sqlite"
   );
 }
@@ -205,6 +238,14 @@ function createLocalConfigurationFileName(
   request: LocalConfigurationExportRequest,
 ): string {
   return `mono-ledger-${safeFileSegment(request.profile) || "default"}-local-configuration.json`;
+}
+
+function createSqliteSnapshotFileName(
+  request: SqliteSnapshotExportRequest,
+): string {
+  const privacySegment = request.redacted === false ? "full" : "redacted";
+
+  return `mono-ledger-${safeFileSegment(request.profile) || "default"}-sqlite-snapshot-${privacySegment}.sqlite`;
 }
 
 function createEntryQuery(request: ExportRequest): LedgerEntryQuery {
@@ -445,6 +486,173 @@ function renderJournalCsv(entries: readonly LedgerEntry[]): string {
   });
 
   return [headers.join(","), ...rows].join("\n");
+}
+
+function optionalString(value: string | undefined): string | null {
+  return value === undefined || value === "" ? null : value;
+}
+
+function optionalNumber(value: number | undefined): bigint | null {
+  return value === undefined ? null : BigInt(value);
+}
+
+function serializeJsonColumn(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  return JSON.stringify(value);
+}
+
+function ledgerEntriesToParquetColumns(
+  entries: readonly LedgerEntry[],
+): ColumnSource[] {
+  const dates = entries.map((entry) =>
+    new Date(entry.time * 1000).toISOString(),
+  );
+
+  return [
+    { name: "id", data: entries.map((entry) => entry.id), type: "STRING" },
+    {
+      name: "account_id",
+      data: entries.map((entry) => entry.accountId),
+      type: "STRING",
+    },
+    {
+      name: "time",
+      data: entries.map((entry) => BigInt(entry.time)),
+      type: "INT64",
+    },
+    {
+      name: "posted_at",
+      data: dates,
+      type: "STRING",
+    },
+    {
+      name: "posted_date",
+      data: dates.map((date) => date.slice(0, 10)),
+      type: "STRING",
+    },
+    {
+      name: "posted_month",
+      data: dates.map((date) => date.slice(0, 7)),
+      type: "STRING",
+    },
+    {
+      name: "description",
+      data: entries.map((entry) => entry.description),
+      type: "STRING",
+    },
+    {
+      name: "amount_minor",
+      data: entries.map((entry) => BigInt(entry.amount)),
+      type: "INT64",
+    },
+    {
+      name: "amount",
+      data: entries.map((entry) => entry.amount / 100),
+      type: "DOUBLE",
+    },
+    {
+      name: "operation_amount_minor",
+      data: entries.map((entry) => optionalNumber(entry.operationAmount)),
+      type: "INT64",
+    },
+    {
+      name: "currency_code",
+      data: entries.map((entry) => entry.currencyCode),
+      type: "INT32",
+    },
+    {
+      name: "category_id",
+      data: entries.map((entry) => optionalString(entry.categoryId)),
+      type: "STRING",
+    },
+    {
+      name: "category_name",
+      data: entries.map((entry) => optionalString(entry.categoryName)),
+      type: "STRING",
+    },
+    {
+      name: "category_source",
+      data: entries.map((entry) => optionalString(entry.categorySource)),
+      type: "STRING",
+    },
+    {
+      name: "category_rule_id",
+      data: entries.map((entry) => optionalString(entry.categoryRuleId)),
+      type: "STRING",
+    },
+    {
+      name: "merchant_name",
+      data: entries.map((entry) => optionalString(entry.merchantName)),
+      type: "STRING",
+    },
+    {
+      name: "status",
+      data: entries.map((entry) => (entry.hold ? "hold" : "posted")),
+      type: "STRING",
+    },
+    {
+      name: "hold",
+      data: entries.map((entry) => entry.hold === true),
+      type: "BOOLEAN",
+    },
+    {
+      name: "balance_minor",
+      data: entries.map((entry) => optionalNumber(entry.balance)),
+      type: "INT64",
+    },
+    {
+      name: "note",
+      data: entries.map((entry) => optionalString(entry.note)),
+      type: "STRING",
+    },
+    {
+      name: "tags_json",
+      data: entries.map((entry) => serializeJsonColumn(entry.tags)),
+      type: "JSON",
+    },
+    {
+      name: "split_plan_json",
+      data: entries.map((entry) => serializeJsonColumn(entry.splitPlan)),
+      type: "JSON",
+    },
+    {
+      name: "review_state",
+      data: entries.map((entry) => entry.reviewState ?? "needs_review"),
+      type: "STRING",
+    },
+    {
+      name: "reviewed_at",
+      data: entries.map((entry) => optionalString(entry.reviewedAt)),
+      type: "STRING",
+    },
+    {
+      name: "reviewed_source",
+      data: entries.map((entry) => optionalString(entry.reviewedSource)),
+      type: "STRING",
+    },
+    {
+      name: "raw_statement_item_id",
+      data: entries.map((entry) => entry.rawStatementItemId),
+      type: "STRING",
+    },
+  ];
+}
+
+function renderLedgerParquet(entries: readonly LedgerEntry[]): Uint8Array {
+  const buffer = parquetWriteBuffer({
+    columnData: ledgerEntriesToParquetColumns(entries),
+    codec: "UNCOMPRESSED",
+    rowGroupSize: 100_000,
+    kvMetadata: [
+      { key: "mono_ledger_sync.dataset", value: "ledger_entries" },
+      { key: "mono_ledger_sync.schema_version", value: "1" },
+    ],
+  });
+
+  return new Uint8Array(buffer);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -761,6 +969,15 @@ export async function createLedgerExport(
     };
   }
 
+  if (format === "parquet") {
+    return {
+      fileName,
+      contentType: "application/vnd.apache.parquet",
+      ...metadata,
+      body: renderLedgerParquet(page.entries),
+    };
+  }
+
   return {
     fileName,
     contentType: "text/csv; charset=utf-8",
@@ -770,6 +987,79 @@ export async function createLedgerExport(
         ? renderJournalCsv(page.entries)
         : renderLedgerCsv(page.entries),
   };
+}
+
+function redactSqliteSnapshotFile(filePath: string): void {
+  const database = new Database(filePath);
+
+  try {
+    database.pragma("foreign_keys = OFF");
+    database.pragma("secure_delete = ON");
+    database.exec(
+      [
+        "UPDATE accounts SET masked_pan_json = NULL, raw_json = '{}'",
+        "UPDATE jars SET raw_json = '{}'",
+        "UPDATE currency_rates SET raw_json = '{}'",
+        "DELETE FROM raw_statement_items",
+        "DELETE FROM webhook_events",
+        "UPDATE local_app_settings SET export_directory = NULL",
+        "UPDATE local_exports SET file_path = NULL",
+      ].join(";\n"),
+    );
+    database.exec("VACUUM");
+  } finally {
+    database.close();
+  }
+}
+
+function sqliteSnapshotFilters(
+  request: SqliteSnapshotExportRequest,
+): Record<string, unknown> {
+  return {
+    redacted: request.redacted !== false,
+  };
+}
+
+export async function createSqliteSnapshotExport(
+  request: SqliteSnapshotExportRequest,
+): Promise<SqliteSnapshotExport> {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "mono-ledger-snapshot-"));
+  const snapshotPath = path.join(
+    tempRoot,
+    createSqliteSnapshotFileName(request),
+  );
+
+  try {
+    await copyFile(request.databasePath, snapshotPath);
+
+    if (request.redacted !== false) {
+      redactSqliteSnapshotFile(snapshotPath);
+    }
+
+    const body = await readFile(snapshotPath);
+    const database = new Database(snapshotPath, { readonly: true });
+
+    try {
+      const row = database
+        .prepare(
+          "SELECT COUNT(*) AS total FROM ledger_entries WHERE profile = ?",
+        )
+        .get(request.profile) as { total: number } | undefined;
+
+      return {
+        fileName: createSqliteSnapshotFileName(request),
+        contentType: "application/vnd.sqlite3",
+        body,
+        format: "sqlite",
+        filters: sqliteSnapshotFilters(request),
+        rowCount: row?.total ?? 0,
+      };
+    } finally {
+      database.close();
+    }
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true });
+  }
 }
 
 export async function createLocalConfigurationExport(

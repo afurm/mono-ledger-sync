@@ -124,8 +124,13 @@ export {
   createBundledFixtureMonobankAdapter,
   createFixtureMonobankAdapter,
   createMonobankHttpAdapter,
+  createMonobankProviderSignedHeaders,
+  createMonobankProviderSignaturePayload,
+  getMonobankProviderPublicKeyHex,
   loadMonobankFixtureSet,
   MonobankApiError,
+  signMonobankProviderRequest,
+  verifyMonobankProviderSignature,
   type MonobankAccount,
   type MonobankAdapter,
   type MonobankClientInfo,
@@ -137,6 +142,11 @@ export {
   type MonobankJar,
   type MonobankManagedClient,
   type MonobankPersonalWebhookEvent,
+  type MonobankProviderSignedHeaders,
+  type MonobankProviderSignedHeadersInput,
+  type MonobankProviderSignaturePayloadInput,
+  type MonobankProviderSignatureVerificationInput,
+  type MonobankProviderSigningInput,
   type MonobankStatementItem,
   type MonobankStatementItemWebhookEvent,
 } from "./monobank/index.js";
@@ -206,6 +216,7 @@ export {
 } from "./security/index.js";
 export {
   createLedgerExport,
+  createSqliteSnapshotExport,
   exportPresetDefinitions,
   exportPresetNames,
   isExportFormat,
@@ -214,4 +225,6 @@ export {
   type ExportPreset,
   type ExportRequest,
   type LedgerExport,
+  type SqliteSnapshotExport,
+  type SqliteSnapshotExportRequest,
 } from "./exports/index.js";
