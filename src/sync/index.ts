@@ -137,6 +137,17 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function retentionCutoffUnixSeconds(
+  days: number,
+  now = nowUnixSeconds(),
+): number | undefined {
+  if (!Number.isFinite(days) || days <= 0) {
+    return undefined;
+  }
+
+  return now - Math.trunc(days) * 24 * 60 * 60;
+}
+
 function emptyWriteStats(): LedgerWriteStats {
   return {
     inserted: 0,
@@ -772,6 +783,15 @@ export async function syncLedgerWithMonobank(
     };
 
     if (!options.dryRun) {
+      const settings = await options.db.getLocalAppSettings(options.profile);
+      const rawStatementRetentionDays =
+        settings?.rawStatementRetentionDays ?? 90;
+      const pruneBefore = retentionCutoffUnixSeconds(rawStatementRetentionDays);
+
+      if (pruneBefore !== undefined) {
+        await options.db.pruneRawStatementItems(options.profile, pruneBefore);
+      }
+
       await options.db.recordSyncRun(finishedRun);
     }
 

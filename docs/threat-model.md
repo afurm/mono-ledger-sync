@@ -84,6 +84,8 @@ account metadata, and category/rule data.
   (`src/sqlite/index.ts:791,805,819`) that hold the unmodified
   upstream Monobank payload, including personal counterparty names
   and IBANs.
+- Redacted SQLite snapshots and Parquet files exported for accountant
+  handoff or local BI workflows.
 
 **Existing mitigations.**
 
@@ -96,6 +98,12 @@ account metadata, and category/rule data.
 - The local API exposes a clear deletion flow that removes the
   local database and the local token store entry together
   (documented in README).
+- Redacted SQLite snapshots delete raw statement rows, delete webhook
+  payload rows, clear local export paths, and replace raw JSON columns
+  before the snapshot leaves the export helper.
+- Raw statement payload retention defaults to 90 days. A value of `0`
+  keeps raw payloads until manual deletion, and positive values prune
+  only `raw_statement_items`, never normalized ledger rows.
 
 **Residual risk.** Once a SQLite file leaves the machine, the project
 cannot reach back to redact it. Future work should add optional
@@ -193,7 +201,7 @@ counterparty name they did not intend to share.
 - The `GET /api/app/diagnostics` endpoint and its JSON response.
 - The local log stream written by the structured logger.
 - The export routes under `/api/exports/...` that produce CSV,
-  JSON, and JSONL files the user may share.
+  JSON, JSONL, Parquet, and SQLite snapshot files the user may share.
 
 **Existing mitigations.**
 
@@ -205,7 +213,7 @@ counterparty name they did not intend to share.
 - The privacy redactor matches `token`, `accesstoken`,
   `refreshtoken`, `secret`, `xtoken`, `xsign`, `xkeyid`, `iban`,
   `accountiban`, `counteriban`, `counteredrpou`, `countername`,
-  `maskedpan`, `rawjson`, `payloadjson`, and any key ending in
+  `maskedpan`, provider private-key field names, `rawjson`, `payloadjson`, and any key ending in
   `token` or `secret` (`src/privacy/index.ts:9`,
   `src/logging/index.ts:12-32`, `src/logging/index.ts:55-58`).
 - The CSV export route is asserted by a test to never include

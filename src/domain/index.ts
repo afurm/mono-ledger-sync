@@ -73,6 +73,7 @@ export interface LocalAppSettings {
   excludedAccountIds?: readonly string[];
   exportDirectory?: string;
   budgetWarningThreshold?: number;
+  rawStatementRetentionDays?: number;
   lastBackupAt?: string;
   lastCompactAt?: string;
   updatedAt: string;
@@ -84,6 +85,7 @@ export interface LocalAppSettingsUpdate {
   excludedAccountIds?: readonly string[];
   exportDirectory?: string | null;
   budgetWarningThreshold?: number;
+  rawStatementRetentionDays?: number;
   lastBackupAt?: string;
   lastCompactAt?: string;
 }

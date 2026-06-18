@@ -35,6 +35,13 @@ import { currencyLabel, formatDateTime } from "../../format";
 
 const AMOUNT_FILTER_PATTERN = /^-?(?:\d+|\d*\.\d{1,2})$/;
 const JOURNAL_CSV_EXPORT_HREF = "/api/exports/ledger?format=journal-csv";
+type ExportWizardFormat =
+  | "csv"
+  | "json"
+  | "jsonl"
+  | "journal-csv"
+  | "parquet"
+  | "sqlite";
 
 function dateInputToEpoch(value: string, endOfDay = false): number | undefined {
   if (!value) {
@@ -60,12 +67,34 @@ function amountInputToMinor(value: string): number | undefined {
   return Number.isSafeInteger(minorAmount) ? minorAmount : undefined;
 }
 
+function exportFileExtension(format: ExportWizardFormat): string {
+  return format === "journal-csv" ? "csv" : format;
+}
+
+function exportFileNamePreview(
+  profile: string | undefined,
+  preset: string,
+  format: ExportWizardFormat,
+): string {
+  const safeProfile =
+    profile
+      ?.trim()
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/^-+|-+$/g, "") || "default";
+
+  if (format === "sqlite") {
+    return `mono-ledger-${safeProfile}-sqlite-snapshot-redacted.sqlite`;
+  }
+
+  return `mono-ledger-${safeProfile}-${preset}.${exportFileExtension(format)}`;
+}
+
 function ExportWizardCard({
   snapshot,
 }: {
   snapshot: LocalAppSnapshot | undefined;
 }) {
-  const [format, setFormat] = useState("csv");
+  const [format, setFormat] = useState<ExportWizardFormat>("csv");
   const [preset, setPreset] = useState("monthly-personal-finance");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -88,7 +117,12 @@ function ExportWizardCard({
   const query = new URLSearchParams();
 
   query.set("format", format);
-  query.set("preset", preset);
+
+  if (format === "sqlite") {
+    query.set("redacted", "true");
+  } else {
+    query.set("preset", preset);
+  }
 
   if (from) {
     query.set("from", String(dateInputToEpoch(from) ?? ""));
@@ -139,7 +173,11 @@ function ExportWizardCard({
 
   const exportHref = `/api/exports/ledger?${query.toString()}`;
   const estimatedRows = snapshot?.transactions.total ?? 0;
-  const fileNamePreview = `mono-ledger-${snapshot?.config.profile ?? "default"}-${preset}.${format === "journal-csv" ? "csv" : format}`;
+  const fileNamePreview = exportFileNamePreview(
+    snapshot?.config.profile,
+    preset,
+    format,
+  );
   const exportDirectory = snapshot?.config.settings.exportDirectory;
   const canSaveToFolder = !!exportDirectory;
 
@@ -152,14 +190,8 @@ function ExportWizardCard({
       const fromEpoch = from ? dateInputToEpoch(from) : undefined;
       const toEpoch = to ? dateInputToEpoch(to, true) : undefined;
       const record = await saveLedgerExportToFolder({
-        format:
-          format === "csv" ||
-          format === "json" ||
-          format === "jsonl" ||
-          format === "journal-csv"
-            ? format
-            : "csv",
-        preset,
+        format,
+        ...(format === "sqlite" ? { redacted: true } : { preset }),
         ...(fromEpoch === undefined ? {} : { from: fromEpoch }),
         ...(toEpoch === undefined ? {} : { to: toEpoch }),
         ...(accountId ? { accountId } : {}),
@@ -205,7 +237,10 @@ function ExportWizardCard({
             <span className="text-xs font-medium text-muted-foreground">
               Format
             </span>
-            <Select value={format} onValueChange={setFormat}>
+            <Select
+              value={format}
+              onValueChange={(value) => setFormat(value as ExportWizardFormat)}
+            >
               <SelectTrigger aria-label="Export format">
                 <SelectValue />
               </SelectTrigger>
@@ -215,9 +250,8 @@ function ExportWizardCard({
                   <SelectItem value="json">JSON</SelectItem>
                   <SelectItem value="jsonl">JSONL</SelectItem>
                   <SelectItem value="journal-csv">Journal CSV</SelectItem>
-                  <SelectItem disabled value="sqlite">
-                    SQLite snapshot
-                  </SelectItem>
+                  <SelectItem value="parquet">Parquet</SelectItem>
+                  <SelectItem value="sqlite">SQLite snapshot</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -226,7 +260,11 @@ function ExportWizardCard({
             <span className="text-xs font-medium text-muted-foreground">
               Preset
             </span>
-            <Select value={preset} onValueChange={setPreset}>
+            <Select
+              disabled={format === "sqlite"}
+              value={preset}
+              onValueChange={setPreset}
+            >
               <SelectTrigger aria-label="Export preset">
                 <SelectValue />
               </SelectTrigger>
@@ -389,8 +427,8 @@ function ExportWizardCard({
           </p>
           <p className="text-muted-foreground">
             Privacy: tokens, secret headers, and local token-store metadata are
-            excluded. SQLite snapshot is a local database-file copy workflow,
-            not an HTTP download.
+            excluded. SQLite snapshots are redacted by default and include the
+            normalized local database plus BI views.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

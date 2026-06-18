@@ -243,6 +243,7 @@ const appSettingsBodySchema = {
     },
     exportDirectory: { type: "string", maxLength: 2000 },
     budgetWarningThreshold: { type: "integer", minimum: 1, maximum: 100 },
+    rawStatementRetentionDays: { type: "integer", minimum: 0, maximum: 3650 },
   },
 } as const;
 

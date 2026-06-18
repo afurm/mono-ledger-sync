@@ -195,6 +195,7 @@ export interface SqliteLedgerDb extends LedgerDb {
     profile?: string,
     limit?: number,
   ): Promise<readonly LocalExportRecord[]>;
+  pruneRawStatementItems(profile: string, beforeTime: number): Promise<number>;
   clearProfileLedgerData(profile: string): Promise<Record<string, number>>;
   importLocalConfiguration(
     profile: string,
@@ -290,6 +291,7 @@ interface SqliteLocalAppSettingsRow {
   excluded_account_ids_json: string | null;
   export_directory: string | null;
   budget_warning_threshold: number | null;
+  raw_statement_retention_days: number | null;
   last_backup_at: string | null;
   last_compact_at: string | null;
   updated_at: string;
@@ -1382,6 +1384,218 @@ const migrations: readonly SqliteMigration[] = [
         ON local_exports(profile, created_at DESC);
     `,
   },
+  {
+    id: "0025_raw_statement_retention",
+    description: "Store raw statement payload retention settings",
+    sql: `
+      ALTER TABLE local_app_settings
+        ADD COLUMN raw_statement_retention_days INTEGER NOT NULL DEFAULT 90;
+    `,
+  },
+  {
+    id: "0026_bi_views",
+    description: "Add DuckDB-friendly BI views",
+    sql: `
+      DROP VIEW IF EXISTS v_transactions_long;
+      DROP VIEW IF EXISTS v_monthly_spending;
+      DROP VIEW IF EXISTS v_daily_balance;
+      DROP VIEW IF EXISTS v_recurring_commitments;
+      DROP VIEW IF EXISTS v_budget_progress;
+
+      CREATE VIEW v_transactions_long AS
+        SELECT
+          ledger_entries.profile,
+          ledger_entries.id AS transaction_id,
+          ledger_entries.account_id,
+          accounts.type AS account_type,
+          ledger_entries.time AS transaction_time,
+          datetime(ledger_entries.time, 'unixepoch') AS transaction_at_utc,
+          date(ledger_entries.time, 'unixepoch') AS transaction_date,
+          substr(date(ledger_entries.time, 'unixepoch'), 1, 7) AS transaction_month,
+          ledger_entries.description,
+          ledger_entries.merchant_name,
+          ledger_entries.amount,
+          ROUND(ledger_entries.amount / 100.0, 2) AS amount_major,
+          ledger_entries.operation_amount,
+          ledger_entries.currency_code,
+          ledger_entries.category_id,
+          ledger_entries.category_name,
+          ledger_entries.category_source,
+          ledger_entries.category_rule_id,
+          ledger_entries.hold AS is_hold,
+          ledger_entries.balance,
+          COALESCE(ledger_entry_review_states.state, 'needs_review') AS review_state,
+          ledger_entry_review_states.reviewed_at,
+          ledger_entries.note,
+          ledger_entries.tags_json,
+          ledger_entries.raw_statement_item_id,
+          ledger_entries.created_at,
+          ledger_entries.updated_at
+        FROM ledger_entries
+        LEFT JOIN accounts
+          ON accounts.profile = ledger_entries.profile
+          AND accounts.id = ledger_entries.account_id
+        LEFT JOIN ledger_entry_review_states
+          ON ledger_entry_review_states.profile = ledger_entries.profile
+          AND ledger_entry_review_states.ledger_entry_id = ledger_entries.id;
+
+      CREATE VIEW v_monthly_spending AS
+        SELECT
+          profile,
+          transaction_month AS month,
+          currency_code,
+          category_id,
+          category_name,
+          SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS spending_amount,
+          ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0, 2) AS spending_amount_major,
+          COUNT(*) FILTER (WHERE amount < 0) AS transaction_count
+        FROM v_transactions_long
+        WHERE amount < 0
+          AND COALESCE(category_id, '') <> 'transfers'
+        GROUP BY profile, transaction_month, currency_code, category_id, category_name;
+
+      CREATE VIEW v_daily_balance AS
+        SELECT
+          profile,
+          account_id,
+          balance_date,
+          currency_code,
+          balance,
+          ROUND(balance / 100.0, 2) AS balance_major,
+          transaction_time,
+          transaction_id
+        FROM (
+          SELECT
+            ledger_entries.profile,
+            ledger_entries.account_id,
+            date(ledger_entries.time, 'unixepoch') AS balance_date,
+            ledger_entries.currency_code,
+            ledger_entries.balance,
+            ledger_entries.time AS transaction_time,
+            ledger_entries.id AS transaction_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY ledger_entries.profile, ledger_entries.account_id, date(ledger_entries.time, 'unixepoch')
+              ORDER BY ledger_entries.time DESC, ledger_entries.id DESC
+            ) AS row_number
+          FROM ledger_entries
+          WHERE ledger_entries.balance IS NOT NULL
+        )
+        WHERE row_number = 1;
+
+      CREATE VIEW v_recurring_commitments AS
+        SELECT
+          recurring_items.profile,
+          recurring_items.id AS recurring_item_id,
+          recurring_items.account_id,
+          recurring_items.category_id,
+          categories.name AS category_name,
+          recurring_items.merchant_name,
+          recurring_items.frequency,
+          recurring_items.expected_amount_min,
+          recurring_items.expected_amount_max,
+          ROUND(recurring_items.expected_amount_min / 100.0, 2) AS expected_amount_min_major,
+          ROUND(recurring_items.expected_amount_max / 100.0, 2) AS expected_amount_max_major,
+          recurring_items.is_active,
+          recurring_items.started_at,
+          recurring_items.last_seen_at,
+          recurring_items.created_at,
+          recurring_items.updated_at
+        FROM recurring_items
+        LEFT JOIN categories
+          ON categories.profile = recurring_items.profile
+          AND categories.id = recurring_items.category_id;
+
+      CREATE VIEW v_budget_progress AS
+        SELECT
+          budget_periods.profile,
+          budgets.id AS budget_id,
+          budget_periods.id AS budget_period_id,
+          budgets.category_id,
+          categories.name AS category_name,
+          budgets.currency_code,
+          budgets.period_start,
+          budgets.period_end,
+          budgets.amount_limit,
+          budget_periods.planned_amount,
+          COALESCE(
+            budget_periods.actual_amount,
+            (
+              SELECT SUM(
+                CASE
+                  WHEN ledger_entries.amount < 0 THEN -ledger_entries.amount
+                  WHEN budgets.include_inflows = 1 THEN -ledger_entries.amount
+                  ELSE 0
+                END
+              )
+              FROM ledger_entries
+              WHERE ledger_entries.profile = budget_periods.profile
+                AND ledger_entries.category_id = budgets.category_id
+                AND ledger_entries.currency_code = budgets.currency_code
+                AND date(ledger_entries.time, 'unixepoch') >= budget_periods.period_start
+                AND date(ledger_entries.time, 'unixepoch') <= budget_periods.period_end
+                AND ledger_entries.hold = 0
+            ),
+            0
+          ) AS actual_amount,
+          budgets.amount_limit - COALESCE(
+            budget_periods.actual_amount,
+            (
+              SELECT SUM(
+                CASE
+                  WHEN ledger_entries.amount < 0 THEN -ledger_entries.amount
+                  WHEN budgets.include_inflows = 1 THEN -ledger_entries.amount
+                  ELSE 0
+                END
+              )
+              FROM ledger_entries
+              WHERE ledger_entries.profile = budget_periods.profile
+                AND ledger_entries.category_id = budgets.category_id
+                AND ledger_entries.currency_code = budgets.currency_code
+                AND date(ledger_entries.time, 'unixepoch') >= budget_periods.period_start
+                AND date(ledger_entries.time, 'unixepoch') <= budget_periods.period_end
+                AND ledger_entries.hold = 0
+            ),
+            0
+          ) AS remaining_amount,
+          CASE
+            WHEN budgets.amount_limit <= 0 THEN 0
+            ELSE ROUND(
+              COALESCE(
+                budget_periods.actual_amount,
+                (
+                  SELECT SUM(
+                    CASE
+                      WHEN ledger_entries.amount < 0 THEN -ledger_entries.amount
+                      WHEN budgets.include_inflows = 1 THEN -ledger_entries.amount
+                      ELSE 0
+                    END
+                  )
+                  FROM ledger_entries
+                  WHERE ledger_entries.profile = budget_periods.profile
+                    AND ledger_entries.category_id = budgets.category_id
+                    AND ledger_entries.currency_code = budgets.currency_code
+                    AND date(ledger_entries.time, 'unixepoch') >= budget_periods.period_start
+                    AND date(ledger_entries.time, 'unixepoch') <= budget_periods.period_end
+                    AND ledger_entries.hold = 0
+                ),
+                0
+              ) * 100.0 / budgets.amount_limit,
+              2
+            )
+          END AS progress_percentage,
+          budget_periods.status,
+          budgets.include_inflows,
+          budget_periods.created_at,
+          budget_periods.updated_at
+        FROM budget_periods
+        INNER JOIN budgets
+          ON budgets.profile = budget_periods.profile
+          AND budgets.id = budget_periods.budget_id
+        LEFT JOIN categories
+          ON categories.profile = budgets.profile
+          AND categories.id = budgets.category_id;
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -2325,6 +2539,13 @@ function mapLocalAppSettingsRow(
     settings.budgetWarningThreshold = row.budget_warning_threshold;
   }
 
+  if (
+    row.raw_statement_retention_days !== null &&
+    Number.isInteger(row.raw_statement_retention_days)
+  ) {
+    settings.rawStatementRetentionDays = row.raw_statement_retention_days;
+  }
+
   if (row.last_backup_at !== null) {
     settings.lastBackupAt = row.last_backup_at;
   }
@@ -2675,6 +2896,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             excluded_account_ids_json,
             export_directory,
             budget_warning_threshold,
+            raw_statement_retention_days,
             last_backup_at,
             last_compact_at,
             updated_at
@@ -2710,6 +2932,12 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         : (update.exportDirectory?.trim() ?? undefined);
     const nextBudgetWarningThreshold =
       update.budgetWarningThreshold ?? current?.budgetWarningThreshold;
+    const requestedRawStatementRetentionDays = update.rawStatementRetentionDays;
+    const nextRawStatementRetentionDays =
+      requestedRawStatementRetentionDays === undefined ||
+      !Number.isFinite(requestedRawStatementRetentionDays)
+        ? (current?.rawStatementRetentionDays ?? 90)
+        : Math.max(0, Math.trunc(requestedRawStatementRetentionDays));
     const nextLastBackupAt = update.lastBackupAt ?? current?.lastBackupAt;
     const nextLastCompactAt = update.lastCompactAt ?? current?.lastCompactAt;
     const updatedAt = nowIso();
@@ -2724,6 +2952,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             excluded_account_ids_json,
             export_directory,
             budget_warning_threshold,
+            raw_statement_retention_days,
             last_backup_at,
             last_compact_at,
             updated_at
@@ -2735,6 +2964,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             @excludedAccountIdsJson,
             @exportDirectory,
             @budgetWarningThreshold,
+            @rawStatementRetentionDays,
             @lastBackupAt,
             @lastCompactAt,
             @updatedAt
@@ -2745,6 +2975,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             excluded_account_ids_json = excluded.excluded_account_ids_json,
             export_directory = excluded.export_directory,
             budget_warning_threshold = excluded.budget_warning_threshold,
+            raw_statement_retention_days = excluded.raw_statement_retention_days,
             last_backup_at = excluded.last_backup_at,
             last_compact_at = excluded.last_compact_at,
             updated_at = excluded.updated_at
@@ -2760,6 +2991,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             : JSON.stringify(nextExcludedAccountIds),
         exportDirectory: nextExportDirectory ?? null,
         budgetWarningThreshold: nextBudgetWarningThreshold ?? null,
+        rawStatementRetentionDays: nextRawStatementRetentionDays ?? 90,
         lastBackupAt: nextLastBackupAt ?? null,
         lastCompactAt: nextLastCompactAt ?? null,
         updatedAt,
@@ -4723,6 +4955,28 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile, normalizeLimit(limit)) as SqliteLocalExportRow[];
 
     return rows.map(mapLocalExportRow);
+  }
+
+  async pruneRawStatementItems(
+    profile: string,
+    beforeTime: number,
+  ): Promise<number> {
+    if (!Number.isFinite(beforeTime) || beforeTime <= 0) {
+      return 0;
+    }
+
+    const normalizedProfile = profile.trim() || this.profile;
+    this.ensureProfileName(normalizedProfile);
+
+    return this.#database
+      .prepare(
+        `
+          DELETE FROM raw_statement_items
+          WHERE profile = ?
+            AND time < ?
+        `,
+      )
+      .run(normalizedProfile, Math.trunc(beforeTime)).changes;
   }
 
   async clearProfileLedgerData(

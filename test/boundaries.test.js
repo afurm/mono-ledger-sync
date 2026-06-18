@@ -482,7 +482,7 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
     /profile-scoped SQLite\s+ledger/,
     /Webhook events are sync hints/,
     /Local files generated from the current SQLite ledger/,
-    /CSV, JSON, JSONL, and journal CSV files/,
+    /CSV, JSON, JSONL, journal CSV, Parquet, and redacted SQLite snapshots/,
     /Ledger transactions/,
     /Rules & Mappings/,
     /Sync & Webhooks/,
@@ -505,7 +505,9 @@ test("keeps the web UI anchored to the Monobank local-ledger product", async () 
   assert.doesNotMatch(productUiSource, genericDashboardCopyPattern);
   assert.doesNotMatch(productUiSource, placeholderRouteCopyPattern);
   assert.doesNotMatch(productUiSource, /function PlaceholderRoute/);
-  assert.doesNotMatch(productUiSource, /\/api\/exports\/ledger\?format=sqlite/);
+  assert.match(productUiSource, /<SelectItem value="parquet">Parquet/);
+  assert.match(productUiSource, /<SelectItem value="sqlite">SQLite snapshot/);
+  assert.match(productUiSource, /query\.set\("redacted", "true"\)/);
   assert.match(productUiSource, /\/api\/exports\/ledger\?format=journal-csv/);
 });
 

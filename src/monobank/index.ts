@@ -17,6 +17,19 @@ import type {
   StatementWindow as DomainStatementWindow,
 } from "../domain/index.js";
 
+export {
+  createMonobankProviderSignedHeaders,
+  createMonobankProviderSignaturePayload,
+  getMonobankProviderPublicKeyHex,
+  signMonobankProviderRequest,
+  verifyMonobankProviderSignature,
+  type MonobankProviderSignedHeaders,
+  type MonobankProviderSignedHeadersInput,
+  type MonobankProviderSignaturePayloadInput,
+  type MonobankProviderSignatureVerificationInput,
+  type MonobankProviderSigningInput,
+} from "./provider.js";
+
 export type MonobankAccount = DomainMonobankAccount;
 
 export type MonobankJar = DomainMonobankJar;

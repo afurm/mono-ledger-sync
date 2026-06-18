@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import {
   createLedgerExport,
   createLocalConfigurationExport,
+  createSqliteSnapshotExport,
   exportPresetNames,
   isExportFormat,
   isExportPreset,
@@ -56,6 +57,7 @@ const ledgerExportQuerySchema = {
     amountMax: { type: "integer" },
     tag: { type: "string" },
     includeExcludedAccounts: { type: "boolean" },
+    redacted: { type: "boolean" },
     destination: { enum: ["browser_download", "local_folder"] },
   },
 } as const;
@@ -135,12 +137,13 @@ function readLedgerExportRequest(
     value.includeExcludedAccounts,
   );
 
-  if (format && (!isExportFormat(format) || format === "sqlite")) {
+  if (format && !isExportFormat(format)) {
     return {
       request: { profile },
       error: {
         code: "unsupported_export_format",
-        message: "Supported export formats: csv, json, jsonl, journal-csv",
+        message:
+          "Supported export formats: csv, json, jsonl, journal-csv, parquet, sqlite",
       },
     };
   }
@@ -182,7 +185,9 @@ function readLedgerExportRequest(
 
 function localExportRecord(
   profile: string,
-  ledgerExport: Awaited<ReturnType<typeof createLedgerExport>>,
+  ledgerExport:
+    | Awaited<ReturnType<typeof createLedgerExport>>
+    | Awaited<ReturnType<typeof createSqliteSnapshotExport>>,
   destination: LocalExportRecord["destination"],
   filePath?: string,
 ): LocalExportRecord {
@@ -192,7 +197,9 @@ function localExportRecord(
     id: crypto.randomUUID(),
     profile,
     format: ledgerExport.format,
-    ...(ledgerExport.preset ? { preset: ledgerExport.preset } : {}),
+    ...("preset" in ledgerExport && ledgerExport.preset
+      ? { preset: ledgerExport.preset }
+      : {}),
     filters: ledgerExport.filters,
     rowCount: ledgerExport.rowCount,
     destination,
@@ -201,6 +208,27 @@ function localExportRecord(
     createdAt: completedAt,
     completedAt,
   };
+}
+
+function exportResponseBody(body: string | Uint8Array): string | Buffer {
+  return typeof body === "string" ? body : Buffer.from(body);
+}
+
+async function runLedgerOrSnapshotExport(
+  services: Awaited<ReturnType<ExportRoutesContext["getServices"]>>,
+  exportRequest: ReturnType<typeof readLedgerExportRequest>["request"],
+  redacted: boolean | undefined,
+) {
+  if (exportRequest.format === "sqlite") {
+    await services.db.checkpoint();
+    return createSqliteSnapshotExport({
+      profile: services.profile,
+      databasePath: services.databasePath,
+      redacted: redacted !== false,
+    });
+  }
+
+  return createLedgerExport(services.db, exportRequest);
 }
 
 export function registerExportRoutes(
@@ -213,7 +241,6 @@ export function registerExportRoutes(
       schema: {
         querystring: ledgerExportQuerySchema,
         response: {
-          200: { type: "string" },
           400: localApiErrorResponseSchema,
         },
       },
@@ -233,9 +260,22 @@ export function registerExportRoutes(
         };
       }
 
-      const ledgerExport = await createLedgerExport(services.db, exportRequest);
+      const redacted = readBooleanQuery(
+        (request.query as Record<string, unknown>).redacted,
+      );
+      const ledgerExport = await runLedgerOrSnapshotExport(
+        services,
+        exportRequest,
+        redacted,
+      );
       await services.db.recordLocalExport(
-        localExportRecord(services.profile, ledgerExport, "browser_download"),
+        localExportRecord(
+          services.profile,
+          ledgerExport,
+          ledgerExport.format === "sqlite"
+            ? "database_copy"
+            : "browser_download",
+        ),
       );
 
       reply.header("content-type", ledgerExport.contentType);
@@ -244,7 +284,7 @@ export function registerExportRoutes(
         `attachment; filename="${ledgerExport.fileName}"`,
       );
 
-      return ledgerExport.body;
+      return exportResponseBody(ledgerExport.body);
     },
   );
 
@@ -292,20 +332,24 @@ export function registerExportRoutes(
       }
 
       try {
-        const ledgerExport = await createLedgerExport(
-          services.db,
+        const redacted = readBooleanQuery(
+          ((request.body ?? {}) as Record<string, unknown>).redacted,
+        );
+        const ledgerExport = await runLedgerOrSnapshotExport(
+          services,
           exportRequest,
+          redacted,
         );
         await mkdir(settings.exportDirectory, { recursive: true });
         const filePath = path.join(
           settings.exportDirectory,
           ledgerExport.fileName,
         );
-        await writeFile(filePath, ledgerExport.body, "utf8");
+        await writeFile(filePath, ledgerExport.body);
         const record = localExportRecord(
           services.profile,
           ledgerExport,
-          "local_folder",
+          ledgerExport.format === "sqlite" ? "database_copy" : "local_folder",
           filePath,
         );
 

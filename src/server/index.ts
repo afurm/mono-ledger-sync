@@ -576,6 +576,7 @@ function withLocalAppSettingsDefaults(
       ? {}
       : { exportDirectory: settings.exportDirectory }),
     budgetWarningThreshold: settings?.budgetWarningThreshold ?? 80,
+    rawStatementRetentionDays: settings?.rawStatementRetentionDays ?? 90,
     ...(settings?.lastBackupAt === undefined
       ? {}
       : { lastBackupAt: settings.lastBackupAt }),
@@ -620,6 +621,14 @@ function readLocalAppSettingsUpdate(
     Number.isInteger(record.budgetWarningThreshold)
   ) {
     update.budgetWarningThreshold = record.budgetWarningThreshold;
+  }
+
+  if (
+    typeof record.rawStatementRetentionDays === "number" &&
+    Number.isInteger(record.rawStatementRetentionDays) &&
+    record.rawStatementRetentionDays >= 0
+  ) {
+    update.rawStatementRetentionDays = record.rawStatementRetentionDays;
   }
 
   return update;
