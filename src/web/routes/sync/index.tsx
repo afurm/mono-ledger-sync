@@ -43,7 +43,12 @@ import {
 } from "@/components/ui/tooltip";
 
 import { compactLocalDatabase, createLocalBackup } from "../../api";
-import type { LocalAppSnapshot, SyncRun, WebhookEvent } from "../../api-types";
+import type {
+  LocalActivityEvent,
+  LocalAppSnapshot,
+  SyncRun,
+  WebhookEvent,
+} from "../../api-types";
 import { formatDateTime } from "../../format";
 import type { RouteId } from "../../navigation";
 import {
@@ -1152,6 +1157,7 @@ export function SyncRoute({
         <TabsTrigger value="runs">Runs</TabsTrigger>
         <TabsTrigger value="storage">Storage</TabsTrigger>
         <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+        <TabsTrigger value="activity">Activity</TabsTrigger>
       </TabsList>
       <TabsContent value="runs">
         <Card>
@@ -1303,6 +1309,193 @@ export function SyncRoute({
           <WebhookSettingsPanel config={snapshot?.config} />
         </div>
       </TabsContent>
+      <TabsContent value="activity">
+        <Card data-testid="sync-activity-tab">
+          <CardHeader>
+            <CardTitle>Recent local activity</CardTitle>
+            <CardDescription>
+              Last 24 hours of sync, webhook, export, rule, warning, and
+              error activity from the local SQLite log.
+            </CardDescription>
+            <CardAction>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onRouteChange("logs")}
+              >
+                <FileClockIcon data-icon="inline-start" />
+                Open Logs
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid gap-4 text-sm">
+            <SyncActivitySummaryPanel
+              events={snapshot?.activityEvents ?? []}
+            />
+            <SyncActivityGroups
+              events={snapshot?.activityEvents ?? []}
+              onOpenLogs={() => onRouteChange("logs")}
+            />
+          </CardContent>
+        </Card>
+      </TabsContent>
     </Tabs>
+  );
+}
+
+const RECENT_ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const ACTIVITY_GROUP_LABELS: Readonly<Record<string, string>> = {
+  sync_run: "Sync runs",
+  ledger_write: "Ledger writes",
+  webhook_delivery: "Webhook deliveries",
+  export: "Exports",
+  report_refresh: "Report refreshes",
+  rule_application: "Rule applications",
+  warning: "Warnings",
+  error: "Errors",
+};
+
+const ACTIVITY_GROUP_ORDER: readonly string[] = [
+  "sync_run",
+  "ledger_write",
+  "webhook_delivery",
+  "export",
+  "report_refresh",
+  "rule_application",
+  "warning",
+  "error",
+];
+
+function isWithinLastDay(timestamp: string): boolean {
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+  return Date.now() - parsed <= RECENT_ACTIVITY_WINDOW_MS;
+}
+
+function filterRecentActivity(
+  events: readonly LocalActivityEvent[],
+): readonly LocalActivityEvent[] {
+  return events.filter((event) => isWithinLastDay(event.timestamp));
+}
+
+function groupActivityByType(
+  events: readonly LocalActivityEvent[],
+): ReadonlyMap<string, readonly LocalActivityEvent[]> {
+  const grouped = new Map<string, LocalActivityEvent[]>();
+  for (const event of events) {
+    const bucket = grouped.get(event.type) ?? [];
+    bucket.push(event);
+    grouped.set(event.type, bucket);
+  }
+  for (const bucket of grouped.values()) {
+    bucket.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
+  return grouped;
+}
+
+function SyncActivitySummaryPanel({
+  events,
+}: {
+  events: readonly LocalActivityEvent[];
+}) {
+  const recent = filterRecentActivity(events);
+  if (recent.length === 0) {
+    return (
+      <p
+        className="rounded-md border border-border p-3 text-muted-foreground"
+        data-testid="sync-activity-summary-empty"
+      >
+        No local activity in the last 24 hours. Once you run a sync, an
+        export, or trigger a webhook, the events will appear here and in the
+        Logs route.
+      </p>
+    );
+  }
+  const grouped = groupActivityByType(recent);
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      data-testid="sync-activity-summary"
+    >
+      <span className="text-xs font-medium text-muted-foreground">
+        Last 24h · {recent.length} event{recent.length === 1 ? "" : "s"}
+      </span>
+      {ACTIVITY_GROUP_ORDER.filter((type) => grouped.has(type)).map((type) => {
+        const count = grouped.get(type)?.length ?? 0;
+        return (
+          <Badge key={type} variant="secondary" data-testid={`sync-activity-count-${type}`}>
+            {ACTIVITY_GROUP_LABELS[type] ?? type} · {count}
+          </Badge>
+        );
+      })}
+    </div>
+  );
+}
+
+function SyncActivityGroups({
+  events,
+  onOpenLogs,
+}: {
+  events: readonly LocalActivityEvent[];
+  onOpenLogs: () => void;
+}) {
+  const recent = filterRecentActivity(events);
+  if (recent.length === 0) {
+    return null;
+  }
+  const grouped = groupActivityByType(recent);
+  return (
+    <div className="grid gap-3" data-testid="sync-activity-groups">
+      {ACTIVITY_GROUP_ORDER.filter((type) => grouped.has(type)).map((type) => {
+        const bucket = grouped.get(type) ?? [];
+        if (bucket.length === 0) {
+          return null;
+        }
+        return (
+          <div
+            key={type}
+            className="grid gap-2 rounded-md border border-border p-3"
+            data-testid={`sync-activity-group-${type}`}
+          >
+            <header className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold">
+                {ACTIVITY_GROUP_LABELS[type] ?? type} ({bucket.length})
+              </h4>
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={onOpenLogs}
+              >
+                View in Logs
+              </Button>
+            </header>
+            <ul className="grid gap-1 text-xs">
+              {bucket.slice(0, 5).map((event) => (
+                <li
+                  className="flex flex-wrap items-baseline justify-between gap-2"
+                  data-testid={`sync-activity-row-${event.id}`}
+                  key={event.id}
+                >
+                  <span className="font-medium">{event.title}</span>
+                  <span className="text-muted-foreground">
+                    {formatDateTime(event.timestamp)}
+                  </span>
+                </li>
+              ))}
+              {bucket.length > 5 ? (
+                <li className="text-muted-foreground">
+                  + {bucket.length - 5} more — open Logs to see all.
+                </li>
+              ) : null}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
   );
 }
