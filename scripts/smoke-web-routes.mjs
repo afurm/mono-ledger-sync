@@ -170,6 +170,13 @@ async function main() {
 
       console.log(`route smoke ok: ${routeId}`);
     }
+
+    // Drill into the Settings route and confirm the F5 'Copy backup
+    // directory' button renders next to the Recent backups section.
+    await page.goto(`${baseUrl}/#settings`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="backup-copy-directory"]').waitFor();
+    console.log("route smoke ok: settings/backup-copy-directory");
   } finally {
     if (browser) {
       await browser.close();
