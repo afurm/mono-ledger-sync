@@ -180,12 +180,8 @@ async function main() {
     await page.getByRole("tab", { name: /^storage$/i }).click();
     await page.locator('[data-testid="sync-storage-tab"]').waitFor();
     await page.locator('[data-testid="storage-database-path"]').waitFor();
-    await page
-      .locator('[data-testid="storage-copy-database-path"]')
-      .waitFor();
-    await page
-      .locator('[data-testid="storage-copy-data-directory"]')
-      .waitFor();
+    await page.locator('[data-testid="storage-copy-database-path"]').waitFor();
+    await page.locator('[data-testid="storage-copy-data-directory"]').waitFor();
     await page.locator('[data-testid="storage-database-modified"]').waitFor();
     await page.locator('[data-testid="storage-details"]').waitFor();
     console.log("route smoke ok: sync/storage-tab");
