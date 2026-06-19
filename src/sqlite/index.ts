@@ -135,6 +135,10 @@ export interface SqliteLedgerDb extends LedgerDb {
     profile?: string,
   ): Promise<readonly LedgerCategorySpending[]>;
   listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage>;
+  getRawStatementItemForEntry(
+    profile: string,
+    entryId: string,
+  ): Promise<SqliteRawStatementItemLookup>;
   updateLedgerEntryAnnotation(
     profile: string,
     id: string,
@@ -274,6 +278,13 @@ interface SqliteRawStatementItemRow {
   payload_json: string;
   updated_at: string;
 }
+
+export type SqliteRawStatementItemLookup =
+  | { available: true; payload: { payload_json: string; updated_at: string } }
+  | {
+      available: false;
+      reason: "entry_not_found" | "pruned" | "no_raw_id";
+    };
 
 interface SqliteSyncCursorRow {
   profile: string;
@@ -4258,6 +4269,55 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
       .all(profile) as SqliteTagRow[];
 
     return rows.map(mapTagRow);
+  }
+
+  async getRawStatementItemForEntry(
+    profile: string,
+    entryId: string,
+  ): Promise<SqliteRawStatementItemLookup> {
+    const lookup = this.#database
+      .prepare(
+        `SELECT raw_statement_item_id, account_id
+         FROM ledger_entries
+         WHERE profile = ? AND id = ?`,
+      )
+      .get(profile, entryId) as
+      | { raw_statement_item_id: string | null; account_id: string }
+      | undefined;
+
+    if (lookup === undefined) {
+      return { available: false, reason: "entry_not_found" };
+    }
+
+    if (
+      lookup.raw_statement_item_id === null ||
+      lookup.raw_statement_item_id === undefined ||
+      lookup.raw_statement_item_id === ""
+    ) {
+      return { available: false, reason: "no_raw_id" };
+    }
+
+    const row = this.#database
+      .prepare(
+        `SELECT payload_json, updated_at
+         FROM raw_statement_items
+         WHERE profile = ? AND account_id = ? AND statement_item_id = ?`,
+      )
+      .get(profile, lookup.account_id, lookup.raw_statement_item_id) as
+      | SqliteRawStatementItemRow
+      | undefined;
+
+    if (row === undefined) {
+      return { available: false, reason: "pruned" };
+    }
+
+    return {
+      available: true,
+      payload: {
+        payload_json: row.payload_json,
+        updated_at: row.updated_at,
+      },
+    };
   }
 
   async listLedgerEntries(query: LedgerEntryQuery): Promise<LedgerEntryPage> {
