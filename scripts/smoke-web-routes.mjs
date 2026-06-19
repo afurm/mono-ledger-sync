@@ -170,6 +170,23 @@ async function main() {
 
       console.log(`route smoke ok: ${routeId}`);
     }
+
+    // Drill into the Accounts route and confirm the E4 jar goal
+    // progress details (remaining, latest movement, projected completion)
+    // render without console errors.
+    await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="jar-card"]').first().waitFor();
+    await page.locator('[data-testid="jar-remaining"]').first().waitFor();
+    await page
+      .locator('[data-testid="jar-latest-movement"]')
+      .first()
+      .waitFor();
+    await page
+      .locator('[data-testid="jar-projected-completion"]')
+      .first()
+      .waitFor();
+    console.log("route smoke ok: accounts/jar-goal-progress");
   } finally {
     if (browser) {
       await browser.close();
