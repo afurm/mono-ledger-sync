@@ -882,7 +882,7 @@ function RouteContent({
         />
       );
     case "accounts":
-      return <AccountsRoute snapshot={snapshot} />;
+      return <AccountsRoute snapshot={snapshot} onRouteChange={onRouteChange} />;
     case "rules":
       return <RulesRoute snapshot={snapshot} onRefresh={onRefresh} />;
     case "exports":

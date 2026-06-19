@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AlertCircleIcon, ChevronRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -31,8 +31,14 @@ import type {
   LedgerJar,
   LocalAppSnapshot,
 } from "../../api-types";
-import { currencyLabel, formatDateTime, formatMinorAmount } from "../../format";
+import {
+  currencyLabel,
+  formatDateTime,
+  formatMinorAmount,
+  formatRelativeAge,
+} from "../../format";
 import { statusVariant } from "../../status";
+import type { RouteId } from "../../navigation";
 
 type TransactionFilterFormState = {
   accountId?: string;
@@ -197,11 +203,24 @@ function BalanceSparkline({
     </div>
   );
 }
-function AccountDetailRow({ label, value }: { label: string; value: string }) {
+function AccountDetailRow({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value: ReactNode;
+  testId?: string;
+}) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate font-medium">{value}</span>
+      <span
+        className="min-w-0 truncate text-right font-medium"
+        {...(testId !== undefined ? { "data-testid": testId } : {})}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -220,9 +239,11 @@ function AccountBalanceSparkline({
 function AccountCard({
   account,
   snapshot,
+  onRouteChange,
 }: {
   account: LedgerAccount;
   snapshot: LocalAppSnapshot;
+  onRouteChange: (routeId: RouteId) => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [transactionPage, setTransactionPage] = useState<
@@ -233,8 +254,22 @@ function AccountCard({
       ? account.maskedPan.join(" · ")
       : "No masked identifiers";
   const accountTransactions = transactionPage?.entries ?? [];
+  const accountWebhookEvents = (snapshot.webhookEvents ?? []).filter(
+    (event) => event.accountId === account.id,
+  );
+  const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const failedWebhooks24h = accountWebhookEvents.filter((event) => {
+    if (event.status !== "failed") {
+      return false;
+    }
+    const received = Date.parse(event.receivedAt);
+    return !Number.isNaN(received) && received >= twentyFourHoursAgo;
+  }).length;
   const oldestTransaction = accountTransactions.at(0);
   const newestTransaction = accountTransactions.at(-1);
+  const cursorAgeLabel = formatRelativeAge(
+    newestTransaction ? newestTransaction.time : undefined,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -375,6 +410,50 @@ function AccountCard({
               />
             </section>
             <Separator />
+            <section
+              className="grid gap-3 text-sm"
+              data-testid="account-sync-health"
+            >
+              <h3 className="text-sm font-semibold">Sync health</h3>
+              <AccountDetailRow
+                label="Last successful window"
+                value={
+                  newestTransaction
+                    ? formatDateTime(newestTransaction.time)
+                    : "Not available"
+                }
+                testId="account-sync-health-last-successful-window"
+              />
+              <AccountDetailRow
+                label="Failed webhooks (24h)"
+                value={String(failedWebhooks24h)}
+                testId="account-sync-health-failed-webhooks-24h"
+              />
+              <AccountDetailRow
+                label="Cursor age"
+                value={cursorAgeLabel}
+                testId="account-sync-health-cursor-age"
+              />
+              <AccountDetailRow
+                label="Next allowed pull"
+                value={
+                  <span className="text-muted-foreground">
+                    Not in rate-limit cooldown.{" "}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() => onRouteChange("sync")}
+                    >
+                      Open Sync
+                    </Button>
+                  </span>
+                }
+                testId="account-sync-health-next-allowed-pull"
+              />
+            </section>
+            <Separator />
             <div className="flex flex-wrap gap-2">
               <Button asChild>
                 <a
@@ -439,8 +518,10 @@ function JarCard({ jar }: { jar: LedgerJar }) {
 
 export function AccountsRoute({
   snapshot,
+  onRouteChange,
 }: {
   snapshot: LocalAppSnapshot | undefined;
+  onRouteChange: (routeId: RouteId) => void;
 }) {
   if (!snapshot) {
     return (
@@ -526,6 +607,7 @@ export function AccountsRoute({
               account={account}
               key={account.id}
               snapshot={snapshot}
+              onRouteChange={onRouteChange}
             />
           ))}
         </div>

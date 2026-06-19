@@ -170,6 +170,28 @@ async function main() {
 
       console.log(`route smoke ok: ${routeId}`);
     }
+
+    // Drill into the Accounts route and confirm the E5 per-account
+    // sync health section (last successful window, failed webhooks 24h,
+    // cursor age, next allowed pull) renders in the account drawer.
+    await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    // The "Details" button is the trigger; click the first one.
+    await page.getByRole("button", { name: /^details$/i }).first().click();
+    await page.locator('[data-testid="account-sync-health"]').waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-last-successful-window"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-failed-webhooks-24h"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-cursor-age"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-next-allowed-pull"]')
+      .waitFor();
+    console.log("route smoke ok: accounts/sync-health");
   } finally {
     if (browser) {
       await browser.close();
