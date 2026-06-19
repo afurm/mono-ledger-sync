@@ -170,6 +170,24 @@ async function main() {
 
       console.log(`route smoke ok: ${routeId}`);
     }
+
+    // Drill into the Exports route and confirm the G3 extended preview
+    // (date range, included columns, excluded sensitive fields) renders
+    // for every supported format.
+    await page.goto(`${baseUrl}/#exports`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="export-preview"]').waitFor();
+    await page.locator('[data-testid="export-preview-rows"]').waitFor();
+    await page
+      .locator('[data-testid="export-preview-date-range"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="export-preview-included-columns"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="export-preview-excluded-sensitive"]')
+      .waitFor();
+    console.log("route smoke ok: exports/preview");
   } finally {
     if (browser) {
       await browser.close();

@@ -89,6 +89,39 @@ function exportFileNamePreview(
   return `mono-ledger-${safeProfile}-${preset}.${exportFileExtension(format)}`;
 }
 
+const TABULAR_EXPORT_COLUMNS = [
+  "id",
+  "time",
+  "accountId",
+  "amount",
+  "operationAmount",
+  "currencyCode",
+  "description",
+  "merchantName",
+  "categoryId",
+  "categoryName",
+  "mcc",
+  "hold",
+  "balance",
+  "note",
+  "tags",
+  "rawStatementItemId",
+];
+
+function previewColumnsForFormat(format: ExportWizardFormat): string {
+  if (format === "sqlite") {
+    return "Full local database (redacted) — normalized ledger rows, accounts, categories, rules, budgets, sync runs, webhook events, BI views";
+  }
+  return TABULAR_EXPORT_COLUMNS.join(", ");
+}
+
+function previewExcludedFieldsForFormat(format: ExportWizardFormat): string {
+  if (format === "sqlite") {
+    return "Tokens, webhook secrets, sensitive counters, raw statement payloads when redacted";
+  }
+  return "Tokens, raw statement payloads (when redacted), webhook secrets, counterparty EDPOU/name when redacted";
+}
+
 function ExportWizardCard({
   snapshot,
 }: {
@@ -173,6 +206,8 @@ function ExportWizardCard({
 
   const exportHref = `/api/exports/ledger?${query.toString()}`;
   const estimatedRows = snapshot?.transactions.total ?? 0;
+  const previewIncludedColumns = previewColumnsForFormat(format);
+  const previewExcludedFields = previewExcludedFieldsForFormat(format);
   const fileNamePreview = exportFileNamePreview(
     snapshot?.config.profile,
     preset,
@@ -415,11 +450,39 @@ function ExportWizardCard({
           />
           Include accounts excluded from reports
         </Label>
-        <div className="grid gap-2 rounded-md border border-border p-3 text-sm">
+        <div
+          className="grid gap-2 rounded-md border border-border p-3 text-sm"
+          data-testid="export-preview"
+        >
           <p className="font-medium">Preview</p>
-          <p className="text-muted-foreground">
+          <p
+            className="text-muted-foreground"
+            data-testid="export-preview-rows"
+          >
             Estimated rows from current snapshot: {estimatedRows}. File name:{" "}
             {fileNamePreview}
+          </p>
+          <p
+            className="text-muted-foreground"
+            data-testid="export-preview-date-range"
+          >
+            Date range:{" "}
+            {from || to
+              ? `${from || "earliest"} to ${to || "latest"}`
+              : "All time"}
+            .
+          </p>
+          <p
+            className="text-muted-foreground"
+            data-testid="export-preview-included-columns"
+          >
+            Included columns: {previewIncludedColumns}.
+          </p>
+          <p
+            className="text-muted-foreground"
+            data-testid="export-preview-excluded-sensitive"
+          >
+            Excluded sensitive fields: {previewExcludedFields}.
           </p>
           <p className="text-muted-foreground">
             Destination: browser download
