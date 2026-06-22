@@ -1,5 +1,5 @@
 export const packageName = "mono-ledger-sync";
-export const version = "0.4.0";
+export const version = "1.0.0";
 
 export const productArchitecture = {
   ui: "vite",
