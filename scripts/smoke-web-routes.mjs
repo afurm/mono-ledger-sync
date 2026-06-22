@@ -194,7 +194,9 @@ async function main() {
     await page
       .locator('[data-testid="account-sync-health-next-allowed-pull"]')
       .waitFor();
-    console.log("route smoke ok: accounts/sync-health"); // Drill into the Sync route Storage tab and confirm the F3 surface    // Drill into the Sync route Activity tab and confirm the F4 surface    // Drill into the Accounts route and confirm the E4 jar goal
+    console.log("route smoke ok: accounts/sync-health");
+
+    // Drill into the Accounts route and confirm the E4 jar goal
     // progress details (remaining, latest movement, projected completion)
     // render without console errors.
     await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
@@ -206,7 +208,10 @@ async function main() {
       .locator('[data-testid="jar-projected-completion"]')
       .first()
       .waitFor();
-    console.log("route smoke ok: accounts/jar-goal-progress"); // Drill into the Sync route Activity tab and confirm the F4 surface    // (last-24h summary + grouped cards) renders without console errors.
+    console.log("route smoke ok: accounts/jar-goal-progress");
+
+    // Drill into the Sync route Activity tab and confirm the F4 surface
+    // (last-24h summary + grouped cards) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
     await page.waitForSelector("main");
     await page.getByRole("tab", { name: /^activity$/i }).click();
@@ -216,8 +221,9 @@ async function main() {
     await page.locator('[data-testid="sync-activity-summary"]').waitFor();
     console.log("route smoke ok: sync/activity-tab");
 
-    // Drill into the Sync route Storage tab and confirm the F3 surface    // (modified time, copy-path buttons, integrity / migrations / row    // Drill into the Sync route Storage tab and confirm the F3 surface
-    // (modified time, copy-path buttons, integrity / migrations / row    // counts) renders without console errors.
+    // Drill into the Sync route Storage tab and confirm the F3 surface
+    // (modified time, copy-path buttons, integrity / migrations / row
+    // counts) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
     await page.waitForSelector("main");
     // The default tab is "Runs"; click the Storage tab trigger.
