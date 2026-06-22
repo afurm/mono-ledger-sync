@@ -187,6 +187,44 @@ async function main() {
       .waitFor();
     console.log("route smoke ok: exports/preview");
 
+    // Drill into the Accounts route and confirm the E5 per-account
+    // sync health section (last successful window, failed webhooks 24h,
+    // cursor age, next allowed pull) renders in the account drawer.
+    await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    // The "Details" button is the trigger; click the first one.
+    await page
+      .getByRole("button", { name: /^details$/i })
+      .first()
+      .click();
+    await page.locator('[data-testid="account-sync-health"]').waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-last-successful-window"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-failed-webhooks-24h"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-cursor-age"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-next-allowed-pull"]')
+      .waitFor();
+    console.log("route smoke ok: accounts/sync-health");
+
+    // Drill into the Accounts route and confirm the E4 jar goal
+    // progress details (remaining, latest movement, projected completion)
+    // render without console errors.
+    await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="jar-card"]').first().waitFor();
+    await page.locator('[data-testid="jar-remaining"]').first().waitFor();
+    await page.locator('[data-testid="jar-latest-movement"]').first().waitFor();
+    await page
+      .locator('[data-testid="jar-projected-completion"]')
+      .first()
+      .waitFor();
+    console.log("route smoke ok: accounts/jar-goal-progress");
     // Drill into the Sync route Activity tab and confirm the F4 surface
     // (last-24h summary + grouped cards) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
