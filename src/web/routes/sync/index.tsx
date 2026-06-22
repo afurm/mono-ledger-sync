@@ -1314,8 +1314,8 @@ export function SyncRoute({
           <CardHeader>
             <CardTitle>Recent local activity</CardTitle>
             <CardDescription>
-              Last 24 hours of sync, webhook, export, rule, warning, and
-              error activity from the local SQLite log.
+              Last 24 hours of sync, webhook, export, rule, warning, and error
+              activity from the local SQLite log.
             </CardDescription>
             <CardAction>
               <Button
@@ -1330,9 +1330,7 @@ export function SyncRoute({
             </CardAction>
           </CardHeader>
           <CardContent className="grid gap-4 text-sm">
-            <SyncActivitySummaryPanel
-              events={snapshot?.activityEvents ?? []}
-            />
+            <SyncActivitySummaryPanel events={snapshot?.activityEvents ?? []} />
             <SyncActivityGroups
               events={snapshot?.activityEvents ?? []}
               onOpenLogs={() => onRouteChange("logs")}
@@ -1409,9 +1407,8 @@ function SyncActivitySummaryPanel({
         className="rounded-md border border-border p-3 text-muted-foreground"
         data-testid="sync-activity-summary-empty"
       >
-        No local activity in the last 24 hours. Once you run a sync, an
-        export, or trigger a webhook, the events will appear here and in the
-        Logs route.
+        No local activity in the last 24 hours. Once you run a sync, an export,
+        or trigger a webhook, the events will appear here and in the Logs route.
       </p>
     );
   }
@@ -1427,7 +1424,11 @@ function SyncActivitySummaryPanel({
       {ACTIVITY_GROUP_ORDER.filter((type) => grouped.has(type)).map((type) => {
         const count = grouped.get(type)?.length ?? 0;
         return (
-          <Badge key={type} variant="secondary" data-testid={`sync-activity-count-${type}`}>
+          <Badge
+            key={type}
+            variant="secondary"
+            data-testid={`sync-activity-count-${type}`}
+          >
             {ACTIVITY_GROUP_LABELS[type] ?? type} · {count}
           </Badge>
         );

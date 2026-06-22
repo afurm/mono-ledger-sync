@@ -107,60 +107,57 @@ test("buildLocalActivityEvents groups sync runs and webhook events by type", () 
   );
 });
 
-test(
-  "Sync activity sources never include the four privacy seeds",
-  async () => {
-    await withTempLedger(async ({ tempRoot }) => {
-      const tokenStore = createSessionMonobankTokenStore();
-      await tokenStore.setToken("activity-tab", SEEDS[0]);
+test("Sync activity sources never include the four privacy seeds", async () => {
+  await withTempLedger(async ({ tempRoot }) => {
+    const tokenStore = createSessionMonobankTokenStore();
+    await tokenStore.setToken("activity-tab", SEEDS[0]);
 
-      const server = createLocalApiServer({
-        profile: "activity-tab",
-        source: "fixture",
-        dataDir: tempRoot,
-        host: "127.0.0.1",
-        port: 56400,
-        monobankTokenStore: tokenStore,
-      });
-
-      try {
-        // Drive a sync so the activity sources are non-empty.
-        const syncResponse = await server.inject({
-          method: "POST",
-          url: "/api/sync/run",
-        });
-        assert.equal(syncResponse.statusCode, 200);
-
-        const syncRunsResponse = await server.inject({
-          method: "GET",
-          url: "/api/sync/runs",
-        });
-        assert.equal(syncRunsResponse.statusCode, 200);
-        const syncRuns = syncRunsResponse.json();
-
-        const webhookEventsResponse = await server.inject({
-          method: "GET",
-          url: "/api/webhooks/events",
-        });
-        assert.equal(webhookEventsResponse.statusCode, 200);
-        const webhookEvents = webhookEventsResponse.json();
-
-        // The Sync tab derives activityEvents from syncRuns + webhookEvents
-        // using buildLocalActivityEvents (same shape as the snapshot).
-        const events = buildLocalActivityEvents(syncRuns, webhookEvents);
-        assert.ok(Array.isArray(events));
-
-        // The combined payload, plus the two underlying API responses,
-        // must never include the four privacy seeds.
-        const serialized = JSON.stringify({
-          events,
-          syncRuns,
-          webhookEvents,
-        });
-        assertNoSeeds(serialized, "Sync activity sources");
-      } finally {
-        await server.close();
-      }
+    const server = createLocalApiServer({
+      profile: "activity-tab",
+      source: "fixture",
+      dataDir: tempRoot,
+      host: "127.0.0.1",
+      port: 56400,
+      monobankTokenStore: tokenStore,
     });
-  },
-);
+
+    try {
+      // Drive a sync so the activity sources are non-empty.
+      const syncResponse = await server.inject({
+        method: "POST",
+        url: "/api/sync/run",
+      });
+      assert.equal(syncResponse.statusCode, 200);
+
+      const syncRunsResponse = await server.inject({
+        method: "GET",
+        url: "/api/sync/runs",
+      });
+      assert.equal(syncRunsResponse.statusCode, 200);
+      const syncRuns = syncRunsResponse.json();
+
+      const webhookEventsResponse = await server.inject({
+        method: "GET",
+        url: "/api/webhooks/events",
+      });
+      assert.equal(webhookEventsResponse.statusCode, 200);
+      const webhookEvents = webhookEventsResponse.json();
+
+      // The Sync tab derives activityEvents from syncRuns + webhookEvents
+      // using buildLocalActivityEvents (same shape as the snapshot).
+      const events = buildLocalActivityEvents(syncRuns, webhookEvents);
+      assert.ok(Array.isArray(events));
+
+      // The combined payload, plus the two underlying API responses,
+      // must never include the four privacy seeds.
+      const serialized = JSON.stringify({
+        events,
+        syncRuns,
+        webhookEvents,
+      });
+      assertNoSeeds(serialized, "Sync activity sources");
+    } finally {
+      await server.close();
+    }
+  });
+});
