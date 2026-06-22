@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import {
   ChevronRightIcon,
+  CopyIcon,
   DatabaseIcon,
   DownloadIcon,
   PlusIcon,
@@ -380,6 +381,16 @@ function currentBudgetMonth(): string {
   return `${now.getFullYear()}-${month}`;
 }
 
+function previousBudgetMonth(month: string): string {
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const monthIndex = Number(monthStr) - 1;
+  const previous = new Date(Date.UTC(year, monthIndex - 1, 1));
+  const yyyy = previous.getUTCFullYear();
+  const mm = String(previous.getUTCMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}`;
+}
+
 function nextBudgetMonth(periodStart: string): string {
   const parsed = new Date(`${periodStart}T00:00:00`);
 
@@ -425,6 +436,12 @@ function BudgetProgressCard({
   const [actingBudgetPeriodId, setActingBudgetPeriodId] = useState<
     string | null
   >(null);
+  const [copyFromPrevState, setCopyFromPrevState] = useState<"idle" | "saving">(
+    "idle",
+  );
+  const [applyToNMonths, setApplyToNMonths] = useState<Record<string, number>>(
+    {},
+  );
   const [status, setStatus] = useState<
     | { state: "idle" }
     | { state: "saving" }
@@ -554,6 +571,105 @@ function BudgetProgressCard({
     }
   }
 
+  async function copyBudgetToFutureMonths(
+    row: LocalAppSnapshot["budgetProgress"][number],
+    monthsAhead: number,
+  ) {
+    if (actingBudgetPeriodId !== null) {
+      return;
+    }
+    if (monthsAhead < 1) {
+      return;
+    }
+
+    setActingBudgetPeriodId(row.id);
+    setStatus({ state: "saving" });
+
+    let cursor = row.periodStart;
+    try {
+      for (let index = 0; index < monthsAhead; index += 1) {
+        cursor = nextBudgetMonth(cursor);
+        await createMonthlyCategoryBudget({
+          categoryId: row.categoryId,
+          currencyCode: row.currencyCode,
+          month: cursor,
+          amountLimit: row.amountLimit,
+          rollover: false,
+        });
+      }
+      setStatus({
+        state: "saved",
+        message:
+          monthsAhead === 1
+            ? "Budget copied to next month."
+            : `Budget copied to ${monthsAhead} future months.`,
+      });
+      await onRefresh();
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Budget could not be copied.",
+      });
+    } finally {
+      setActingBudgetPeriodId(null);
+    }
+  }
+
+  async function copyPreviousMonthBudgetsToCurrent() {
+    if (copyFromPrevState === "saving") {
+      return;
+    }
+
+    const currentMonth = currentBudgetMonth();
+    const previousMonth = previousBudgetMonth(currentMonth);
+    const previousMonthRows = snapshot.budgetProgress.filter(
+      (row) => row.periodStart === previousMonth,
+    );
+
+    if (previousMonthRows.length === 0) {
+      setStatus({
+        state: "error",
+        message: `No budgets found in ${previousMonth} to copy.`,
+      });
+      return;
+    }
+
+    setCopyFromPrevState("saving");
+    setStatus({ state: "saving" });
+
+    try {
+      for (const row of previousMonthRows) {
+        await createMonthlyCategoryBudget({
+          categoryId: row.categoryId,
+          currencyCode: row.currencyCode,
+          month: currentMonth,
+          amountLimit: row.amountLimit,
+          rollover: row.rollover === true,
+        });
+      }
+      setStatus({
+        state: "saved",
+        message: `Copied ${previousMonthRows.length} budget${
+          previousMonthRows.length === 1 ? "" : "s"
+        } from ${previousMonth} to ${currentMonth}.`,
+      });
+      await onRefresh();
+    } catch (error) {
+      setStatus({
+        state: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Previous-month budgets could not be copied.",
+      });
+    } finally {
+      setCopyFromPrevState("idle");
+    }
+  }
+
   async function updateBudgetPeriodStatus(
     row: LocalAppSnapshot["budgetProgress"][number],
     nextStatus: "open" | "closed",
@@ -595,6 +711,19 @@ function BudgetProgressCard({
         <CardDescription>
           Current budget periods ranked by overspend risk.
         </CardDescription>
+        <CardAction>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={copyFromPrevState === "saving"}
+            onClick={() => void copyPreviousMonthBudgetsToCurrent()}
+            data-testid="budget-copy-from-prev-month"
+          >
+            <CopyIcon data-icon="inline-start" />
+            Copy from previous month
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="grid gap-3">
         <form
@@ -801,18 +930,45 @@ function BudgetProgressCard({
                     style={{ width: `${width}%` }}
                   />
                 </div>
-                <div className="flex items-center justify-end gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button variant="outline" size="sm" asChild>
                     <a href={href}>Transactions</a>
                   </Button>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={24}
+                    step={1}
+                    value={String(applyToNMonths[row.id] ?? 1)}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      const parsed = Number.parseInt(raw, 10);
+                      setApplyToNMonths((current) => ({
+                        ...current,
+                        [row.id]:
+                          Number.isFinite(parsed) && parsed >= 1
+                            ? Math.min(24, parsed)
+                            : 1,
+                      }));
+                    }}
+                    className="w-16"
+                    aria-label={`Months ahead to copy budget for ${row.categoryName}`}
+                    data-testid={`budget-apply-to-n-months-${row.id}`}
+                  />
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     disabled={actingBudgetPeriodId === row.id}
-                    onClick={() => void copyBudgetToNextMonth(row)}
+                    onClick={() =>
+                      void copyBudgetToFutureMonths(
+                        row,
+                        applyToNMonths[row.id] ?? 1,
+                      )
+                    }
+                    data-testid={`budget-copy-to-month-${row.id}`}
                   >
-                    Copy next
+                    Copy forward
                   </Button>
                   <Button
                     type="button"

@@ -170,6 +170,92 @@ async function main() {
 
       console.log(`route smoke ok: ${routeId}`);
     }
+
+    // Drill into the Settings route and confirm the F5 'Copy backup
+    // directory' button renders next to the Recent backups section.
+    await page.goto(`${baseUrl}/#settings`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="backup-copy-directory"]').waitFor();
+    console.log("route smoke ok: settings/backup-copy-directory");
+
+    // Drill into the Exports route and confirm the G3 extended preview
+    // (date range, included columns, excluded sensitive fields) renders
+    // for every supported format.
+    await page.goto(`${baseUrl}/#exports`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="export-preview"]').waitFor();
+    await page.locator('[data-testid="export-preview-rows"]').waitFor();
+    await page.locator('[data-testid="export-preview-date-range"]').waitFor();
+    await page
+      .locator('[data-testid="export-preview-included-columns"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="export-preview-excluded-sensitive"]')
+      .waitFor();
+    console.log("route smoke ok: exports/preview");
+
+    // Drill into the Accounts route and confirm the E5 per-account
+    // sync health section (last successful window, failed webhooks 24h,
+    // cursor age, next allowed pull) renders in the account drawer.
+    await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    // The "Details" button is the trigger; click the first one.
+    await page
+      .getByRole("button", { name: /^details$/i })
+      .first()
+      .click();
+    await page.locator('[data-testid="account-sync-health"]').waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-last-successful-window"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-failed-webhooks-24h"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-cursor-age"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="account-sync-health-next-allowed-pull"]')
+      .waitFor();
+    console.log("route smoke ok: accounts/sync-health");
+
+    // Drill into the Accounts route and confirm the E4 jar goal
+    // progress details (remaining, latest movement, projected completion)
+    // render without console errors.
+    await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="jar-card"]').first().waitFor();
+    await page.locator('[data-testid="jar-remaining"]').first().waitFor();
+    await page.locator('[data-testid="jar-latest-movement"]').first().waitFor();
+    await page
+      .locator('[data-testid="jar-projected-completion"]')
+      .first()
+      .waitFor();
+    console.log("route smoke ok: accounts/jar-goal-progress");
+    // Drill into the Sync route Activity tab and confirm the F4 surface
+    // (last-24h summary + grouped cards) renders without console errors.
+    await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.getByRole("tab", { name: /^activity$/i }).click();
+    await page.locator('[data-testid="sync-activity-tab"]').waitFor();
+    // After a fixture sync, the activity sources are non-empty so the
+    // summary block (not the empty-state) should be visible.
+    await page.locator('[data-testid="sync-activity-summary"]').waitFor();
+    console.log("route smoke ok: sync/activity-tab");
+    // Drill into the Sync route Storage tab and confirm the F3 surface
+    // (modified time, copy-path buttons, integrity / migrations / row
+    // counts) renders without console errors.
+    await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    // The default tab is "Runs"; click the Storage tab trigger.
+    await page.getByRole("tab", { name: /^storage$/i }).click();
+    await page.locator('[data-testid="sync-storage-tab"]').waitFor();
+    await page.locator('[data-testid="storage-database-path"]').waitFor();
+    await page.locator('[data-testid="storage-copy-database-path"]').waitFor();
+    await page.locator('[data-testid="storage-copy-data-directory"]').waitFor();
+    await page.locator('[data-testid="storage-database-modified"]').waitFor();
+    await page.locator('[data-testid="storage-details"]').waitFor();
+    console.log("route smoke ok: sync/storage-tab");
   } finally {
     if (browser) {
       await browser.close();

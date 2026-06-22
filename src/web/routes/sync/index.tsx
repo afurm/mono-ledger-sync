@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   AlertCircleIcon,
+  CopyIcon,
   DatabaseIcon,
   DownloadIcon,
   FileClockIcon,
@@ -43,7 +44,13 @@ import {
 } from "@/components/ui/tooltip";
 
 import { compactLocalDatabase, createLocalBackup } from "../../api";
-import type { LocalAppSnapshot, SyncRun, WebhookEvent } from "../../api-types";
+import type {
+  LocalActivityEvent,
+  LocalAppSnapshot,
+  SyncRun,
+  WebhookEvent,
+} from "../../api-types";
+import { useCopyToClipboard } from "../../clipboard";
 import { formatDateTime } from "../../format";
 import type { RouteId } from "../../navigation";
 import {
@@ -1152,6 +1159,7 @@ export function SyncRoute({
         <TabsTrigger value="runs">Runs</TabsTrigger>
         <TabsTrigger value="storage">Storage</TabsTrigger>
         <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+        <TabsTrigger value="activity">Activity</TabsTrigger>
       </TabsList>
       <TabsContent value="runs">
         <Card>
@@ -1179,112 +1187,13 @@ export function SyncRoute({
         </Card>
       </TabsContent>
       <TabsContent value="storage">
-        <Card>
-          <CardHeader>
-            <CardTitle>Local storage</CardTitle>
-            <CardDescription>
-              Profile-scoped SQLite location, backups, and maintenance.
-            </CardDescription>
-            <CardAction>
-              <Badge variant="secondary">
-                {formatBytes(snapshot?.storage.databaseBytes ?? 0)}
-              </Badge>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="grid gap-3 text-sm">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <p className="text-muted-foreground">Database path</p>
-                <p className="break-all font-medium">
-                  {snapshot?.storage.databasePath ?? "Waiting for local API"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Data directory</p>
-                <p className="break-all font-medium">
-                  {snapshot?.storage.dataDir ?? "Waiting for local API"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Last backup</p>
-                <p className="break-all font-medium">
-                  {snapshot?.storage.latestBackupPath ?? "No backup yet"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Last compact</p>
-                <p className="font-medium">
-                  {snapshot?.storage.lastCompactAt
-                    ? formatDateTime(snapshot.storage.lastCompactAt)
-                    : "Not compacted"}
-                </p>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <p className="text-muted-foreground">Recent backups</p>
-              {(snapshot?.storage.backups ?? []).length === 0 ? (
-                <p className="rounded-md border border-border p-3 text-muted-foreground">
-                  No backups created yet.
-                </p>
-              ) : (
-                <div className="grid gap-2">
-                  {(snapshot?.storage.backups ?? [])
-                    .slice(0, 3)
-                    .map((backup) => (
-                      <div
-                        className="grid gap-1 rounded-md border border-border p-3"
-                        key={backup.path}
-                      >
-                        <p className="break-all font-medium">{backup.path}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDateTime(backup.modifiedAt)} ·{" "}
-                          {formatBytes(backup.bytes)}
-                        </p>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={storageActionState.status === "saving"}
-                onClick={() => void backupFromSyncRoute()}
-              >
-                <DownloadIcon data-icon="inline-start" />
-                Backup now
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={storageActionState.status === "saving"}
-                onClick={() => void compactFromSyncRoute()}
-              >
-                <DatabaseIcon data-icon="inline-start" />
-                Compact database
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onRouteChange("settings")}
-              >
-                <SettingsIcon data-icon="inline-start" />
-                Restore or delete
-              </Button>
-            </div>
-            {storageActionState.status === "saved" && (
-              <p className="text-xs text-muted-foreground">
-                {storageActionState.message}
-              </p>
-            )}
-            {storageActionState.status === "error" && (
-              <p className="text-xs text-destructive">
-                {storageActionState.message}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        <SyncStorageTab
+          snapshot={snapshot}
+          storageActionState={storageActionState}
+          onBackup={backupFromSyncRoute}
+          onCompact={compactFromSyncRoute}
+          onRouteChange={onRouteChange}
+        />
       </TabsContent>
       <TabsContent value="webhooks">
         <div className="grid gap-4">
@@ -1303,6 +1212,429 @@ export function SyncRoute({
           <WebhookSettingsPanel config={snapshot?.config} />
         </div>
       </TabsContent>
+      <TabsContent value="activity">
+        <Card data-testid="sync-activity-tab">
+          <CardHeader>
+            <CardTitle>Recent local activity</CardTitle>
+            <CardDescription>
+              Last 24 hours of sync, webhook, export, rule, warning, and error
+              activity from the local SQLite log.
+            </CardDescription>
+            <CardAction>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onRouteChange("logs")}
+              >
+                <FileClockIcon data-icon="inline-start" />
+                Open Logs
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid gap-4 text-sm">
+            <SyncActivitySummaryPanel events={snapshot?.activityEvents ?? []} />
+            <SyncActivityGroups
+              events={snapshot?.activityEvents ?? []}
+              onOpenLogs={() => onRouteChange("logs")}
+            />
+          </CardContent>
+        </Card>
+      </TabsContent>
     </Tabs>
+  );
+}
+
+const RECENT_ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const ACTIVITY_GROUP_LABELS: Readonly<Record<string, string>> = {
+  sync_run: "Sync runs",
+  ledger_write: "Ledger writes",
+  webhook_delivery: "Webhook deliveries",
+  export: "Exports",
+  report_refresh: "Report refreshes",
+  rule_application: "Rule applications",
+  warning: "Warnings",
+  error: "Errors",
+};
+
+const ACTIVITY_GROUP_ORDER: readonly string[] = [
+  "sync_run",
+  "ledger_write",
+  "webhook_delivery",
+  "export",
+  "report_refresh",
+  "rule_application",
+  "warning",
+  "error",
+];
+
+function isWithinLastDay(timestamp: string): boolean {
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+  return Date.now() - parsed <= RECENT_ACTIVITY_WINDOW_MS;
+}
+
+function filterRecentActivity(
+  events: readonly LocalActivityEvent[],
+): readonly LocalActivityEvent[] {
+  return events.filter((event) => isWithinLastDay(event.timestamp));
+}
+
+function groupActivityByType(
+  events: readonly LocalActivityEvent[],
+): ReadonlyMap<string, readonly LocalActivityEvent[]> {
+  const grouped = new Map<string, LocalActivityEvent[]>();
+  for (const event of events) {
+    const bucket = grouped.get(event.type) ?? [];
+    bucket.push(event);
+    grouped.set(event.type, bucket);
+  }
+  for (const bucket of grouped.values()) {
+    bucket.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
+  return grouped;
+}
+
+function SyncActivitySummaryPanel({
+  events,
+}: {
+  events: readonly LocalActivityEvent[];
+}) {
+  const recent = filterRecentActivity(events);
+  if (recent.length === 0) {
+    return (
+      <p
+        className="rounded-md border border-border p-3 text-muted-foreground"
+        data-testid="sync-activity-summary-empty"
+      >
+        No local activity in the last 24 hours. Once you run a sync, an export,
+        or trigger a webhook, the events will appear here and in the Logs route.
+      </p>
+    );
+  }
+  const grouped = groupActivityByType(recent);
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      data-testid="sync-activity-summary"
+    >
+      <span className="text-xs font-medium text-muted-foreground">
+        Last 24h · {recent.length} event{recent.length === 1 ? "" : "s"}
+      </span>
+      {ACTIVITY_GROUP_ORDER.filter((type) => grouped.has(type)).map((type) => {
+        const count = grouped.get(type)?.length ?? 0;
+        return (
+          <Badge
+            key={type}
+            variant="secondary"
+            data-testid={`sync-activity-count-${type}`}
+          >
+            {ACTIVITY_GROUP_LABELS[type] ?? type} · {count}
+          </Badge>
+        );
+      })}
+    </div>
+  );
+}
+
+function SyncActivityGroups({
+  events,
+  onOpenLogs,
+}: {
+  events: readonly LocalActivityEvent[];
+  onOpenLogs: () => void;
+}) {
+  const recent = filterRecentActivity(events);
+  if (recent.length === 0) {
+    return null;
+  }
+  const grouped = groupActivityByType(recent);
+  return (
+    <div className="grid gap-3" data-testid="sync-activity-groups">
+      {ACTIVITY_GROUP_ORDER.filter((type) => grouped.has(type)).map((type) => {
+        const bucket = grouped.get(type) ?? [];
+        if (bucket.length === 0) {
+          return null;
+        }
+        return (
+          <div
+            key={type}
+            className="grid gap-2 rounded-md border border-border p-3"
+            data-testid={`sync-activity-group-${type}`}
+          >
+            <header className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold">
+                {ACTIVITY_GROUP_LABELS[type] ?? type} ({bucket.length})
+              </h4>
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={onOpenLogs}
+              >
+                View in Logs
+              </Button>
+            </header>
+            <ul className="grid gap-1 text-xs">
+              {bucket.slice(0, 5).map((event) => (
+                <li
+                  className="flex flex-wrap items-baseline justify-between gap-2"
+                  data-testid={`sync-activity-row-${event.id}`}
+                  key={event.id}
+                >
+                  <span className="font-medium">{event.title}</span>
+                  <span className="text-muted-foreground">
+                    {formatDateTime(event.timestamp)}
+                  </span>
+                </li>
+              ))}
+              {bucket.length > 5 ? (
+                <li className="text-muted-foreground">
+                  + {bucket.length - 5} more — open Logs to see all.
+                </li>
+              ) : null}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type StorageActionState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "saved"; message: string }
+  | { status: "error"; message: string };
+
+function SyncStorageTab({
+  snapshot,
+  storageActionState,
+  onBackup,
+  onCompact,
+  onRouteChange,
+}: {
+  snapshot: LocalAppSnapshot | undefined;
+  storageActionState: StorageActionState;
+  onBackup: () => Promise<void>;
+  onCompact: () => Promise<void>;
+  onRouteChange: (routeId: RouteId) => void;
+}) {
+  const storage = snapshot?.storage;
+  const databasePathCopy = useCopyToClipboard();
+  const dataDirCopy = useCopyToClipboard();
+  const storageActionsDisabled = storageActionState.status === "saving";
+
+  return (
+    <Card data-testid="sync-storage-tab">
+      <CardHeader>
+        <CardTitle>Local storage</CardTitle>
+        <CardDescription>
+          Profile-scoped SQLite location, backups, and maintenance.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary">
+            {formatBytes(storage?.databaseBytes ?? 0)}
+          </Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <p className="text-muted-foreground">Database path</p>
+            <p
+              className="break-all font-medium"
+              data-testid="storage-database-path"
+            >
+              {storage?.databasePath ?? "Waiting for local API"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Data directory</p>
+            <p
+              className="break-all font-medium"
+              data-testid="storage-data-directory"
+            >
+              {storage?.dataDir ?? "Waiting for local API"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Database modified</p>
+            <p className="font-medium" data-testid="storage-database-modified">
+              {storage?.databaseModifiedAt
+                ? formatDateTime(storage.databaseModifiedAt)
+                : "Not available"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Last backup</p>
+            <p className="break-all font-medium">
+              {storage?.latestBackupPath ?? "No backup yet"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Last compact</p>
+            <p className="font-medium">
+              {storage?.lastCompactAt
+                ? formatDateTime(storage.lastCompactAt)
+                : "Not compacted"}
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <p className="text-muted-foreground">Recent backups</p>
+          {(storage?.backups ?? []).length === 0 ? (
+            <p className="rounded-md border border-border p-3 text-muted-foreground">
+              No backups created yet.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {(storage?.backups ?? []).slice(0, 3).map((backup) => (
+                <div
+                  className="grid gap-1 rounded-md border border-border p-3"
+                  key={backup.path}
+                >
+                  <p className="break-all font-medium">{backup.path}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTime(backup.modifiedAt)} ·{" "}
+                    {formatBytes(backup.bytes)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={storageActionsDisabled}
+            onClick={() => void onBackup()}
+          >
+            <DownloadIcon data-icon="inline-start" />
+            Backup now
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={storageActionsDisabled}
+            onClick={() => void onCompact()}
+          >
+            <DatabaseIcon data-icon="inline-start" />
+            Compact database
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              databasePathCopy.state.status === "copied" ||
+              storage?.databasePath === undefined
+            }
+            onClick={() => {
+              if (storage?.databasePath !== undefined) {
+                void databasePathCopy.copy(storage.databasePath);
+              }
+            }}
+            data-testid="storage-copy-database-path"
+          >
+            <CopyIcon data-icon="inline-start" />
+            {databasePathCopy.state.status === "copied"
+              ? "Copied database path"
+              : "Copy database path"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              dataDirCopy.state.status === "copied" ||
+              storage?.dataDir === undefined
+            }
+            onClick={() => {
+              if (storage?.dataDir !== undefined) {
+                void dataDirCopy.copy(storage.dataDir);
+              }
+            }}
+            data-testid="storage-copy-data-directory"
+          >
+            <CopyIcon data-icon="inline-start" />
+            {dataDirCopy.state.status === "copied"
+              ? "Copied data directory"
+              : "Copy data directory"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onRouteChange("settings")}
+          >
+            <SettingsIcon data-icon="inline-start" />
+            Restore or delete
+          </Button>
+        </div>
+        {databasePathCopy.state.status === "error" ? (
+          <p className="text-xs text-destructive" role="status">
+            {databasePathCopy.state.message ??
+              "Could not copy the database path."}
+          </p>
+        ) : null}
+        {dataDirCopy.state.status === "error" ? (
+          <p className="text-xs text-destructive" role="status">
+            {dataDirCopy.state.message ?? "Could not copy the data directory."}
+          </p>
+        ) : null}
+        <details
+          className="rounded-md border border-border p-3"
+          data-testid="storage-details"
+        >
+          <summary className="cursor-pointer text-sm font-medium">
+            Storage details (integrity, migrations, row counts)
+          </summary>
+          <div className="mt-2 grid gap-2 text-xs">
+            <p data-testid="storage-integrity">
+              <span className="text-muted-foreground">Integrity check:</span>{" "}
+              <code>{storage?.integrityCheck ?? "ok"}</code>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Page count:</span>{" "}
+              {storage?.pageCount ?? 0} ·{" "}
+              <span className="text-muted-foreground">Page size:</span>{" "}
+              {storage?.pageSize ?? 0} bytes
+            </p>
+            <p>
+              <span className="text-muted-foreground">Migrations:</span>{" "}
+              {storage?.migrations.length ?? 0} applied
+            </p>
+            <ul
+              className="ml-4 list-disc text-muted-foreground"
+              data-testid="storage-migrations"
+            >
+              {(storage?.migrations ?? []).map((migration) => (
+                <li key={migration}>
+                  <code>{migration}</code>
+                </li>
+              ))}
+            </ul>
+            <p data-testid="storage-row-counts">
+              <span className="text-muted-foreground">Row counts:</span>{" "}
+              accounts {storage?.accounts ?? 0} · ledger entries{" "}
+              {storage?.ledgerEntries ?? 0} · sync runs {storage?.syncRuns ?? 0}{" "}
+              · webhook events {storage?.webhookEvents ?? 0}
+            </p>
+          </div>
+        </details>
+        {storageActionState.status === "saved" && (
+          <p className="text-xs text-muted-foreground">
+            {storageActionState.message}
+          </p>
+        )}
+        {storageActionState.status === "error" && (
+          <p className="text-xs text-destructive">
+            {storageActionState.message}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
