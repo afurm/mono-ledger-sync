@@ -479,6 +479,7 @@ export interface BudgetProgress {
   remainingAmount: number;
   progressPercentage: number;
   status: "on_track" | "near_limit" | "overspent";
+  rollover?: boolean;
 }
 
 export interface NetWorthTrendPoint {
