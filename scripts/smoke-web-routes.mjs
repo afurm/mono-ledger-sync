@@ -178,9 +178,7 @@ async function main() {
     await page.waitForSelector("main");
     await page.locator('[data-testid="export-preview"]').waitFor();
     await page.locator('[data-testid="export-preview-rows"]').waitFor();
-    await page
-      .locator('[data-testid="export-preview-date-range"]')
-      .waitFor();
+    await page.locator('[data-testid="export-preview-date-range"]').waitFor();
     await page
       .locator('[data-testid="export-preview-included-columns"]')
       .waitFor();
