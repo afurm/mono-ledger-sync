@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   AccountBalance,
   Budget,
@@ -32,6 +34,7 @@ import type {
   LedgerJar,
   Category,
   CategoryRule,
+  CategoryRuleInput,
   LedgerSummary,
   MerchantCleanupRule,
   MissedRecurringPayment,
@@ -53,12 +56,23 @@ import type {
 } from "./index.js";
 
 import type { LedgerDbTransaction } from "./index.js";
+import { redactSensitiveText } from "../privacy/index.js";
+import type {
+  MonobankStatementItem,
+  RawStatementItemLookup,
+} from "../domain/index.js";
 import type { SqliteLedgerDb } from "../sqlite/index.js";
+
+export type { MonobankStatementItem, RawStatementItemLookup };
 
 export interface LedgerTransactionQueryService {
   listLedgerEntries(
     query: Omit<LedgerEntryQuery, "profile"> & { profile?: string },
   ): Promise<LedgerEntryPage>;
+  getRawStatementItemForEntry(
+    entryId: string,
+    profile?: string,
+  ): Promise<RawStatementItemLookup>;
 }
 
 export interface LedgerBalanceQueryService {
@@ -167,6 +181,10 @@ export interface LedgerQueryService
     LedgerSyncStateQueryService {}
 
 export interface LedgerWriteService {
+  createRecurringItem(
+    input: ManualRecurringItemInput,
+    profile?: string,
+  ): Promise<RecurringItem>;
   confirmRecurringDetection(
     candidateId: string,
     profile?: string,
@@ -175,6 +193,10 @@ export interface LedgerWriteService {
     candidateId: string,
     profile?: string,
   ): Promise<RecurringDetectionDecisionResult>;
+  createCategoryRule(
+    input: CategoryRuleInput,
+    profile?: string,
+  ): Promise<CategoryRule>;
   createMonthlyCategoryBudget(
     input: MonthlyCategoryBudgetInput,
     profile?: string,
@@ -220,6 +242,17 @@ export interface LedgerWriteService {
     update: LedgerEntrySplitPlanUpdate,
     profile?: string,
   ): Promise<LedgerEntry | undefined>;
+}
+
+export interface ManualRecurringItemInput {
+  accountId: string;
+  categoryId?: string;
+  merchantName?: string;
+  frequency: RecurringItem["frequency"];
+  expectedAmountMin?: number;
+  expectedAmountMax?: number;
+  isActive?: boolean;
+  startedAt?: string;
 }
 
 export interface MonthlyCategoryBudgetInput {
@@ -1248,6 +1281,10 @@ async function buildCashflowReport(
     }
 
     for (const entry of page.entries) {
+      if (isTransferLikeEntry(entry)) {
+        continue;
+      }
+
       const month = localMonthKey(new Date(entry.time * 1000));
       const monthPeriod = readReportMonth(month);
       const pointKey = `${month}:${entry.currencyCode}`;
@@ -1391,6 +1428,10 @@ async function buildSavingsRateReport(
     }
 
     for (const entry of page.entries) {
+      if (isTransferLikeEntry(entry)) {
+        continue;
+      }
+
       const month = localMonthKey(new Date(entry.time * 1000));
       const monthPeriod = readReportMonth(month);
       const pointKey = `${month}:${entry.currencyCode}`;
@@ -1749,6 +1790,10 @@ async function buildCategoryTrendReport(
     }
 
     for (const entry of page.entries) {
+      if (isTransferLikeEntry(entry)) {
+        continue;
+      }
+
       const amount = Math.abs(entry.amount);
       const month = localMonthKey(new Date(entry.time * 1000));
       const monthPeriod = readReportMonth(month);
@@ -1886,6 +1931,10 @@ async function buildMerchantTrendReport(
     }
 
     for (const entry of page.entries) {
+      if (isTransferLikeEntry(entry)) {
+        continue;
+      }
+
       const amount = Math.abs(entry.amount);
       const month = localMonthKey(new Date(entry.time * 1000));
       const monthPeriod = readReportMonth(month);
@@ -2066,6 +2115,10 @@ async function buildMonthlySpendingReport(
     }
 
     for (const entry of page.entries) {
+      if (isTransferLikeEntry(entry)) {
+        continue;
+      }
+
       const amount = Math.abs(entry.amount);
       const currencyTotal = currencyTotals.get(entry.currencyCode) ?? {
         currencyCode: entry.currencyCode,
@@ -2944,11 +2997,16 @@ async function buildBudgetProgressRow(
   const progressPercentage =
     amountLimit > 0 ? Math.round((actualAmount / amountLimit) * 100) : 0;
   const remainingAmount = amountLimit - actualAmount;
+  const settings = await db.getLocalAppSettings(profile);
+  const warningThreshold =
+    settings?.budgetWarningThreshold !== undefined
+      ? Math.max(1, Math.min(settings.budgetWarningThreshold, 100))
+      : 85;
   const status = budget.includeInflows
     ? "on_track"
     : actualAmount > amountLimit
       ? "overspent"
-      : progressPercentage >= 85
+      : progressPercentage >= warningThreshold
         ? "near_limit"
         : "on_track";
 
@@ -2961,6 +3019,7 @@ async function buildBudgetProgressRow(
     currencyCode: budget.currencyCode,
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
+    periodStatus: period.status,
     amountLimit,
     actualAmount,
     remainingAmount,
@@ -3102,11 +3161,32 @@ export function createLedgerQueryService({
         asOf,
       );
     },
-    listLedgerEntries({ profile, ...query }) {
+    async listLedgerEntries({ profile, ...query }) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const settings = await db.getLocalAppSettings(resolvedProfile);
+
       return db.listLedgerEntries({
+        ...(settings?.excludedAccountIds === undefined
+          ? {}
+          : { excludedAccountIds: settings.excludedAccountIds }),
         ...query,
-        profile: coerceProfile(profile, defaultProfile),
+        profile: resolvedProfile,
       });
+    },
+    async getRawStatementItemForEntry(entryId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const lookup = await db.getRawStatementItemForEntry(
+        resolvedProfile,
+        entryId,
+      );
+
+      if (!lookup.available) {
+        return lookup;
+      }
+
+      const redactedJson = redactSensitiveText(lookup.payload.payload_json);
+      const redactedPayload = JSON.parse(redactedJson) as MonobankStatementItem;
+      return { available: true, redactedPayload };
     },
     listSyncRuns(profile, limit) {
       return db.listSyncRuns(coerceProfile(profile, defaultProfile), limit);
@@ -3128,6 +3208,7 @@ export function createLedgerQueryServices(
   return {
     transactions: {
       listLedgerEntries: query.listLedgerEntries,
+      getRawStatementItemForEntry: query.getRawStatementItemForEntry,
     },
     balances: {
       getLedgerSummary: query.getLedgerSummary,
@@ -3185,6 +3266,74 @@ export function createLedgerWriteService({
     return normalizedCandidateId;
   }
 
+  function readOptionalRuleText(value: string | undefined): string | undefined {
+    const normalized = value?.trim();
+
+    return normalized ? normalized.slice(0, 120) : undefined;
+  }
+
+  function readRuleMcc(value: number | undefined): number | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    const normalized = Math.trunc(value);
+
+    if (!Number.isFinite(normalized) || normalized < 1 || normalized > 9999) {
+      throw new Error("Category rule MCC must be between 1 and 9999.");
+    }
+
+    return normalized;
+  }
+
+  function categoryRuleIdFromInput(
+    profile: string,
+    input: CategoryRuleInput,
+  ): string {
+    const digest = createHash("sha256")
+      .update(
+        JSON.stringify({
+          profile,
+          categoryId: input.categoryId.trim(),
+          merchantContains: readOptionalRuleText(input.merchantContains),
+          descriptionContains: readOptionalRuleText(input.descriptionContains),
+          mcc: readRuleMcc(input.mcc),
+          amountDirection: input.amountDirection ?? "any",
+        }),
+      )
+      .digest("hex")
+      .slice(0, 12);
+
+    return `manual-${digest}`;
+  }
+
+  function defaultCategoryRuleName(
+    categoryName: string,
+    input: CategoryRuleInput,
+  ): string {
+    const merchant = readOptionalRuleText(input.merchantContains);
+    const description = readOptionalRuleText(input.descriptionContains);
+    const source = merchant ?? description ?? `MCC ${input.mcc}`;
+
+    return `${source} to ${categoryName}`.slice(0, 120);
+  }
+
+  function nextUserCategoryRulePriority(
+    rules: readonly CategoryRule[],
+    existing: CategoryRule | undefined,
+  ): number {
+    if (existing) {
+      return existing.priority;
+    }
+
+    const userPriorities = rules
+      .filter((rule) => rule.isSystem !== true)
+      .map((rule) => rule.priority)
+      .filter((priority) => Number.isFinite(priority));
+
+    return Math.min(90, Math.max(49, ...userPriorities) + 1);
+  }
+
   async function findRecurringDetectionCandidate(
     profile: string,
     candidateId: string,
@@ -3222,6 +3371,21 @@ export function createLedgerWriteService({
     };
   }
 
+  function recurringItemIdFromManualInput(
+    input: ManualRecurringItemInput,
+    timestamp: string,
+  ): string {
+    const label = normalizeRecurringGroupLabel(
+      input.merchantName ?? input.categoryId ?? input.accountId,
+    )
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-|-$/gu, "")
+      .slice(0, 60);
+
+    return `manual-${label || "stream"}-${input.frequency}-${Date.parse(timestamp)}`;
+  }
+
   async function withProfileTransaction<T>(
     profile: string | undefined,
     callback: (tx: LedgerDbTransaction, profile: string) => Promise<T>,
@@ -3242,6 +3406,81 @@ export function createLedgerWriteService({
   }
 
   return {
+    async createRecurringItem(input, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const accountId = input.accountId.trim();
+      const categoryId = input.categoryId?.trim();
+      const merchantName = input.merchantName?.trim();
+      const timestamp = new Date().toISOString();
+      const expectedAmountMin =
+        input.expectedAmountMin === undefined
+          ? undefined
+          : Math.trunc(input.expectedAmountMin);
+      const expectedAmountMax =
+        input.expectedAmountMax === undefined
+          ? undefined
+          : Math.trunc(input.expectedAmountMax);
+
+      if (!accountId) {
+        throw new Error("Recurring account is required.");
+      }
+
+      if (
+        ![
+          "daily",
+          "weekly",
+          "monthly",
+          "quarterly",
+          "yearly",
+          "irregular",
+        ].includes(input.frequency)
+      ) {
+        throw new Error("Recurring frequency is invalid.");
+      }
+
+      if (!merchantName && !categoryId) {
+        throw new Error("Recurring merchant or category is required.");
+      }
+
+      if (
+        expectedAmountMin !== undefined &&
+        expectedAmountMax !== undefined &&
+        expectedAmountMin > expectedAmountMax
+      ) {
+        throw new Error("Recurring amount range is invalid.");
+      }
+
+      const [accounts, categories] = await Promise.all([
+        db.listAccounts(resolvedProfile),
+        db.listCategories(resolvedProfile),
+      ]);
+
+      if (!accounts.some((account) => account.id === accountId)) {
+        throw new Error("Recurring account was not found.");
+      }
+
+      if (
+        categoryId &&
+        !categories.some((category) => category.id === categoryId)
+      ) {
+        throw new Error("Recurring category was not found.");
+      }
+
+      return db.upsertRecurringItem(resolvedProfile, {
+        id: recurringItemIdFromManualInput(input, timestamp),
+        profile: resolvedProfile,
+        accountId,
+        ...(categoryId ? { categoryId } : {}),
+        ...(merchantName ? { merchantName } : {}),
+        frequency: input.frequency,
+        ...(expectedAmountMin === undefined ? {} : { expectedAmountMin }),
+        ...(expectedAmountMax === undefined ? {} : { expectedAmountMax }),
+        isActive: input.isActive !== false,
+        ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    },
     async confirmRecurringDetection(candidateId, profile) {
       const resolvedProfile = coerceProfile(profile, defaultProfile);
       const normalizedCandidateId = readRecurringCandidateId(candidateId);
@@ -3289,6 +3528,84 @@ export function createLedgerWriteService({
         action: decision.action,
         updatedAt: decision.updatedAt,
       };
+    },
+    async createCategoryRule(input, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const categoryId = input.categoryId.trim();
+      const merchantContains = readOptionalRuleText(input.merchantContains);
+      const descriptionContains = readOptionalRuleText(
+        input.descriptionContains,
+      );
+      const mcc = readRuleMcc(input.mcc);
+      const amountDirection = input.amountDirection ?? "any";
+      const explicitPriority =
+        input.priority === undefined ? undefined : Math.trunc(input.priority);
+
+      if (!categoryId) {
+        throw new Error("Category rule target category is required.");
+      }
+
+      if (!["income", "expense", "any"].includes(amountDirection)) {
+        throw new Error("Category rule amount direction is invalid.");
+      }
+
+      if (
+        merchantContains === undefined &&
+        descriptionContains === undefined &&
+        mcc === undefined
+      ) {
+        throw new Error(
+          "Category rule requires merchant, description, or MCC condition.",
+        );
+      }
+
+      if (
+        explicitPriority !== undefined &&
+        (!Number.isFinite(explicitPriority) || explicitPriority < 1)
+      ) {
+        throw new Error("Category rule priority must be a positive number.");
+      }
+
+      const [categories, rules] = await Promise.all([
+        db.listCategories(resolvedProfile),
+        db.listCategoryRules(resolvedProfile),
+      ]);
+      const category = categories.find(
+        (candidate) => candidate.id === categoryId,
+      );
+
+      if (!category) {
+        throw new Error("Category rule target category was not found.");
+      }
+
+      const ruleId = categoryRuleIdFromInput(resolvedProfile, {
+        ...input,
+        categoryId,
+        ...(merchantContains === undefined ? {} : { merchantContains }),
+        ...(descriptionContains === undefined ? {} : { descriptionContains }),
+        ...(mcc === undefined ? {} : { mcc }),
+        amountDirection,
+      });
+      const existing = rules.find((rule) => rule.id === ruleId);
+      const timestamp = new Date().toISOString();
+
+      return db.upsertCategoryRule(resolvedProfile, {
+        id: ruleId,
+        categoryId,
+        name:
+          readOptionalRuleText(input.name) ??
+          defaultCategoryRuleName(category.name, input),
+        priority:
+          explicitPriority ?? nextUserCategoryRulePriority(rules, existing),
+        matchType: "condition",
+        ...(merchantContains === undefined ? {} : { merchantContains }),
+        ...(descriptionContains === undefined ? {} : { descriptionContains }),
+        ...(mcc === undefined ? {} : { mcc }),
+        amountDirection,
+        isEnabled: input.isEnabled !== false,
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      });
     },
     async createMonthlyCategoryBudget(input, profile) {
       const resolvedProfile = coerceProfile(profile, defaultProfile);

@@ -1,29 +1,23 @@
 import os from "node:os";
 import crypto from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { copyFile, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Fastify, { type FastifyInstance } from "fastify";
 import type inject from "light-my-request";
 
-import {
-  createLedgerExport,
-  createLocalConfigurationExport,
-  exportPresetNames,
-  isExportFormat,
-  isExportPreset,
-  parseLocalConfigurationImport,
-  type ExportFormat,
-  type ExportPreset,
-} from "../exports/index.js";
-import {
-  collectDiagnostics,
-  collectSupportBundle,
-  type CollectDiagnosticsTokenStatus,
-  type DiagnosticsSnapshot,
-  type SupportBundleSnapshot,
-} from "./diagnostics.js";
+import type { CollectDiagnosticsTokenStatus } from "./diagnostics.js";
+import { registerDiagnosticsRoutes } from "./routes/diagnostics-routes.js";
+import { registerLocalAppRoutes } from "./routes/app-routes.js";
+import { registerExportRoutes } from "./routes/export-routes.js";
+import { registerLedgerRoutes } from "./routes/ledger-routes.js";
+import { registerRecurringRoutes } from "./routes/recurring-routes.js";
+import { registerReportRoutes } from "./routes/report-routes.js";
+import { registerSyncRoutes } from "./routes/sync-routes.js";
+import { registerTransactionRoutes } from "./routes/transaction-routes.js";
+import { registerLocalWebRoutes } from "./routes/web-routes.js";
+import { registerWebhookRoutes } from "./routes/webhook-routes.js";
 import {
   isLedgerSource,
   productArchitecture,
@@ -32,69 +26,21 @@ import {
 } from "../core/index.js";
 import { DomainError } from "../domain/index.js";
 import {
-  assertMonobankPersonalWebhookEvent,
   createBundledFixtureMonobankAdapter,
   createMonobankHttpAdapter,
   createMonobankRateLimitState,
-  loadMonobankFixtureSet,
   MonobankApiError,
-  MonobankValidationError,
   type MonobankAdapter,
-  type MonobankClientInfo,
-  type MonobankFixtureSet,
-  type MonobankPersonalWebhookEvent,
   type MonobankRateLimitState,
-  type MonobankStatementItem,
 } from "../monobank/index.js";
 import { createSqliteLedgerDb, type SqliteLedgerDb } from "../sqlite/index.js";
 import {
-  createProcessSignalAbortController,
-  syncLedgerWithMonobank,
-} from "../sync/index.js";
-import {
-  ledgerEntrySortDirections,
-  ledgerEntrySortFields,
   createLedgerQueryService,
   createLedgerWriteService,
   type LedgerQueryService,
   type LedgerWriteService,
-  type MonthlyCategoryBudgetInput,
 } from "../storage/index.js";
-import type {
-  Category,
-  CategoryRule,
-  BalanceProjectionReport,
-  CategoryTrendReport,
-  BudgetProgress,
-  CashflowReport,
-  LedgerAccount,
-  LedgerCategorySpending,
-  LedgerEntry,
-  LedgerEntryAnnotationUpdate,
-  LedgerEntryBulkEditUpdate,
-  LedgerEntryCategoryRestoreEntry,
-  LedgerEntrySplitPlanUpdate,
-  LedgerEntryPage,
-  LedgerEntrySortDirection,
-  LedgerEntrySortField,
-  LedgerJar,
-  SavingsGoalProgress,
-  LedgerSummary,
-  MerchantCleanupRule,
-  MerchantTrendReport,
-  MissedRecurringPayment,
-  MonthlySpendingReport,
-  NetWorthTrend,
-  RecurringCalendarEvent,
-  RecurringDetectionCandidate,
-  RecurringDetectionDecisionResult,
-  SavingsRateReport,
-  SubscriptionIncreaseAlert,
-  UpcomingRecurringPayment,
-  StoredWebhookEvent,
-  SyncRun,
-} from "../storage/index.js";
-import type { SyncLedgerResult } from "../sync/index.js";
+import type { LocalAppSettings } from "../storage/index.js";
 import { logStructured } from "../logging/index.js";
 import {
   createDefaultMonobankTokenStore,
@@ -253,6 +199,7 @@ function requestHasAccessPasscode(
 const serverModuleDir = path.dirname(fileURLToPath(import.meta.url));
 const localWebBuildDir = path.resolve(serverModuleDir, "../web");
 const localWebAssetsDir = path.join(localWebBuildDir, "assets");
+const localWebStaticAssetNames = new Set(["favicon.ico", "favicon.svg"]);
 
 export interface LocalApiServerOptions {
   host?: string;
@@ -344,6 +291,50 @@ export interface LocalApiMonobankClientInfoSummary {
 export interface LocalApiAppConfigSyncState {
   lastSyncedAt?: string;
   nextSyncAllowedAt?: number;
+  schedule: NonNullable<LocalAppSettings["syncSchedule"]>;
+}
+
+export interface LocalApiStorageInfo {
+  profile: string;
+  dataDir: string;
+  databasePath: string;
+  databaseBytes: number;
+  databaseModifiedAt?: string;
+  integrityCheck: string;
+  pageCount: number;
+  pageSize: number;
+  migrations: readonly string[];
+  accounts: number;
+  ledgerEntries: number;
+  syncRuns: number;
+  webhookEvents: number;
+  backupDirectory: string;
+  backups: readonly LocalApiBackupFile[];
+  latestBackupPath?: string;
+  latestBackupAt?: string;
+  lastCompactAt?: string;
+}
+
+export interface LocalApiBackupFile {
+  path: string;
+  modifiedAt: string;
+  bytes: number;
+}
+
+export interface LocalApiBackupResult {
+  profile: string;
+  backupPath: string;
+  databasePath: string;
+  createdAt: string;
+  bytes: number;
+}
+
+export interface LocalApiLocalDataDeletionResult {
+  profile: string;
+  databasePath: string;
+  tokenRemoved: boolean;
+  ledgerDataDeleted: boolean;
+  deleted: Record<string, number>;
 }
 
 export interface LocalApiAppConfig {
@@ -355,37 +346,8 @@ export interface LocalApiAppConfig {
   access: LocalApiAccessBinding;
   webhook: LocalApiWebhookSettings;
   token: LocalApiMonobankTokenStatus;
+  settings: LocalAppSettings;
   sync: LocalApiAppConfigSyncState;
-}
-
-export interface LocalApiFixtureSummary {
-  source: "fixture";
-  profile: string;
-  accounts: number;
-  jars: number;
-  currencyRates: number;
-  statementAccounts: number;
-  statementItems: number;
-  webhookEvents: number;
-  errorStates: number;
-}
-
-export interface LocalApiFixtureClientInfo {
-  source: "fixture";
-  profile: string;
-  clientInfo: MonobankClientInfo;
-}
-
-export interface LocalApiFixtureStatementsAccount {
-  accountId: string;
-  items: readonly MonobankStatementItem[];
-}
-
-export interface LocalApiFixtureStatements {
-  source: "fixture";
-  profile: string;
-  totalItems: number;
-  accounts: readonly LocalApiFixtureStatementsAccount[];
 }
 
 interface LocalAppServices {
@@ -399,978 +361,9 @@ interface LocalAppServices {
   writeService: LedgerWriteService;
 }
 
-const healthResponseSchema = {
-  type: "object",
-  required: [
-    "status",
-    "localOnly",
-    "version",
-    "framework",
-    "apiPrefix",
-    "architecture",
-  ],
-  properties: {
-    status: { const: "ok" },
-    localOnly: { type: "boolean" },
-    version: { const: version },
-    framework: { const: localApiServerFramework },
-    apiPrefix: { const: localApiRoutePrefix },
-    architecture: {
-      type: "object",
-      required: ["ui", "server", "storage"],
-      properties: {
-        ui: { const: productArchitecture.ui },
-        server: { const: productArchitecture.server },
-        storage: { const: productArchitecture.storage },
-      },
-    },
-  },
-} as const;
-
-const diagnosticsResponseSchema = {
-  type: "object",
-  required: [
-    "schemaVersion",
-    "profile",
-    "source",
-    "version",
-    "architecture",
-    "generatedAt",
-    "secureStorage",
-    "database",
-    "sync",
-    "webhooks",
-    "duplicates",
-    "token",
-  ],
-  properties: {
-    schemaVersion: { type: "string" },
-    profile: { type: "string" },
-    source: { enum: ["fixture", "monobank"] },
-    version: { type: "string" },
-    architecture: { type: "object" },
-    generatedAt: { type: "string" },
-    secureStorage: {
-      type: "object",
-      required: ["available", "platform", "backend"],
-      properties: {
-        available: { type: "boolean" },
-        platform: { type: "string" },
-        backend: { enum: ["keychain", "secret-service", "session"] },
-        reason: { type: "string" },
-      },
-    },
-    database: {
-      type: "object",
-      required: ["integrity", "filePath", "fileSize", "lastModified"],
-      properties: {
-        integrity: { enum: ["ok", "error"] },
-        integrityError: { type: "string" },
-        filePath: { type: "string" },
-        fileSize: { type: "number" },
-        lastModified: { type: "string" },
-      },
-    },
-    sync: {
-      type: "object",
-      required: ["lastSuccessfulAt", "ageHours", "staleCursors"],
-      properties: {
-        lastSuccessfulAt: { type: ["string", "null"] },
-        ageHours: { type: ["number", "null"] },
-        staleCursors: { type: "array" },
-      },
-    },
-    webhooks: {
-      type: "object",
-      required: ["pending", "processed", "failed", "ignored", "duplicate"],
-      properties: {
-        pending: { type: "number" },
-        processed: { type: "number" },
-        failed: { type: "number" },
-        ignored: { type: "number" },
-        duplicate: { type: "number" },
-      },
-    },
-    duplicates: {
-      type: "object",
-      required: ["last24h", "sinceFirstRun"],
-      properties: {
-        last24h: { type: "number" },
-        sinceFirstRun: { type: "number" },
-      },
-    },
-    token: {
-      type: "object",
-      required: ["present", "storage", "persistence"],
-      properties: {
-        present: { type: "boolean" },
-        storage: { enum: ["secure", "session"] },
-        persistence: { enum: ["persistent", "session"] },
-        fallbackReason: { type: "string" },
-      },
-    },
-  },
-} as const;
-
-const supportBundleResponseSchema = {
-  ...diagnosticsResponseSchema,
-  required: [
-    ...diagnosticsResponseSchema.required.filter((k) => k !== "token"),
-    "supportBundle",
-    "tokenRedacted",
-  ],
-  properties: {
-    ...diagnosticsResponseSchema.properties,
-    supportBundle: { const: true },
-    tokenRedacted: { const: true },
-  },
-} as const;
-
-const fixtureSummaryResponseSchema = {
-  type: "object",
-  required: [
-    "source",
-    "profile",
-    "accounts",
-    "jars",
-    "currencyRates",
-    "statementAccounts",
-    "statementItems",
-    "webhookEvents",
-    "errorStates",
-  ],
-  properties: {
-    source: { const: "fixture" },
-    profile: { type: "string" },
-    accounts: { type: "number" },
-    jars: { type: "number" },
-    currencyRates: { type: "number" },
-    statementAccounts: { type: "number" },
-    statementItems: { type: "number" },
-    webhookEvents: { type: "number" },
-    errorStates: { type: "number" },
-  },
-} as const;
-
-const fixtureClientInfoResponseSchema = {
-  type: "object",
-  required: ["source", "profile", "clientInfo"],
-  properties: {
-    source: { const: "fixture" },
-    profile: { type: "string" },
-    clientInfo: {
-      type: "object",
-      additionalProperties: true,
-    },
-  },
-} as const;
-
-const fixtureStatementsResponseSchema = {
-  type: "object",
-  required: ["source", "profile", "totalItems", "accounts"],
-  properties: {
-    source: { const: "fixture" },
-    profile: { type: "string" },
-    totalItems: { type: "number" },
-    accounts: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["accountId", "items"],
-        properties: {
-          accountId: { type: "string" },
-          items: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: true,
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
-
-const appConfigResponseSchema = {
-  type: "object",
-  required: [
-    "profile",
-    "source",
-    "dataDir",
-    "databasePath",
-    "localOnly",
-    "access",
-    "webhook",
-    "token",
-    "sync",
-  ],
-  properties: {
-    profile: { type: "string" },
-    source: { enum: ["fixture", "monobank"] },
-    dataDir: { type: "string" },
-    databasePath: { type: "string" },
-    localOnly: { type: "boolean" },
-    access: {
-      type: "object",
-      required: ["localOnly", "host", "authentication"],
-      additionalProperties: false,
-      properties: {
-        localOnly: { type: "boolean" },
-        host: { type: "string" },
-        authentication: { enum: ["none", "passcode"] },
-      },
-    },
-    webhook: {
-      type: "object",
-      required: ["enabled", "path", "host", "port", "url"],
-      properties: {
-        enabled: { type: "boolean" },
-        path: {
-          type: "string",
-          pattern: "^/api/webhooks/monobank-[a-f0-9]{32}$",
-        },
-        host: { type: "string" },
-        port: { type: "number" },
-        url: { type: "string" },
-      },
-    },
-    token: {
-      type: "object",
-      required: ["profile", "hasToken", "storage", "persistence"],
-      properties: {
-        profile: { type: "string" },
-        hasToken: { type: "boolean" },
-        storage: { enum: ["secure", "session"] },
-        persistence: { enum: ["persistent", "session"] },
-        fallbackReason: {
-          enum: ["secure_storage_unavailable", "secure_storage_write_failed"],
-        },
-      },
-    },
-    sync: {
-      type: "object",
-      properties: {
-        lastSyncedAt: { type: "string" },
-        nextSyncAllowedAt: { type: "number" },
-      },
-    },
-  },
-} as const;
-
-const monobankTokenBodySchema = {
-  type: "object",
-  required: ["token"],
-  properties: {
-    profile: { type: "string" },
-    token: { type: "string" },
-  },
-  additionalProperties: false,
-} as const;
-
-const appSourceBodySchema = {
-  type: "object",
-  required: ["source"],
-  properties: {
-    source: { enum: ["fixture", "monobank"] },
-  },
-  additionalProperties: false,
-} as const;
-
-const monobankTokenResponseSchema = {
-  type: "object",
-  required: ["profile", "hasToken", "storage", "persistence"],
-  properties: {
-    profile: { type: "string" },
-    hasToken: { type: "boolean" },
-    storage: { enum: ["secure", "session"] },
-    persistence: { enum: ["persistent", "session"] },
-    fallbackReason: {
-      enum: ["secure_storage_unavailable", "secure_storage_write_failed"],
-    },
-    clientInfo: {
-      type: "object",
-      required: ["clientId", "name", "accounts", "jars", "masked"],
-      properties: {
-        clientId: { type: "string" },
-        name: { type: "string" },
-        accounts: { type: "number" },
-        jars: { type: "number" },
-        masked: { const: true },
-      },
-    },
-  },
-} as const;
-
-const ledgerSummaryResponseSchema = {
-  type: "object",
-  required: [
-    "profile",
-    "accounts",
-    "ledgerEntries",
-    "income",
-    "expenses",
-    "net",
-    "monthToDate",
-    "currencies",
-  ],
-  properties: {
-    profile: { type: "string" },
-    accounts: { type: "number" },
-    ledgerEntries: { type: "number" },
-    income: { type: "number" },
-    expenses: { type: "number" },
-    net: { type: "number" },
-    monthToDate: {
-      type: "object",
-      required: ["month", "from", "to", "income", "expenses", "net"],
-      properties: {
-        month: { type: "string" },
-        from: { type: "string" },
-        to: { type: "string" },
-        income: { type: "number" },
-        expenses: { type: "number" },
-        net: { type: "number" },
-      },
-    },
-    currencies: { type: "array", items: { type: "number" } },
-    lastSyncedAt: { type: "string" },
-    oldestSyncCursorUpdatedAt: { type: "string" },
-  },
-} as const;
-
-const netWorthTrendResponseSchema = {
-  type: "object",
-  required: ["enabled", "points"],
-  properties: {
-    enabled: { type: "boolean" },
-    reason: { type: "string" },
-    points: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: true,
-      },
-    },
-  },
-} as const;
-
-const ledgerAccountsResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const ledgerJarsResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const ledgerCategoriesResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const ledgerCategoryRulesResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const merchantCleanupRulesResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const ledgerCategorySpendingResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const cashflowReportQuerySchema = {
-  type: "object",
-  properties: {
-    months: { type: "integer", minimum: 1 },
-  },
-} as const;
-
-const cashflowReportResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const savingsRateReportQuerySchema = {
-  type: "object",
-  properties: {
-    months: { type: "integer", minimum: 1 },
-  },
-} as const;
-
-const savingsRateReportResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const balanceProjectionReportQuerySchema = {
-  type: "object",
-  properties: {
-    days: { type: "integer", minimum: 1 },
-  },
-} as const;
-
-const balanceProjectionReportResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const categoryTrendReportQuerySchema = {
-  type: "object",
-  properties: {
-    months: { type: "integer", minimum: 1 },
-  },
-} as const;
-
-const categoryTrendReportResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const merchantTrendReportQuerySchema = {
-  type: "object",
-  properties: {
-    months: { type: "integer", minimum: 1 },
-  },
-} as const;
-
-const merchantTrendReportResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const monthlySpendingReportQuerySchema = {
-  type: "object",
-  properties: {
-    month: { type: "string" },
-  },
-} as const;
-
-const monthlySpendingReportResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const upcomingRecurringPaymentsResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const missedRecurringPaymentsQuerySchema = {
-  type: "object",
-  properties: {
-    asOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
-  },
-  additionalProperties: false,
-} as const;
-
-const missedRecurringPaymentsResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const subscriptionIncreaseAlertsQuerySchema = {
-  type: "object",
-  properties: {
-    asOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
-  },
-  additionalProperties: false,
-} as const;
-
-const subscriptionIncreaseAlertsResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const recurringDetectionCandidatesResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const recurringDetectionDecisionParamsSchema = {
-  type: "object",
-  required: ["id"],
-  properties: {
-    id: { type: "string", minLength: 1 },
-  },
-  additionalProperties: false,
-} as const;
-
-const recurringDetectionDecisionResponseSchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const recurringCalendarQuerySchema = {
-  type: "object",
-  properties: {
-    from: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
-    to: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
-  },
-  additionalProperties: false,
-} as const;
-
-const recurringCalendarResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const budgetProgressResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const savingsGoalProgressResponseSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: true,
-  },
-} as const;
-
-const monthlyCategoryBudgetBodySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["categoryId", "month", "amountLimit"],
-  properties: {
-    categoryId: { type: "string", minLength: 1, maxLength: 80 },
-    month: { type: "string", pattern: "^\\d{4}-\\d{2}$" },
-    amountLimit: { type: "number", exclusiveMinimum: 0 },
-    currencyCode: { type: "number", minimum: 1 },
-    rollover: { type: "boolean" },
-  },
-} as const;
-
-const deleteMonthlyBudgetParamsSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id"],
-  properties: {
-    id: { type: "string", minLength: 1 },
-  },
-} as const;
-
-const ledgerEntriesPageResponseSchema = {
-  type: "object",
-  required: ["entries", "total", "limit", "offset"],
-  properties: {
-    entries: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: true,
-      },
-    },
-    total: { type: "number" },
-    limit: { type: "number" },
-    offset: { type: "number" },
-  },
-} as const;
-
-const ledgerEntryAnnotationBodySchema = {
-  type: "object",
-  additionalProperties: false,
-  minProperties: 1,
-  properties: {
-    note: { type: "string", maxLength: 2000 },
-    tags: {
-      type: "array",
-      maxItems: 12,
-      items: { type: "string", minLength: 1, maxLength: 40 },
-    },
-  },
-} as const;
-
-const ledgerEntriesBulkEditBodySchema = {
-  type: "object",
-  required: ["ids"],
-  additionalProperties: false,
-  minProperties: 2,
-  properties: {
-    ids: {
-      type: "array",
-      minItems: 1,
-      maxItems: 100,
-      items: { type: "string", minLength: 1, maxLength: 200 },
-    },
-    categoryId: { type: "string", minLength: 1, maxLength: 120 },
-    merchantName: { type: "string", minLength: 1, maxLength: 200 },
-    tags: {
-      type: "array",
-      maxItems: 12,
-      items: { type: "string", minLength: 1, maxLength: 40 },
-    },
-  },
-} as const;
-
-const ledgerEntryCategoryRestoreBodySchema = {
-  type: "object",
-  required: ["entries"],
-  additionalProperties: false,
-  properties: {
-    entries: {
-      type: "array",
-      minItems: 1,
-      maxItems: 100,
-      items: {
-        type: "object",
-        required: ["id"],
-        additionalProperties: false,
-        properties: {
-          id: { type: "string", minLength: 1, maxLength: 200 },
-          categoryId: { type: "string", minLength: 1, maxLength: 120 },
-          categoryName: { type: "string", minLength: 1, maxLength: 200 },
-          categorySource: {
-            type: "string",
-            enum: ["system_rule", "user_rule", "manual"],
-          },
-          categoryRuleId: { type: "string", minLength: 1, maxLength: 200 },
-          categoryRuleVersion: {
-            type: "string",
-            minLength: 1,
-            maxLength: 120,
-          },
-        },
-      },
-    },
-  },
-} as const;
-
-const ledgerEntrySplitPlanLineSchema = {
-  type: "object",
-  required: ["category", "amount"],
-  additionalProperties: false,
-  properties: {
-    category: {
-      type: "string",
-      minLength: 1,
-      maxLength: 120,
-      pattern: "^(?!\\s*$).+",
-    },
-    amount: { type: "integer" },
-  },
-} as const;
-
-const ledgerEntrySplitPlanBodySchema = {
-  type: "object",
-  required: ["lines"],
-  additionalProperties: false,
-  properties: {
-    lines: {
-      type: "array",
-      maxItems: 20,
-      items: ledgerEntrySplitPlanLineSchema,
-    },
-  },
-} as const;
-
-const syncRunResponseSchema = {
-  type: "object",
-  required: [
-    "id",
-    "profile",
-    "source",
-    "status",
-    "startedAt",
-    "apiCalls",
-    "windowsFetched",
-    "itemsSeen",
-    "itemsInserted",
-    "itemsUpdated",
-    "itemsSkipped",
-    "rateLimited",
-  ],
-  properties: {
-    id: { type: "string" },
-    profile: { type: "string" },
-    source: { enum: ["fixture", "monobank"] },
-    status: {
-      enum: ["queued", "running", "success", "partial", "failed"],
-    },
-    startedAt: { type: "string" },
-    finishedAt: { type: "string" },
-    apiCalls: { type: "number" },
-    windowsFetched: { type: "number" },
-    itemsSeen: { type: "number" },
-    itemsInserted: { type: "number" },
-    itemsUpdated: { type: "number" },
-    itemsSkipped: { type: "number" },
-    rateLimited: { type: "number" },
-  },
-} as const;
-
-const syncWriteStatsResponseSchema = {
-  type: "object",
-  required: ["inserted", "updated", "skipped"],
-  properties: {
-    inserted: { type: "number" },
-    updated: { type: "number" },
-    skipped: { type: "number" },
-  },
-} as const;
-
-const syncRunResultResponseSchema = {
-  type: "object",
-  required: ["run", "accounts", "dryRun", "stats", "summary"],
-  properties: {
-    run: syncRunResponseSchema,
-    accounts: {
-      type: "array",
-      items: {
-        type: "object",
-        required: [
-          "accountId",
-          "from",
-          "to",
-          "windowsFetched",
-          "itemsSeen",
-          "writeStats",
-        ],
-        properties: {
-          accountId: { type: "string" },
-          from: { type: "number" },
-          to: { type: "number" },
-          windowsFetched: { type: "number" },
-          itemsSeen: { type: "number" },
-          writeStats: syncWriteStatsResponseSchema,
-        },
-      },
-    },
-    dryRun: { type: "boolean" },
-    stats: {
-      type: "object",
-      required: [
-        "apiCalls",
-        "windowsFetched",
-        "itemsSeen",
-        "itemsInserted",
-        "itemsUpdated",
-        "itemsSkipped",
-        "rateLimited",
-      ],
-      properties: {
-        apiCalls: { type: "number" },
-        windowsFetched: { type: "number" },
-        itemsSeen: { type: "number" },
-        itemsInserted: { type: "number" },
-        itemsUpdated: { type: "number" },
-        itemsSkipped: { type: "number" },
-        rateLimited: { type: "number" },
-      },
-    },
-    summary: ledgerSummaryResponseSchema,
-  },
-} as const;
-
-const syncRunsResponseSchema = {
-  type: "array",
-  items: syncRunResponseSchema,
-} as const;
-
-const localApiErrorResponseSchema = {
-  type: "object",
-  required: ["error", "message"],
-  properties: {
-    error: { type: "string" },
-    message: { type: "string" },
-    upstreamStatus: { type: "number" },
-  },
-} as const;
-
-const webhookEventResponseSchema = {
-  type: "object",
-  required: ["id", "profile", "accountId", "type", "receivedAt"],
-  properties: {
-    id: { type: "string" },
-    profile: { type: "string" },
-    accountId: { type: "string" },
-    type: { type: "string" },
-    statementItemId: { type: "string" },
-    status: {
-      type: "string",
-      enum: ["pending", "processed", "duplicate", "ignored", "failed"],
-    },
-    receivedAt: { type: "string" },
-    processedAt: { type: "string" },
-  },
-} as const;
-
 const defaultWebhookRateLimitMaxRequests = 30;
 const defaultWebhookRateLimitWindowMs = 60_000;
-
-const webhookEventsResponseSchema = {
-  type: "array",
-  items: webhookEventResponseSchema,
-} as const;
-
-const webhookAcceptedResponseSchema = {
-  type: "object",
-  required: ["accepted", "pullRequired", "event"],
-  properties: {
-    accepted: { const: true },
-    pullRequired: { const: true },
-    event: webhookEventResponseSchema,
-  },
-} as const;
-
-const webhookValidationResponseSchema = {
-  type: "string",
-} as const;
-
-const ledgerEntriesQuerySchema = {
-  type: "object",
-  properties: {
-    accountId: { type: "string" },
-    categoryId: { type: "string" },
-    merchantName: { type: "string" },
-    status: { type: "string", enum: ["hold", "posted"] },
-    amountMin: { type: "integer" },
-    amountMax: { type: "integer" },
-    search: { type: "string" },
-    from: { type: "integer", minimum: 0 },
-    to: { type: "integer", minimum: 0 },
-    limit: { type: "integer", minimum: 1 },
-    offset: { type: "integer", minimum: 0 },
-    sortBy: { type: "string", enum: [...ledgerEntrySortFields] },
-    sortDirection: { type: "string", enum: [...ledgerEntrySortDirections] },
-  },
-} as const;
-
-const ledgerExportQuerySchema = {
-  type: "object",
-  properties: {
-    format: { type: "string" },
-    preset: { type: "string" },
-    from: { type: "integer", minimum: 0 },
-    to: { type: "integer", minimum: 0 },
-    accountId: { type: "string" },
-    categoryId: { type: "string" },
-    tag: { type: "string" },
-  },
-} as const;
-
-const localConfigurationImportBodySchema = {
-  type: "object",
-  additionalProperties: true,
-} as const;
-
-const localConfigurationImportResponseSchema = {
-  type: "object",
-  required: ["imported"],
-  properties: {
-    imported: {
-      type: "object",
-      required: [
-        "categories",
-        "categoryRules",
-        "budgets",
-        "budgetPeriods",
-        "tags",
-      ],
-      properties: {
-        categories: { type: "number" },
-        categoryRules: { type: "number" },
-        budgets: { type: "number" },
-        budgetPeriods: { type: "number" },
-        tags: { type: "number" },
-      },
-    },
-  },
-} as const;
-
-function summarizeFixtureSet(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): LocalApiFixtureSummary {
-  return {
-    source: "fixture",
-    profile,
-    accounts: fixtureSet.clientInfo.accounts.length,
-    jars: fixtureSet.clientInfo.jars?.length ?? 0,
-    currencyRates: fixtureSet.currencyRates.length,
-    statementAccounts: Object.keys(fixtureSet.statements).length,
-    statementItems: Object.values(fixtureSet.statements).reduce(
-      (count, statementItems) => count + statementItems.length,
-      0,
-    ),
-    webhookEvents: Object.keys(fixtureSet.webhookEvents ?? {}).length,
-    errorStates: Object.keys(fixtureSet.errors ?? {}).length,
-  };
-}
-
-function fixtureClientInfoResponse(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): LocalApiFixtureClientInfo {
-  return {
-    source: "fixture",
-    profile,
-    clientInfo: fixtureSet.clientInfo,
-  };
-}
-
-function fixtureStatementsResponse(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): LocalApiFixtureStatements {
-  const accounts = Object.entries(fixtureSet.statements).map(
-    ([accountId, items]) => ({
-      accountId,
-      items,
-    }),
-  );
-
-  return {
-    source: "fixture",
-    profile,
-    totalItems: accounts.reduce((count, account) => {
-      return count + account.items.length;
-    }, 0),
-    accounts,
-  };
-}
+const staleRunningSyncRunTimeoutMs = 30 * 60 * 1000;
 
 function escapeHtml(value: string): string {
   return value
@@ -1379,28 +372,6 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function currencyLabel(currencyCode: number): string {
-  switch (currencyCode) {
-    case 840:
-      return "USD";
-    case 978:
-      return "EUR";
-    case 980:
-      return "UAH";
-    default:
-      return String(currencyCode);
-  }
-}
-
-function formatMinorAmount(amount: number, currencyCode: number): string {
-  const normalizedAmount = amount / 100;
-
-  return `${normalizedAmount.toLocaleString("en-US", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  })} ${currencyLabel(currencyCode)}`;
 }
 
 function resolveProfile(options: LocalApiServerOptions): string {
@@ -1433,7 +404,7 @@ function resolveConfiguredSource(
 }
 
 function resolveSource(options: LocalApiServerOptions): LedgerSource {
-  return resolveConfiguredSource(options) ?? "fixture";
+  return resolveConfiguredSource(options) ?? "monobank";
 }
 
 function resolveDataDir(options: LocalApiServerOptions): string {
@@ -1538,6 +509,11 @@ async function createServices(
   });
 
   await db.migrate();
+  await interruptStaleRunningSyncRuns(
+    db,
+    profile,
+    options.now?.() ?? Date.now(),
+  );
 
   return {
     profile,
@@ -1551,280 +527,240 @@ async function createServices(
   };
 }
 
-function readNumberQuery(value: unknown): number | undefined {
-  if (Array.isArray(value)) {
-    return readNumberQuery(value[0]);
-  }
+function staleRunningSyncRunReason(timeoutMs: number): string {
+  const timeoutMinutes = Math.round(timeoutMs / 60_000);
 
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : undefined;
-  }
-
-  if (typeof value !== "string" || value.trim() === "") {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return `Marked interrupted because this sync run stayed running for more than ${timeoutMinutes} minutes. The local process likely stopped before it could finish.`;
 }
 
-function readStringQuery(value: unknown): string | undefined {
-  if (Array.isArray(value)) {
-    return readStringQuery(value[0]);
-  }
+async function interruptStaleRunningSyncRuns(
+  db: SqliteLedgerDb,
+  profile: string,
+  nowMs: number,
+): Promise<number> {
+  const interruptedAt = new Date(nowMs).toISOString();
+  const staleBefore = new Date(
+    nowMs - staleRunningSyncRunTimeoutMs,
+  ).toISOString();
 
-  if (typeof value !== "string" || value.trim() === "") {
-    return undefined;
-  }
-
-  return value;
+  return db.interruptStaleSyncRuns(
+    profile,
+    staleBefore,
+    interruptedAt,
+    staleRunningSyncRunReason(staleRunningSyncRunTimeoutMs),
+  );
 }
 
-function readUtcDateQuery(value: unknown, field: string): Date | undefined {
-  const text = readStringQuery(value);
-
-  if (text === undefined) {
-    return undefined;
-  }
-
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-
-  if (!match) {
-    throw new Error(`${field} must use YYYY-MM-DD format.`);
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]) - 1;
-  const day = Number(match[3]);
-  const parsed = new Date(Date.UTC(year, month, day));
-
-  if (parsed.toISOString().slice(0, 10) !== text) {
-    throw new Error(`${field} must be a valid calendar date.`);
-  }
-
-  return parsed;
-}
-
-function isLedgerEntrySortField(
-  value: string | undefined,
-): value is LedgerEntrySortField {
-  return ledgerEntrySortFields.includes(value as LedgerEntrySortField);
-}
-
-function isLedgerEntrySortDirection(
-  value: string | undefined,
-): value is LedgerEntrySortDirection {
-  return ledgerEntrySortDirections.includes(value as LedgerEntrySortDirection);
-}
-
-function readLedgerEntryAnnotationUpdate(
-  body: unknown,
-): LedgerEntryAnnotationUpdate {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return {};
-  }
-
-  const record = body as Record<string, unknown>;
-  const update: LedgerEntryAnnotationUpdate = {};
-
-  if (Object.hasOwn(record, "note") && typeof record.note === "string") {
-    update.note = record.note;
-  }
-
-  if (Object.hasOwn(record, "tags") && Array.isArray(record.tags)) {
-    update.tags = record.tags.filter((tag): tag is string => {
-      return typeof tag === "string";
-    });
-  }
-
-  return update;
-}
-
-function readLedgerEntryBulkEditUpdate(body: unknown): {
-  ids: readonly string[];
-  update: LedgerEntryBulkEditUpdate;
-} {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { ids: [], update: {} };
-  }
-
-  const record = body as Record<string, unknown>;
-  const update: LedgerEntryBulkEditUpdate = {};
-  const ids = Array.isArray(record.ids)
-    ? record.ids.filter((id): id is string => typeof id === "string")
-    : [];
-
-  if (
-    Object.hasOwn(record, "categoryId") &&
-    typeof record.categoryId === "string"
-  ) {
-    update.categoryId = record.categoryId;
-  }
-
-  if (
-    Object.hasOwn(record, "merchantName") &&
-    typeof record.merchantName === "string"
-  ) {
-    update.merchantName = record.merchantName;
-  }
-
-  if (Object.hasOwn(record, "tags") && Array.isArray(record.tags)) {
-    update.tags = record.tags.filter((tag): tag is string => {
-      return typeof tag === "string";
-    });
-  }
-
-  return { ids, update };
-}
-
-function isLedgerEntryCategorySource(
+function isSyncSchedule(
   value: unknown,
-): value is NonNullable<LedgerEntryCategoryRestoreEntry["categorySource"]> {
-  return value === "system_rule" || value === "user_rule" || value === "manual";
+): value is NonNullable<LocalAppSettings["syncSchedule"]> {
+  return (
+    value === "manual" ||
+    value === "hourly" ||
+    value === "daily" ||
+    value === "app_start"
+  );
 }
 
-function readLedgerEntryCategoryRestoreEntries(
-  body: unknown,
-): readonly LedgerEntryCategoryRestoreEntry[] {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return [];
-  }
-
-  const record = body as Record<string, unknown>;
-
-  if (!Array.isArray(record.entries)) {
-    return [];
-  }
-
-  return record.entries
-    .filter((entry): entry is Record<string, unknown> => {
-      return !!entry && typeof entry === "object" && !Array.isArray(entry);
-    })
-    .flatMap((entry) => {
-      if (typeof entry.id !== "string") {
-        return [];
-      }
-
-      const restoreEntry: LedgerEntryCategoryRestoreEntry = { id: entry.id };
-
-      if (typeof entry.categoryId === "string") {
-        restoreEntry.categoryId = entry.categoryId;
-      }
-
-      if (typeof entry.categoryName === "string") {
-        restoreEntry.categoryName = entry.categoryName;
-      }
-
-      if (isLedgerEntryCategorySource(entry.categorySource)) {
-        restoreEntry.categorySource = entry.categorySource;
-      }
-
-      if (typeof entry.categoryRuleId === "string") {
-        restoreEntry.categoryRuleId = entry.categoryRuleId;
-      }
-
-      if (typeof entry.categoryRuleVersion === "string") {
-        restoreEntry.categoryRuleVersion = entry.categoryRuleVersion;
-      }
-
-      return [restoreEntry];
-    });
-}
-
-function readLedgerEntrySplitPlanUpdate(
-  body: unknown,
-): LedgerEntrySplitPlanUpdate {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return {};
-  }
-
-  const record = body as Record<string, unknown>;
-  const update: LedgerEntrySplitPlanUpdate = {};
-
-  if (Array.isArray(record.lines)) {
-    update.lines = record.lines
-      .map((line) => {
-        if (!line || typeof line !== "object" || Array.isArray(line)) {
-          return undefined;
-        }
-
-        const item = line as Record<string, unknown>;
-        const category = item.category;
-        const amount = item.amount;
-
-        if (typeof category !== "string" || typeof amount !== "number") {
-          return undefined;
-        }
-
-        return { category, amount };
-      })
-      .filter((line): line is { category: string; amount: number } => {
-        return line !== undefined;
-      });
-  }
-
-  return update;
-}
-
-function readMonthlyCategoryBudgetInput(
-  body: unknown,
-): MonthlyCategoryBudgetInput {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return {
-      categoryId: "",
-      currencyCode: 980,
-      month: "",
-      amountLimit: 0,
-    };
-  }
-
-  const record = body as Record<string, unknown>;
-
+function withLocalAppSettingsDefaults(
+  profile: string,
+  source: LedgerSource,
+  settings: LocalAppSettings | undefined,
+): LocalAppSettings {
   return {
-    categoryId:
-      typeof record.categoryId === "string" ? record.categoryId.trim() : "",
-    currencyCode:
-      typeof record.currencyCode === "number" ? record.currencyCode : 980,
-    month: typeof record.month === "string" ? record.month.trim() : "",
-    amountLimit:
-      typeof record.amountLimit === "number" ? record.amountLimit : 0,
-    rollover: record.rollover === true,
+    profile,
+    source: settings?.source ?? source,
+    syncSchedule: settings?.syncSchedule ?? "manual",
+    excludedAccountIds: settings?.excludedAccountIds ?? [],
+    ...(settings?.exportDirectory === undefined
+      ? {}
+      : { exportDirectory: settings.exportDirectory }),
+    budgetWarningThreshold: settings?.budgetWarningThreshold ?? 80,
+    rawStatementRetentionDays: settings?.rawStatementRetentionDays ?? 90,
+    ...(settings?.lastBackupAt === undefined
+      ? {}
+      : { lastBackupAt: settings.lastBackupAt }),
+    ...(settings?.lastCompactAt === undefined
+      ? {}
+      : { lastCompactAt: settings.lastCompactAt }),
+    updatedAt: settings?.updatedAt ?? new Date(0).toISOString(),
   };
 }
 
-function renderLocalFixtureOverview(
-  fixtureSet: MonobankFixtureSet,
-  profile: string,
-): string {
-  const summary = summarizeFixtureSet(fixtureSet, profile);
-  const recentStatementItems = Object.entries(fixtureSet.statements)
-    .flatMap(([accountId, items]) => {
-      return items.map((item) => ({ accountId, item }));
-    })
-    .sort((left, right) => right.item.time - left.item.time)
-    .slice(0, 8);
-  const accountRows = fixtureSet.clientInfo.accounts
-    .map((account) => {
-      return `<tr>
-        <td>${escapeHtml(account.id)}</td>
-        <td>${escapeHtml(account.type)}</td>
-        <td>${escapeHtml(formatMinorAmount(account.balance, account.currencyCode))}</td>
-        <td>${escapeHtml(account.maskedPan?.join(", ") ?? "none")}</td>
-      </tr>`;
-    })
-    .join("");
-  const statementRows = recentStatementItems
-    .map(({ accountId, item }) => {
-      return `<tr>
-        <td>${escapeHtml(new Date(item.time * 1000).toISOString().slice(0, 10))}</td>
-        <td>${escapeHtml(item.description)}</td>
-        <td>${escapeHtml(accountId)}</td>
-        <td class="amount">${escapeHtml(formatMinorAmount(item.amount, item.currencyCode))}</td>
-        <td>${item.hold ? "hold" : "posted"}</td>
-      </tr>`;
-    })
-    .join("");
+function readLocalAppSettingsUpdate(
+  body: unknown,
+): Omit<LocalAppSettings, "profile" | "updatedAt"> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {};
+  }
+
+  const record = body as Record<string, unknown>;
+  const update: Omit<LocalAppSettings, "profile" | "updatedAt"> = {};
+
+  if (isSyncSchedule(record.syncSchedule)) {
+    update.syncSchedule = record.syncSchedule;
+  }
+
+  if (Array.isArray(record.excludedAccountIds)) {
+    update.excludedAccountIds = [
+      ...new Set(
+        record.excludedAccountIds
+          .filter((id): id is string => typeof id === "string")
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ];
+  }
+
+  if (typeof record.exportDirectory === "string") {
+    update.exportDirectory = record.exportDirectory.trim();
+  }
+
+  if (
+    typeof record.budgetWarningThreshold === "number" &&
+    Number.isInteger(record.budgetWarningThreshold)
+  ) {
+    update.budgetWarningThreshold = record.budgetWarningThreshold;
+  }
+
+  if (
+    typeof record.rawStatementRetentionDays === "number" &&
+    Number.isInteger(record.rawStatementRetentionDays) &&
+    record.rawStatementRetentionDays >= 0
+  ) {
+    update.rawStatementRetentionDays = record.rawStatementRetentionDays;
+  }
+
+  return update;
+}
+
+function backupDirectory(dataDir: string): string {
+  return path.join(dataDir, "backups");
+}
+
+function backupFileName(profile: string, timestamp: string): string {
+  const safeProfile = profile.replace(/[^a-z0-9._-]+/gi, "-") || "default";
+  const safeTimestamp = timestamp.replace(/[:.]/g, "-");
+
+  return `mono-ledger-${safeProfile}-${safeTimestamp}.sqlite`;
+}
+
+async function listBackupFiles(
+  directory: string,
+): Promise<readonly LocalApiBackupFile[]> {
+  let entries: string[];
+
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return [];
+  }
+
+  const backupFiles = await Promise.all(
+    entries
+      .filter((entry) => entry.endsWith(".sqlite"))
+      .map(async (entry) => {
+        const backupPath = path.join(directory, entry);
+
+        try {
+          const info = await stat(backupPath);
+
+          return {
+            path: backupPath,
+            modifiedAt: info.mtime.toISOString(),
+            modifiedTime: info.mtimeMs,
+            bytes: info.size,
+          };
+        } catch {
+          return undefined;
+        }
+      }),
+  );
+
+  return backupFiles
+    .filter(
+      (entry): entry is LocalApiBackupFile & { modifiedTime: number } =>
+        entry !== undefined,
+    )
+    .sort((left, right) => right.modifiedTime - left.modifiedTime)
+    .map(({ modifiedTime: _modifiedTime, ...entry }) => entry);
+}
+
+function isPathInsideDirectory(filePath: string, directory: string): boolean {
+  const relativePath = path.relative(directory, filePath);
+
+  return (
+    relativePath !== "" &&
+    !relativePath.startsWith("..") &&
+    !path.isAbsolute(relativePath)
+  );
+}
+
+function isValidProfileBackupPath(
+  backupPath: string,
+  services: LocalAppServices,
+): boolean {
+  const resolvedBackupPath = path.resolve(backupPath);
+  const resolvedBackupDirectory = path.resolve(
+    backupDirectory(services.dataDir),
+  );
+  const profilePrefix = `mono-ledger-${
+    safeProfileFileName(services.profile) || "default"
+  }-`;
+
+  return (
+    isPathInsideDirectory(resolvedBackupPath, resolvedBackupDirectory) &&
+    path.basename(resolvedBackupPath).startsWith(profilePrefix) &&
+    path.extname(resolvedBackupPath) === ".sqlite"
+  );
+}
+
+async function readStorageInfo(
+  services: LocalAppServices,
+): Promise<LocalApiStorageInfo> {
+  const [dbInfo, settings, databaseStat, backups] = await Promise.all([
+    services.db.getDatabaseInfo(services.profile),
+    services.db.getLocalAppSettings(services.profile),
+    stat(services.databasePath).catch(() => undefined),
+    listBackupFiles(backupDirectory(services.dataDir)),
+  ]);
+  const latestBackup = backups[0];
+
+  return {
+    profile: services.profile,
+    dataDir: services.dataDir,
+    databasePath: services.databasePath,
+    databaseBytes: databaseStat?.size ?? dbInfo.bytes,
+    ...(databaseStat === undefined
+      ? {}
+      : { databaseModifiedAt: databaseStat.mtime.toISOString() }),
+    integrityCheck: dbInfo.integrityCheck,
+    pageCount: dbInfo.pageCount,
+    pageSize: dbInfo.pageSize,
+    migrations: dbInfo.migrations,
+    accounts: dbInfo.accounts,
+    ledgerEntries: dbInfo.ledgerEntries,
+    syncRuns: dbInfo.syncRuns,
+    webhookEvents: dbInfo.webhookEvents,
+    backupDirectory: backupDirectory(services.dataDir),
+    backups,
+    ...(latestBackup === undefined
+      ? {}
+      : {
+          latestBackupPath: latestBackup.path,
+          latestBackupAt: latestBackup.modifiedAt,
+        }),
+    ...(settings?.lastBackupAt === undefined
+      ? {}
+      : { latestBackupAt: settings.lastBackupAt }),
+    ...(settings?.lastCompactAt === undefined
+      ? {}
+      : { lastCompactAt: settings.lastCompactAt }),
+  };
+}
+
+function renderLocalApiBootstrap(profile: string): string {
+  const escapedProfile = escapeHtml(profile);
 
   return `<!doctype html>
 <html lang="en">
@@ -1842,105 +778,40 @@ function renderLocalFixtureOverview(
         --primary: #05962f;
         --primary-dark: #047827;
         --surface: #f7f9fb;
-        --accent: #eef8f1;
-        --danger: #ef4444;
-        --warning: #f59e0b;
       }
       * { box-sizing: border-box; }
-      html {
-        width: 100%;
-      }
       body {
         margin: 0;
+        min-height: 100vh;
         background: var(--background);
         color: var(--foreground);
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 14px;
         line-height: 1.5;
-        overflow-x: hidden;
-        width: 100%;
-      }
-      button, input, select {
-        font: inherit;
-      }
-      .shell {
-        display: grid;
-        grid-template-columns: 236px minmax(0, 1fr);
-        min-height: 100vh;
-        max-width: 100vw;
-      }
-      aside {
-        border-right: 1px solid var(--border);
-        background: var(--surface);
-        min-width: 0;
-        padding: 22px 14px;
       }
       main {
-        min-width: 0;
-        max-width: 100vw;
-        padding: 24px;
-      }
-      .brand {
-        font-weight: 750;
-        font-size: 18px;
-        letter-spacing: 0;
-        margin: 0 0 22px;
-      }
-      nav {
         display: grid;
-        gap: 4px;
-      }
-      nav a {
-        border-radius: 6px;
-        color: var(--muted);
-        padding: 8px 10px;
-        text-decoration: none;
-      }
-      nav a.active {
-        background: var(--accent);
-        color: var(--primary-dark);
-        font-weight: 650;
-      }
-      .sidebar-footer {
-        border-top: 1px solid var(--border);
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 24px;
-        padding: 14px 10px 0;
-        overflow-wrap: anywhere;
-      }
-      .sidebar-footer strong {
-        color: var(--foreground);
-        display: block;
-        font-size: 12px;
-        margin-bottom: 4px;
-      }
-      .topbar {
-        align-items: center;
-        border-bottom: 1px solid var(--border);
-        display: flex;
         gap: 16px;
-        justify-content: space-between;
-        margin: -24px -24px 24px;
-        padding: 18px 24px;
+        margin: 0 auto;
+        max-width: 720px;
+        min-height: 100vh;
+        padding: 32px 20px;
+        place-content: center;
       }
-      h1, h2, p {
-        margin: 0;
-      }
+      h1, p { margin: 0; }
       h1 {
-        font-size: 24px;
-        line-height: 1.15;
+        font-size: 28px;
         letter-spacing: 0;
+        line-height: 1.1;
       }
-      h2 {
-        font-size: 16px;
-        line-height: 1.25;
-        letter-spacing: 0;
-        margin-bottom: 10px;
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        display: grid;
+        gap: 12px;
+        padding: 18px;
       }
-      .muted {
-        color: var(--muted);
-      }
+      .muted { color: var(--muted); }
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -1948,14 +819,12 @@ function renderLocalFixtureOverview(
       }
       .button {
         align-items: center;
-        background: var(--primary);
         border: 1px solid var(--primary);
         border-radius: 6px;
         color: #fff;
-        cursor: pointer;
+        background: var(--primary);
         display: inline-flex;
         font-weight: 650;
-        gap: 8px;
         justify-content: center;
         min-height: 34px;
         padding: 7px 12px;
@@ -1966,389 +835,26 @@ function renderLocalFixtureOverview(
         border-color: var(--border);
         color: var(--foreground);
       }
-      .button:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
-      }
-      .metrics {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 1px;
-        border: 1px solid var(--border);
-        background: var(--border);
-        margin-bottom: 24px;
-      }
-      .metric {
-        background: #fff;
-        padding: 14px;
-      }
-      .metric strong {
-        display: block;
-        font-size: 22px;
-        line-height: 1.2;
-      }
-      .grid {
-        display: grid;
-        gap: 24px;
-        grid-template-columns: minmax(0, 1fr);
-      }
-      section {
-        min-width: 0;
-      }
-      .panel {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        max-width: 100%;
-        min-width: 0;
-        overflow: hidden;
-      }
-      .panel-header {
-        align-items: center;
+      code {
         background: var(--surface);
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        gap: 12px;
-        justify-content: space-between;
-        padding: 10px 12px;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      th, td {
-        border-bottom: 1px solid var(--border);
-        padding: 9px 12px;
-        text-align: left;
-        vertical-align: top;
-      }
-      th {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 650;
-      }
-      tr:last-child td {
-        border-bottom: 0;
-      }
-      .amount {
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-      .negative {
-        color: var(--danger);
-      }
-      .positive {
-        color: var(--primary-dark);
-      }
-      .status {
-        border-radius: 999px;
-        display: inline-flex;
-        font-size: 12px;
-        font-weight: 650;
-        line-height: 1;
-        padding: 5px 8px;
-      }
-      .status.local {
-        background: var(--accent);
-        color: var(--primary-dark);
-      }
-      .status.hold {
-        background: #fff7ed;
-        color: #9a3412;
-      }
-      .filters {
-        display: grid;
-        gap: 8px;
-        grid-template-columns: minmax(180px, 1fr) 160px;
-      }
-      input, select {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        min-height: 34px;
-        padding: 7px 9px;
-      }
-      .links {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-      .links a {
-        color: var(--primary-dark);
-      }
-      @media (max-width: 840px) {
-        .shell {
-          grid-template-columns: minmax(0, 1fr);
-        }
-        aside {
-          border-bottom: 1px solid var(--border);
-          border-right: 0;
-          max-width: 100vw;
-          overflow: hidden;
-          width: 100%;
-        }
-        nav {
-          display: flex;
-          overflow-x: auto;
-          max-width: 100%;
-          width: 100%;
-        }
-        nav a {
-          flex: 0 0 auto;
-          white-space: nowrap;
-        }
-        main {
-          max-width: 100vw;
-          padding: 18px;
-          width: 100%;
-        }
-        .topbar {
-          align-items: flex-start;
-          flex-direction: column;
-          margin: -18px -18px 18px;
-          padding: 16px 18px;
-        }
-        .metrics {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .panel {
-          max-width: 100%;
-          overflow-x: auto;
-        }
-        .panel-header {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-        .panel-header > .muted {
-          overflow-wrap: anywhere;
-        }
-        table {
-          min-width: 680px;
-        }
-        .filters {
-          grid-template-columns: 1fr;
-          width: 100%;
-        }
+        border-radius: 4px;
+        padding: 2px 5px;
       }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <aside>
-        <p class="brand">mono-ledger-sync</p>
-        <nav aria-label="Primary">
-          <a class="active" href="#overview">Overview</a>
-          <a href="#transactions">Transactions</a>
-          <a href="#rules">Rules & Mappings</a>
-          <a href="#sync">Sync & Webhooks</a>
-          <a href="#accounts">Accounts</a>
-          <a href="#exports">Exports</a>
-          <a href="#logs">Logs</a>
-          <a href="#settings">Settings</a>
-          <a href="#help">Help</a>
-        </nav>
-        <div class="sidebar-footer">
-          <strong>Local database</strong>
-          <span id="database-path">loading</span>
+    <main>
+      <div class="panel">
+        <p class="muted">Profile ${escapedProfile}</p>
+        <h1>Local Monobank ledger API is running</h1>
+        <p class="muted">The production web bundle was not found in this build output. Start the Vite web client or run the production build to load the full app. Data routes are served from the local API and sync uses the saved Monobank token.</p>
+        <div class="actions">
+          <a class="button" href="https://api.monobank.ua/" target="_blank" rel="noopener noreferrer">Get Monobank token</a>
+          <a class="button secondary" href="/api/app/config">Open app config JSON</a>
+          <a class="button secondary" href="/api/health">Open health JSON</a>
         </div>
-      </aside>
-      <main>
-        <div class="topbar">
-          <div>
-            <h1>Local ledger</h1>
-            <p class="muted" id="profile-label">Profile ${escapeHtml(summary.profile)} · fixture source · local only</p>
-          </div>
-          <div class="actions">
-            <button class="button" id="sync-button" type="button">Sync fixture</button>
-            <a class="button secondary" href="/api/exports/ledger?format=csv">Export CSV</a>
-            <span class="status local" id="sync-status">ready</span>
-          </div>
-        </div>
-
-        <section class="metrics" aria-label="Ledger summary">
-          <div class="metric"><strong id="metric-accounts">${summary.accounts}</strong><span>accounts</span></div>
-          <div class="metric"><strong id="metric-entries">${summary.statementItems}</strong><span>transactions</span></div>
-          <div class="metric"><strong id="metric-income">0.00</strong><span>income</span></div>
-          <div class="metric"><strong id="metric-expenses">0.00</strong><span>expenses</span></div>
-        </section>
-
-        <div class="grid">
-          <section id="transactions">
-            <div class="panel">
-              <div class="panel-header">
-                <h2>Transactions</h2>
-                <div class="filters">
-                  <input id="search" type="search" placeholder="Search transactions">
-                  <select id="account-filter">
-                    <option value="">All accounts</option>
-                  </select>
-                </div>
-              </div>
-              <table>
-                <thead>
-                  <tr><th>Date</th><th>Description</th><th>Category</th><th>Account</th><th>Amount</th><th>Status</th></tr>
-                </thead>
-                <tbody id="ledger-rows">
-                  ${statementRows}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section id="accounts">
-            <div class="panel">
-              <div class="panel-header">
-                <h2>Accounts</h2>
-                <span class="muted">fixture-account-uah-main</span>
-              </div>
-              <table>
-                <thead><tr><th>Account</th><th>Type</th><th>Balance</th><th>Masked PAN</th></tr></thead>
-                <tbody id="account-rows">${accountRows}</tbody>
-              </table>
-            </div>
-          </section>
-
-          <section id="exports">
-            <div class="panel">
-              <div class="panel-header">
-                <h2>Exports</h2>
-                <div class="links">
-                  <a href="/api/exports/ledger?format=csv">CSV</a>
-                  <a href="/api/exports/ledger?format=json">JSON</a>
-                  <a href="/api/exports/ledger?format=jsonl">JSONL</a>
-                  <a href="/api/fixtures/client-info">/api/fixtures/client-info</a>
-                  <a href="/api/fixtures/statements">/api/fixtures/statements</a>
-                  <a href="/api/fixtures/summary">/api/fixtures/summary</a>
-                  <a href="/api/health">/api/health</a>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
-      </main>
-    </div>
-    <script>
-      const escapeHtml = (value) => {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#39;");
-      };
-      const currencyLabel = (code) => {
-        if (code === 980) return "UAH";
-        if (code === 978) return "EUR";
-        if (code === 840) return "USD";
-        return String(code);
-      };
-      const formatAmount = (amount, currencyCode) => {
-        return (amount / 100).toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        }) + " " + currencyLabel(currencyCode);
-      };
-      const state = {
-        accounts: [],
-        accountId: "",
-        search: "",
-        bootstrapped: false
-      };
-
-      async function api(path, options) {
-        const response = await fetch(path, options);
-        if (!response.ok) throw new Error(await response.text());
-        return response.json();
-      }
-
-      function renderSummary(summary) {
-        document.querySelector("#metric-accounts").textContent = summary.accounts;
-        document.querySelector("#metric-entries").textContent = summary.ledgerEntries;
-        document.querySelector("#metric-income").textContent =
-          (summary.income / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
-        document.querySelector("#metric-expenses").textContent =
-          (summary.expenses / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
-      }
-
-      function renderConfig(config) {
-        document.querySelector("#database-path").textContent = config.databasePath;
-        document.querySelector("#profile-label").textContent =
-          "Profile " + config.profile + " · " + config.source + " source · local only";
-      }
-
-      function renderAccounts(accounts) {
-        state.accounts = accounts;
-        document.querySelector("#account-filter").innerHTML =
-          '<option value="">All accounts</option>' +
-          accounts.map((account) => {
-            return '<option value="' + escapeHtml(account.id) + '">' + escapeHtml(account.id) + '</option>';
-          }).join("");
-        document.querySelector("#account-rows").innerHTML = accounts.map((account) => {
-          return '<tr><td>' + escapeHtml(account.id) + '</td><td>' + escapeHtml(account.type) + '</td><td>' +
-            escapeHtml(formatAmount(account.balance, account.currencyCode)) + '</td><td>' +
-            escapeHtml((account.maskedPan || ["none"]).join(", ")) + '</td></tr>';
-        }).join("");
-      }
-
-      function renderTransactions(page) {
-        document.querySelector("#ledger-rows").innerHTML = page.entries.map((entry) => {
-          const amountClass = entry.amount < 0 ? "negative" : "positive";
-          const status = entry.hold ? '<span class="status hold">hold</span>' : "posted";
-          return '<tr><td>' + new Date(entry.time * 1000).toISOString().slice(0, 10) +
-            '</td><td>' + escapeHtml(entry.description) + '</td><td>' +
-            escapeHtml(entry.categoryName || "Uncategorized") + '</td><td>' + escapeHtml(entry.accountId) +
-            '</td><td class="amount ' + amountClass + '">' +
-            escapeHtml(formatAmount(entry.amount, entry.currencyCode)) + '</td><td>' + status + '</td></tr>';
-        }).join("");
-      }
-
-      async function refresh() {
-        const params = new URLSearchParams();
-        if (state.accountId) params.set("accountId", state.accountId);
-        if (state.search) params.set("search", state.search);
-        let summary = await api("/api/ledger/summary");
-        if (!state.bootstrapped && summary.ledgerEntries === 0) {
-          state.bootstrapped = true;
-          document.querySelector("#sync-status").textContent = "syncing";
-          await api("/api/sync/run", { method: "POST" });
-          summary = await api("/api/ledger/summary");
-          document.querySelector("#sync-status").textContent = "synced";
-        }
-        const [config, accounts, transactions] = await Promise.all([
-          api("/api/app/config"),
-          api("/api/ledger/accounts"),
-          api("/api/ledger/transactions?" + params.toString())
-        ]);
-        renderConfig(config);
-        renderSummary(summary);
-        renderAccounts(accounts);
-        renderTransactions(transactions);
-      }
-
-      document.querySelector("#sync-button").addEventListener("click", async () => {
-        const button = document.querySelector("#sync-button");
-        const status = document.querySelector("#sync-status");
-        button.disabled = true;
-        status.textContent = "syncing";
-        try {
-          await api("/api/sync/run", { method: "POST" });
-          await refresh();
-          status.textContent = "synced";
-        } catch {
-          status.textContent = "failed";
-        } finally {
-          button.disabled = false;
-        }
-      });
-      document.querySelector("#account-filter").addEventListener("change", (event) => {
-        state.accountId = event.target.value;
-        refresh();
-      });
-      document.querySelector("#search").addEventListener("input", (event) => {
-        state.search = event.target.value;
-        window.clearTimeout(window.__ledgerSearchTimer);
-        window.__ledgerSearchTimer = window.setTimeout(refresh, 180);
-      });
-      refresh().catch(() => undefined);
-    </script>
+      </div>
+    </main>
   </body>
 </html>`;
 }
@@ -2386,6 +892,29 @@ async function readBuiltWebAsset(
   const resolvedPath = path.resolve(localWebAssetsDir, assetPath);
 
   if (!resolvedPath.startsWith(`${localWebAssetsDir}${path.sep}`)) {
+    return undefined;
+  }
+
+  try {
+    return {
+      body: await readFile(resolvedPath),
+      contentType: contentTypeForAsset(resolvedPath),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function readBuiltWebStaticAsset(
+  assetPath: string,
+): Promise<{ body: Buffer; contentType: string } | undefined> {
+  if (!localWebStaticAssetNames.has(assetPath)) {
+    return undefined;
+  }
+
+  const resolvedPath = path.resolve(localWebBuildDir, assetPath);
+
+  if (!resolvedPath.startsWith(`${localWebBuildDir}${path.sep}`)) {
     return undefined;
   }
 
@@ -2474,6 +1003,9 @@ function registerLocalApiRoutes(
   ) => Promise<LocalApiMonobankTokenStatus>,
   removeMonobankToken: () => Promise<LocalApiMonobankTokenStatus>,
   setSource: (source: LedgerSource) => Promise<void>,
+  restoreLocalDatabaseFromBackup: (
+    backupPath: string,
+  ) => Promise<LocalApiStorageInfo>,
   getMonobankTokenStoreStatus: (
     profile: string,
   ) => Promise<
@@ -2588,1781 +1120,69 @@ function registerLocalApiRoutes(
     return metadata;
   }
 
-  async function readAppConfig(): Promise<LocalApiAppConfig> {
-    const services = await getServices();
-    const monobankToken = getMonobankToken();
-    const tokenStoreStatus = await getMonobankTokenStoreStatus(
-      services.profile,
-    );
-    const syncRuns = await services.db.listSyncRuns(services.profile, 1);
-    const lastSuccessfulRun = syncRuns.find((run) => run.status === "success");
-    const lastSyncedAt = lastSuccessfulRun?.startedAt;
-    const nextSyncAllowedAt = monobankRateLimitState.getNextAllowedAt(
-      "personal",
-      Date.now(),
-    );
-    const personalEverCalled =
-      monobankRateLimitState.getNextAllowedAt(
-        "personal",
-        Number.NEGATIVE_INFINITY,
-      ) > Number.NEGATIVE_INFINITY;
-
-    return {
-      profile: services.profile,
-      source: services.source,
-      dataDir: services.dataDir,
-      databasePath: services.databasePath,
-      localOnly: localApiAccess.localOnly,
-      access: localApiAccess,
-      token: {
-        profile: services.profile,
-        hasToken: monobankToken !== undefined,
-        ...tokenStoreStatus,
-      },
-      webhook: {
-        enabled: true,
-        path: localWebhookRoutePath,
-        ...resolveWebhookSettings(),
-      },
-      sync: {
-        ...(lastSyncedAt !== undefined ? { lastSyncedAt } : {}),
-        ...(personalEverCalled ? { nextSyncAllowedAt } : {}),
-      },
-    };
-  }
-
-  app.get("/", async (_request, reply): Promise<string> => {
-    const builtWebIndex = await readBuiltWebIndex();
-
-    if (builtWebIndex) {
-      reply.type("text/html; charset=utf-8");
-
-      return builtWebIndex;
-    }
-
-    const fixtureSet = await loadMonobankFixtureSet();
-
-    reply.type("text/html; charset=utf-8");
-
-    return renderLocalFixtureOverview(fixtureSet, resolveProfile(options));
+  registerLocalWebRoutes(app, {
+    profile: resolveProfile(options),
+    readBuiltWebIndex,
+    readBuiltWebAsset,
+    readBuiltWebStaticAsset,
+    renderLocalApiBootstrap,
   });
 
-  app.get("/assets/*", async (request, reply): Promise<Buffer | void> => {
-    const params = request.params as { "*": string };
-    const asset = await readBuiltWebAsset(params["*"]);
-
-    if (!asset) {
-      reply.code(404).send();
-      return;
-    }
-
-    reply.type(asset.contentType);
-
-    return asset.body;
-  });
-
-  app.get("/favicon.ico", async (_request, reply): Promise<void> => {
-    reply.code(204).send();
-  });
-
-  app.get(
-    `${localApiRoutePrefix}/health`,
-    {
-      schema: {
-        response: {
-          200: healthResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiHealth> => ({
-      status: "ok",
-      localOnly: localApiAccess.localOnly,
-      version,
-      framework: localApiServerFramework,
-      apiPrefix: localApiRoutePrefix,
-      architecture: productArchitecture,
-    }),
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/app/config`,
-    {
-      schema: {
-        response: {
-          200: appConfigResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiAppConfig> => readAppConfig(),
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/app/workspace`,
-    {
-      schema: {
-        response: {
-          200: appConfigResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiAppConfig> => {
-      const services = await getServices();
-
-      await services.db.migrate();
-      await services.db.updateLocalAppSettings(services.profile, {
-        source: services.source,
-      });
-
-      return readAppConfig();
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/app/source`,
-    {
-      schema: {
-        body: appSourceBodySchema,
-        response: {
-          200: appConfigResponseSchema,
-        },
-      },
-    },
-    async (request, _reply): Promise<LocalApiAppConfig> => {
-      const body = request.body as { source: LedgerSource };
-
-      await setSource(body.source);
-      return readAppConfig();
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/app/token`,
-    {
-      schema: {
-        body: monobankTokenBodySchema,
-        response: {
-          200: monobankTokenResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      LocalApiMonobankTokenStatus | { error: string; message: string }
-    > => {
-      const body = request.body as
-        | { profile?: string; token: string }
-        | undefined;
-      const profile = resolveProfile(options);
-      const token = body?.token?.trim();
-
-      if (token === undefined || token.length === 0) {
-        reply.code(400);
-
-        return {
-          error: "invalid_token",
-          message: "Monobank token must be a non-empty string.",
-        };
-      }
-
-      if (/\s/.test(token)) {
-        reply.code(400);
-
-        return {
-          error: "invalid_token",
-          message: "Monobank token must not contain whitespace.",
-        };
-      }
-
-      if (body?.profile !== undefined && body.profile !== profile) {
-        reply.code(400);
-
-        return {
-          error: "config_invalid",
-          message: `Monobank token profile must match ${profile}.`,
-        };
-      }
-
-      const result = await saveMonobankToken(token, profile);
-
-      if ("error" in result) {
-        reply.code(400);
-        return result;
-      }
-
-      return result;
-    },
-  );
-
-  app.delete(
-    `${localApiRoutePrefix}/app/token`,
-    {
-      schema: {
-        response: {
-          200: monobankTokenResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiMonobankTokenStatus> => removeMonobankToken(),
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/app/token/recheck`,
-    {
-      schema: {
-        response: {
-          200: monobankTokenResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      _request,
-      reply,
-    ): Promise<
-      LocalApiMonobankTokenStatus | { error: string; message: string }
-    > => {
-      const profile = resolveProfile(options);
-      const result = await recheckMonobankToken(profile);
-
-      if ("error" in result) {
-        reply.code(400);
-        return result;
-      }
-
-      return result;
-    },
-  );
-
-  app.patch(
-    `${localApiRoutePrefix}/ledger/budgets/monthly/:id/close`,
-    {
-      schema: {
-        params: deleteMonthlyBudgetParamsSchema,
-        response: {
-          200: { type: "object", additionalProperties: true },
-          400: localApiErrorResponseSchema,
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<BudgetProgress | { error: string; message: string }> => {
-      const services = await getServices();
-      const params = request.params as { id?: string };
-      const budgetPeriodId = params.id?.trim() ?? "";
-
-      if (!budgetPeriodId) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message: "Budget period ID is required.",
-        };
-      }
-
-      try {
-        const progress = await services.writeService.closeMonthlyBudgetPeriod(
-          budgetPeriodId,
-          services.profile,
-        );
-
-        if (progress === undefined) {
-          reply.code(404);
-
-          return {
-            error: "budget_not_found",
-            message: "Monthly budget period could not be found.",
-          };
-        }
-
-        return progress;
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Monthly budget period could not be closed.",
-        };
-      }
-    },
-  );
-
-  app.patch(
-    `${localApiRoutePrefix}/ledger/budgets/monthly/:id/reopen`,
-    {
-      schema: {
-        params: deleteMonthlyBudgetParamsSchema,
-        response: {
-          200: { type: "object", additionalProperties: true },
-          400: localApiErrorResponseSchema,
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<BudgetProgress | { error: string; message: string }> => {
-      const services = await getServices();
-      const params = request.params as { id?: string };
-      const budgetPeriodId = params.id?.trim() ?? "";
-
-      if (!budgetPeriodId) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message: "Budget period ID is required.",
-        };
-      }
-
-      try {
-        const progress = await services.writeService.reopenMonthlyBudgetPeriod(
-          budgetPeriodId,
-          services.profile,
-        );
-
-        if (progress === undefined) {
-          reply.code(404);
-
-          return {
-            error: "budget_not_found",
-            message: "Monthly budget period could not be found.",
-          };
-        }
-
-        return progress;
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Monthly budget period could not be reopened.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/summary`,
-    {
-      schema: {
-        response: {
-          200: ledgerSummaryResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LedgerSummary> => {
-      const services = await getServices();
-
-      return services.queryService.getLedgerSummary(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/net-worth-trend`,
-    {
-      schema: {
-        response: {
-          200: netWorthTrendResponseSchema,
-        },
-      },
-    },
-    async (): Promise<NetWorthTrend> => {
-      const services = await getServices();
-
-      return services.queryService.getNetWorthTrend(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/accounts`,
-    {
-      schema: {
-        response: {
-          200: ledgerAccountsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly LedgerAccount[]> => {
-      const services = await getServices();
-
-      return services.queryService.listAccounts(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/jars`,
-    {
-      schema: {
-        response: {
-          200: ledgerJarsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly LedgerJar[]> => {
-      const services = await getServices();
-
-      return services.queryService.listJars(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/savings-goal-progress`,
-    {
-      schema: {
-        response: {
-          200: savingsGoalProgressResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly SavingsGoalProgress[]> => {
-      const services = await getServices();
-
-      return services.queryService.listSavingsGoalProgress(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/categories`,
-    {
-      schema: {
-        response: {
-          200: ledgerCategoriesResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly Category[]> => {
-      const services = await getServices();
-
-      return services.queryService.listCategories(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/category-rules`,
-    {
-      schema: {
-        response: {
-          200: ledgerCategoryRulesResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly CategoryRule[]> => {
-      const services = await getServices();
-
-      return services.queryService.listCategoryRules(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/merchant-cleanup-rules`,
-    {
-      schema: {
-        response: {
-          200: merchantCleanupRulesResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly MerchantCleanupRule[]> => {
-      const services = await getServices();
-
-      return services.queryService.listMerchantCleanupRules(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/category-spending`,
-    {
-      schema: {
-        response: {
-          200: ledgerCategorySpendingResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly LedgerCategorySpending[]> => {
-      const services = await getServices();
-
-      return services.queryService.listCategorySpending(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/reports/monthly-spending`,
-    {
-      schema: {
-        querystring: monthlySpendingReportQuerySchema,
-        response: {
-          200: monthlySpendingReportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | MonthlySpendingReport
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const month = readStringQuery(query.month);
-
-      try {
-        return await services.queryService.getMonthlySpendingReport(
-          services.profile,
-          month,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_monthly_spending_report_query",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Monthly spending report could not be generated.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/reports/cashflow`,
-    {
-      schema: {
-        querystring: cashflowReportQuerySchema,
-        response: {
-          200: cashflowReportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | CashflowReport
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const months = readNumberQuery(query.months);
-
-      try {
-        return await services.queryService.getCashflowReport(
-          services.profile,
-          months,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_cashflow_report_query",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Cashflow report could not be generated.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/reports/savings-rate`,
-    {
-      schema: {
-        querystring: savingsRateReportQuerySchema,
-        response: {
-          200: savingsRateReportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | SavingsRateReport
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const months = readNumberQuery(query.months);
-
-      try {
-        return await services.queryService.getSavingsRateReport(
-          services.profile,
-          months,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_savings_rate_report_query",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Savings rate report could not be generated.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/reports/balance-projection`,
-    {
-      schema: {
-        querystring: balanceProjectionReportQuerySchema,
-        response: {
-          200: balanceProjectionReportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | BalanceProjectionReport
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const days = readNumberQuery(query.days);
-
-      try {
-        return await services.queryService.getBalanceProjectionReport(
-          services.profile,
-          days,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_balance_projection_report_query",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Balance projection report could not be generated.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/reports/category-trends`,
-    {
-      schema: {
-        querystring: categoryTrendReportQuerySchema,
-        response: {
-          200: categoryTrendReportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | CategoryTrendReport
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const months = readNumberQuery(query.months);
-
-      try {
-        return await services.queryService.getCategoryTrendReport(
-          services.profile,
-          months,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_category_trend_report_query",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Category trend report could not be generated.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/reports/merchant-trends`,
-    {
-      schema: {
-        querystring: merchantTrendReportQuerySchema,
-        response: {
-          200: merchantTrendReportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | MerchantTrendReport
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const months = readNumberQuery(query.months);
-
-      try {
-        return await services.queryService.getMerchantTrendReport(
-          services.profile,
-          months,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_merchant_trend_report_query",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Merchant trend report could not be generated.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/upcoming-recurring-payments`,
-    {
-      schema: {
-        response: {
-          200: upcomingRecurringPaymentsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly UpcomingRecurringPayment[]> => {
-      const services = await getServices();
-
-      return services.queryService.listUpcomingRecurringPayments(
-        services.profile,
-      );
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/missed-recurring-payments`,
-    {
-      schema: {
-        querystring: missedRecurringPaymentsQuerySchema,
-        response: {
-          200: missedRecurringPaymentsResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | readonly MissedRecurringPayment[]
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const query = request.query as Record<string, string | string[]>;
-
-      try {
-        const asOf = readUtcDateQuery(query.asOf, "asOf");
-        const services = await getServices();
-
-        return await services.queryService.listMissedRecurringPayments(
-          services.profile,
-          asOf,
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Missed recurring payment query is invalid.";
-
-        if (!/^asOf must /.test(message)) {
-          throw error;
-        }
-
-        reply.code(400);
-
-        return {
-          error: "invalid_missed_recurring_payments_query",
-          message,
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/subscription-increase-alerts`,
-    {
-      schema: {
-        querystring: subscriptionIncreaseAlertsQuerySchema,
-        response: {
-          200: subscriptionIncreaseAlertsResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | readonly SubscriptionIncreaseAlert[]
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const query = request.query as Record<string, string | string[]>;
-
-      try {
-        const asOf = readUtcDateQuery(query.asOf, "asOf");
-        const services = await getServices();
-
-        return await services.queryService.listSubscriptionIncreaseAlerts(
-          services.profile,
-          asOf,
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Subscription increase alert query is invalid.";
-
-        if (!/^asOf must /.test(message)) {
-          throw error;
-        }
-
-        reply.code(400);
-
-        return {
-          error: "invalid_subscription_increase_alerts_query",
-          message,
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/recurring-detections`,
-    {
-      schema: {
-        response: {
-          200: recurringDetectionCandidatesResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly RecurringDetectionCandidate[]> => {
-      const services = await getServices();
-
-      return services.queryService.detectRecurringTransactions(
-        services.profile,
-      );
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/ledger/recurring-detections/:id/confirm`,
-    {
-      schema: {
-        params: recurringDetectionDecisionParamsSchema,
-        response: {
-          200: recurringDetectionDecisionResponseSchema,
-          400: localApiErrorResponseSchema,
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | RecurringDetectionDecisionResult
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const params = request.params as { id?: string };
-      const candidateId = params.id?.trim() ?? "";
-
-      try {
-        const services = await getServices();
-
-        return await services.writeService.confirmRecurringDetection(
-          candidateId,
-          services.profile,
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Recurring detection candidate could not be confirmed.";
-
-        if (/was not found/.test(message)) {
-          reply.code(404);
-
-          return {
-            error: "recurring_detection_not_found",
-            message,
-          };
-        }
-
-        reply.code(400);
-
-        return {
-          error: "invalid_recurring_detection_decision",
-          message,
-        };
-      }
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/ledger/recurring-detections/:id/ignore`,
-    {
-      schema: {
-        params: recurringDetectionDecisionParamsSchema,
-        response: {
-          200: recurringDetectionDecisionResponseSchema,
-          400: localApiErrorResponseSchema,
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | RecurringDetectionDecisionResult
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const params = request.params as { id?: string };
-      const candidateId = params.id?.trim() ?? "";
-
-      try {
-        const services = await getServices();
-
-        return await services.writeService.ignoreRecurringDetection(
-          candidateId,
-          services.profile,
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Recurring detection candidate could not be ignored.";
-
-        if (/was not found/.test(message)) {
-          reply.code(404);
-
-          return {
-            error: "recurring_detection_not_found",
-            message,
-          };
-        }
-
-        reply.code(400);
-
-        return {
-          error: "invalid_recurring_detection_decision",
-          message,
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/recurring-calendar`,
-    {
-      schema: {
-        querystring: recurringCalendarQuerySchema,
-        response: {
-          200: recurringCalendarResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | readonly RecurringCalendarEvent[]
-      | {
-          error: string;
-          message: string;
-        }
-    > => {
-      const query = request.query as Record<string, string | string[]>;
-
-      try {
-        const from = readUtcDateQuery(query.from, "from");
-        const to = readUtcDateQuery(query.to, "to");
-        const services = await getServices();
-
-        return await services.queryService.listRecurringCalendar(
-          services.profile,
-          from,
-          to,
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Recurring calendar range is invalid.";
-
-        if (!/^(from|to) must |^Recurring calendar range /.test(message)) {
-          throw error;
-        }
-
-        reply.code(400);
-
-        return {
-          error: "invalid_recurring_calendar_range",
-          message,
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/budget-progress`,
-    {
-      schema: {
-        response: {
-          200: budgetProgressResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly BudgetProgress[]> => {
-      const services = await getServices();
-
-      return services.queryService.listBudgetProgress(services.profile);
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/ledger/budgets/monthly`,
-    {
-      schema: {
-        body: monthlyCategoryBudgetBodySchema,
-        response: {
-          200: { type: "object", additionalProperties: true },
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<BudgetProgress | { error: string; message: string }> => {
-      const services = await getServices();
-
-      try {
-        return await services.writeService.createMonthlyCategoryBudget(
-          readMonthlyCategoryBudgetInput(request.body),
-          services.profile,
-        );
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Monthly category budget could not be created.",
-        };
-      }
-    },
-  );
-
-  app.delete(
-    `${localApiRoutePrefix}/ledger/budgets/monthly/:id`,
-    {
-      schema: {
-        params: deleteMonthlyBudgetParamsSchema,
-        response: {
-          200: {
-            type: "object",
-            required: ["deleted"],
-            properties: {
-              deleted: { type: "boolean" },
-            },
-          },
-          400: localApiErrorResponseSchema,
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<{ deleted: true } | { error: string; message: string }> => {
-      const services = await getServices();
-      const params = request.params as { id?: string };
-      const budgetPeriodId = params.id?.trim() ?? "";
-
-      if (!budgetPeriodId) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message: "Budget period ID is required.",
-        };
-      }
-
-      try {
-        const deleted = await services.writeService.deleteMonthlyCategoryBudget(
-          budgetPeriodId,
-          services.profile,
-        );
-
-        if (!deleted) {
-          reply.code(404);
-
-          return {
-            error: "budget_not_found",
-            message: "Monthly budget period could not be found.",
-          };
-        }
-
-        return { deleted: true };
-      } catch (error) {
-        reply.code(400);
-
-        return {
-          error: "invalid_budget",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Monthly category budget could not be deleted.",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/ledger/transactions`,
-    {
-      schema: {
-        querystring: ledgerEntriesQuerySchema,
-        response: {
-          200: ledgerEntriesPageResponseSchema,
-        },
-      },
-    },
-    async (request): Promise<LedgerEntryPage> => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const entryQuery = {
-        profile: services.profile,
-      };
-      const accountId = readStringQuery(query.accountId);
-      const categoryId = readStringQuery(query.categoryId);
-      const merchantName = readStringQuery(query.merchantName);
-      const status = readStringQuery(query.status);
-      const amountMin = readNumberQuery(query.amountMin);
-      const amountMax = readNumberQuery(query.amountMax);
-      const search = readStringQuery(query.search);
-      const from = readNumberQuery(query.from);
-      const to = readNumberQuery(query.to);
-      const limit = readNumberQuery(query.limit);
-      const offset = readNumberQuery(query.offset);
-      const sortBy = readStringQuery(query.sortBy);
-      const sortDirection = readStringQuery(query.sortDirection);
-
-      if (accountId) {
-        Object.assign(entryQuery, { accountId });
-      }
-
-      if (categoryId) {
-        Object.assign(entryQuery, { categoryId });
-      }
-
-      if (merchantName) {
-        Object.assign(entryQuery, { merchantName });
-      }
-
-      if (status === "hold" || status === "posted") {
-        Object.assign(entryQuery, { status });
-      }
-
-      if (amountMin !== undefined) {
-        Object.assign(entryQuery, { amountMin });
-      }
-
-      if (amountMax !== undefined) {
-        Object.assign(entryQuery, { amountMax });
-      }
-
-      if (search) {
-        Object.assign(entryQuery, { search });
-      }
-
-      if (from !== undefined) {
-        Object.assign(entryQuery, { from });
-      }
-
-      if (to !== undefined) {
-        Object.assign(entryQuery, { to });
-      }
-
-      if (limit !== undefined) {
-        Object.assign(entryQuery, { limit });
-      }
-
-      if (offset !== undefined) {
-        Object.assign(entryQuery, { offset });
-      }
-
-      if (isLedgerEntrySortField(sortBy)) {
-        Object.assign(entryQuery, { sortBy });
-      }
-
-      if (isLedgerEntrySortDirection(sortDirection)) {
-        Object.assign(entryQuery, { sortDirection });
-      }
-
-      return services.queryService.listLedgerEntries(entryQuery);
-    },
-  );
-
-  app.patch(
-    `${localApiRoutePrefix}/ledger/transactions/bulk-edit`,
-    {
-      schema: {
-        body: ledgerEntriesBulkEditBodySchema,
-        response: {
-          200: {
-            type: "array",
-            items: { type: "object", additionalProperties: true },
-          },
-        },
-      },
-    },
-    async (request): Promise<readonly LedgerEntry[]> => {
-      const services = await getServices();
-      const { ids, update } = readLedgerEntryBulkEditUpdate(request.body);
-
-      return services.writeService.updateTransactionsBulk(
-        ids,
-        update,
-        services.profile,
-      );
-    },
-  );
-
-  app.patch(
-    `${localApiRoutePrefix}/ledger/transactions/category-restore`,
-    {
-      schema: {
-        body: ledgerEntryCategoryRestoreBodySchema,
-        response: {
-          200: {
-            type: "array",
-            items: { type: "object", additionalProperties: true },
-          },
-        },
-      },
-    },
-    async (request): Promise<readonly LedgerEntry[]> => {
-      const services = await getServices();
-      const entries = readLedgerEntryCategoryRestoreEntries(request.body);
-
-      return services.writeService.restoreTransactionCategories(
-        entries,
-        services.profile,
-      );
-    },
-  );
-
-  app.patch(
-    `${localApiRoutePrefix}/ledger/transactions/:id/annotation`,
-    {
-      schema: {
-        body: ledgerEntryAnnotationBodySchema,
-        response: {
-          200: { type: "object", additionalProperties: true },
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<LedgerEntry | { error: string; message: string }> => {
-      const services = await getServices();
-      const params = request.params as { id?: string };
-      const id = params.id?.trim();
-
-      if (!id) {
-        reply.code(404);
-        return {
-          error: "not_found",
-          message: "Transaction was not found",
-        };
-      }
-
-      const entry = await services.writeService.updateTransactionAnnotation(
-        id,
-        readLedgerEntryAnnotationUpdate(request.body),
-        services.profile,
-      );
-
-      if (!entry) {
-        reply.code(404);
-        return {
-          error: "not_found",
-          message: "Transaction was not found",
-        };
-      }
-
-      return entry;
-    },
-  );
-
-  app.patch(
-    `${localApiRoutePrefix}/ledger/transactions/:id/split-plan`,
-    {
-      schema: {
-        body: ledgerEntrySplitPlanBodySchema,
-        response: {
-          200: { type: "object", additionalProperties: true },
-          404: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<LedgerEntry | { error: string; message: string }> => {
-      const services = await getServices();
-      const params = request.params as { id?: string };
-      const id = params.id?.trim();
-
-      if (!id) {
-        reply.code(404);
-        return {
-          error: "not_found",
-          message: "Transaction was not found",
-        };
-      }
-
-      const entry = await services.writeService.updateTransactionSplitPlan(
-        id,
-        readLedgerEntrySplitPlanUpdate(request.body),
-        services.profile,
-      );
-
-      if (!entry) {
-        reply.code(404);
-        return {
-          error: "not_found",
-          message: "Transaction was not found",
-        };
-      }
-
-      return entry;
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/sync/run`,
-    {
-      schema: {
-        response: {
-          200: syncRunResultResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      _request,
-      reply,
-    ): Promise<SyncLedgerResult | { error: string; message: string }> => {
-      const services = await getServices();
-      const monobankToken = getMonobankToken();
-
-      if (services.source === "monobank" && monobankToken === undefined) {
-        reply.code(400);
-
-        return {
-          error: "auth_required",
-          message:
-            "Monobank source is configured, but no token is provided. Set MONOBANK_TOKEN or pass monobankToken.",
-        };
-      }
-
-      const syncAbortController = createProcessSignalAbortController();
-
-      try {
-        return await syncLedgerWithMonobank({
-          profile: services.profile,
-          source: services.source,
-          adapter: services.adapter,
-          db: services.db,
-          signal: syncAbortController.signal,
-        });
-      } finally {
-        syncAbortController.dispose();
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/sync/runs`,
-    {
-      schema: {
-        response: {
-          200: syncRunsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly SyncRun[]> => {
-      const services = await getServices();
-
-      return services.queryService.listSyncRuns(services.profile);
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/webhooks/events`,
-    {
-      schema: {
-        response: {
-          200: webhookEventsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<readonly StoredWebhookEvent[]> => {
-      const services = await getServices();
-
-      return services.queryService.listWebhookEvents(services.profile, 20);
-    },
-  );
-
-  app.get(
+  registerLocalAppRoutes(app, {
+    apiPrefix: localApiRoutePrefix,
+    architecture: productArchitecture,
+    framework: localApiServerFramework,
+    version,
+    profile: resolveProfile(options),
+    now,
+    localApiAccess,
+    getServices,
+    getMonobankToken,
+    saveMonobankToken,
+    recheckMonobankToken,
+    removeMonobankToken,
+    setSource,
+    restoreLocalDatabaseFromBackup,
+    getMonobankTokenStoreStatus,
     localWebhookRoutePath,
-    {
-      schema: {
-        response: {
-          200: webhookValidationResponseSchema,
-        },
-      },
-    },
-    async (): Promise<string> => "ok",
-  );
+    resolveWebhookSettings,
+    monobankRateLimitState,
+    interruptStaleRunningSyncRuns,
+    withLocalAppSettingsDefaults,
+    readLocalAppSettingsUpdate,
+    backupDirectory,
+    backupFileName,
+    isValidProfileBackupPath,
+    readStorageInfo,
+  });
 
-  app.post(
+  const routeContext = {
+    apiPrefix: localApiRoutePrefix,
+    getServices,
+  };
+
+  registerLedgerRoutes(app, routeContext);
+  registerReportRoutes(app, routeContext);
+  registerRecurringRoutes(app, routeContext);
+  registerTransactionRoutes(app, routeContext);
+  registerSyncRoutes(app, {
+    ...routeContext,
+    now,
+    getMonobankToken,
+    interruptStaleRunningSyncRuns,
+  });
+  registerWebhookRoutes(app, {
+    ...routeContext,
     localWebhookRoutePath,
-    {
-      schema: {
-        response: {
-          200: webhookAcceptedResponseSchema,
-          400: localApiErrorResponseSchema,
-          429: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (
-      request,
-      reply,
-    ): Promise<
-      | {
-          accepted: true;
-          pullRequired: true;
-          event: StoredWebhookEvent;
-        }
-      | { error: string; message: string }
-    > => {
-      const services = await getServices();
-      const webhookEvent = request.body;
-
-      try {
-        assertMonobankPersonalWebhookEvent(webhookEvent, "request.body");
-      } catch (error) {
-        if (error instanceof MonobankValidationError) {
-          if (isMalformedWebhookRateLimited(services.profile, request.ip)) {
-            reply.code(429);
-
-            return {
-              error: "webhook_rate_limit_exceeded",
-              message:
-                "Webhook endpoint rate limit exceeded. Retry with a short delay.",
-            };
-          }
-
-          const logOptions =
-            options.logSink === undefined ? {} : { logger: options.logSink };
-
-          logStructured(
-            "warn",
-            "Rejected malformed webhook payload",
-            {
-              route: localWebhookRoutePath,
-              path: error.path,
-              expected: error.expected,
-            },
-            logOptions,
-          );
-
-          reply.code(400);
-
-          return {
-            error: "invalid_webhook_payload",
-            message: "Webhook payload is malformed.",
-          };
-        }
-
-        throw error;
-      }
-
-      const typedWebhookEvent = webhookEvent as MonobankPersonalWebhookEvent;
-
-      if (
-        isWebhookAccountRateLimited(
-          services.profile,
-          typedWebhookEvent.data.account,
-        )
-      ) {
-        reply.code(429);
-
-        return {
-          error: "webhook_rate_limit_exceeded",
-          message:
-            "Webhook endpoint rate limit exceeded. Retry with a short delay.",
-        };
-      }
-
-      const event = await services.db.recordWebhookEvent(
-        typedWebhookEvent,
-        undefined,
-        webhookDeliveryMetadata(
-          request.headers as Record<string, unknown>,
-          request.ip,
-        ),
-      );
-
-      return {
-        accepted: true,
-        pullRequired: true,
-        event,
-      };
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/exports/ledger`,
-    {
-      schema: {
-        querystring: ledgerExportQuerySchema,
-        response: {
-          200: { type: "string" },
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (request, reply) => {
-      const services = await getServices();
-      const query = request.query as Record<string, string | string[]>;
-      const format = readStringQuery(query.format);
-      const preset = readStringQuery(query.preset);
-      const from = readNumberQuery(query.from);
-      const to = readNumberQuery(query.to);
-      const accountId = readStringQuery(query.accountId);
-      const categoryId = readStringQuery(query.categoryId);
-
-      if (format && (!isExportFormat(format) || format === "sqlite")) {
-        reply.code(400);
-        return {
-          error: "unsupported_export_format",
-          message: "Supported export formats: csv, json, jsonl, journal-csv",
-        };
-      }
-
-      if (preset && !isExportPreset(preset)) {
-        reply.code(400);
-        return {
-          error: "unsupported_export_preset",
-          message: `Supported export presets: ${exportPresetNames.join(", ")}`,
-        };
-      }
-
-      const ledgerExport = await createLedgerExport(services.db, {
-        profile: services.profile,
-        ...(format ? { format: format as ExportFormat } : {}),
-        ...(preset ? { preset: preset as ExportPreset } : {}),
-        ...(from !== undefined ? { from } : {}),
-        ...(to !== undefined ? { to } : {}),
-        ...(accountId ? { accountIds: [accountId] } : {}),
-        ...(categoryId ? { categoryIds: [categoryId] } : {}),
-        ...(readStringQuery(query.tag)
-          ? { tag: readStringQuery(query.tag)! }
-          : {}),
-      });
-
-      reply.header("content-type", ledgerExport.contentType);
-      reply.header(
-        "content-disposition",
-        `attachment; filename="${ledgerExport.fileName}"`,
-      );
-
-      return ledgerExport.body;
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/exports/local-configuration`,
-    {
-      schema: {
-        response: {
-          200: { type: "string" },
-        },
-      },
-    },
-    async (_request, reply) => {
-      const services = await getServices();
-      const configurationExport = await createLocalConfigurationExport(
-        services.db,
-        {
-          profile: services.profile,
-        },
-      );
-
-      reply.header("content-type", configurationExport.contentType);
-      reply.header(
-        "content-disposition",
-        `attachment; filename="${configurationExport.fileName}"`,
-      );
-
-      return configurationExport.body;
-    },
-  );
-
-  app.post(
-    `${localApiRoutePrefix}/imports/local-configuration`,
-    {
-      schema: {
-        body: localConfigurationImportBodySchema,
-        response: {
-          200: localConfigurationImportResponseSchema,
-          400: localApiErrorResponseSchema,
-        },
-      },
-    },
-    async (request, reply) => {
-      const services = await getServices();
-
-      try {
-        const configuration = parseLocalConfigurationImport(request.body);
-        const imported = await services.db.importLocalConfiguration(
-          services.profile,
-          configuration,
-        );
-
-        return {
-          imported,
-        };
-      } catch (error) {
-        reply.code(400);
-        return {
-          error: "invalid_local_configuration_import",
-          message: error instanceof Error ? error.message : "Invalid import",
-        };
-      }
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/fixtures/summary`,
-    {
-      schema: {
-        response: {
-          200: fixtureSummaryResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiFixtureSummary> => {
-      const fixtureSet = await loadMonobankFixtureSet();
-
-      return summarizeFixtureSet(fixtureSet, resolveProfile(options));
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/fixtures/client-info`,
-    {
-      schema: {
-        response: {
-          200: fixtureClientInfoResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiFixtureClientInfo> => {
-      const fixtureSet = await loadMonobankFixtureSet();
-
-      return fixtureClientInfoResponse(fixtureSet, resolveProfile(options));
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/fixtures/statements`,
-    {
-      schema: {
-        response: {
-          200: fixtureStatementsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<LocalApiFixtureStatements> => {
-      const fixtureSet = await loadMonobankFixtureSet();
-
-      return fixtureStatementsResponse(fixtureSet, resolveProfile(options));
-    },
-  );
+    ...(options.logSink === undefined ? {} : { logSink: options.logSink }),
+    isMalformedWebhookRateLimited,
+    isWebhookAccountRateLimited,
+    webhookDeliveryMetadata,
+  });
+  registerExportRoutes(app, {
+    ...routeContext,
+    withLocalAppSettingsDefaults,
+  });
 }
 
 export function createLocalApiServer(
@@ -4389,7 +1209,7 @@ export function createLocalApiServer(
   const monobankRateLimitState: MonobankRateLimitState =
     createMonobankRateLimitState();
   const configuredSource = resolveConfiguredSource(options);
-  let source = configuredSource ?? "fixture";
+  let source = configuredSource ?? "monobank";
   let storedSettingsLoadPromise: Promise<void> | undefined;
   const localWebhookRoutePath = createWebhookRoutePath();
   let webhookPort = options.port ?? 0;
@@ -4467,7 +1287,7 @@ export function createLocalApiServer(
         await db.migrate();
         const settings = await db.getLocalAppSettings(profile);
 
-        if (settings?.source !== undefined) {
+        if (settings?.source === "monobank") {
           source = settings.source;
         }
 
@@ -4520,6 +1340,21 @@ export function createLocalApiServer(
     return servicesPromise;
   }
 
+  async function restoreLocalDatabaseFromBackup(
+    backupPath: string,
+  ): Promise<LocalApiStorageInfo> {
+    const services = await getServices();
+    const databasePath = services.databasePath;
+
+    await services.db.close();
+    servicesPromise = undefined;
+    await copyFile(backupPath, databasePath);
+
+    const restoredServices = await getServices();
+
+    return readStorageInfo(restoredServices);
+  }
+
   function getMonobankToken(): string | undefined {
     return monobankToken;
   }
@@ -4551,7 +1386,7 @@ export function createLocalApiServer(
     monobankToken = undefined;
     monobankTokenSource = undefined;
     await rebuildServices();
-    await autoDemoteSourceOnTokenDelete();
+    await keepMonobankSourceOnTokenDelete();
     const tokenStoreStatus = await getMonobankTokenStoreStatus(profile);
 
     return {
@@ -4810,14 +1645,24 @@ export function createLocalApiServer(
     await updateSource("monobank");
   }
 
-  async function autoDemoteSourceOnTokenDelete(): Promise<void> {
-    if (source === "fixture") {
+  async function keepMonobankSourceOnTokenDelete(): Promise<void> {
+    if (configuredSource !== undefined || source === "monobank") {
       return;
     }
-    await updateSource("fixture");
+
+    await updateSource("monobank");
   }
 
   async function updateSource(nextSource: LedgerSource): Promise<void> {
+    if (nextSource === "fixture" && configuredSource !== "fixture") {
+      throw new DomainError(
+        "Fixture source is only available when explicitly configured for development.",
+        "config_invalid",
+        "config",
+        { source: nextSource },
+      );
+    }
+
     if (source === nextSource) {
       await persistSource(nextSource);
       return;
@@ -4862,59 +1707,19 @@ export function createLocalApiServer(
     recheckMonobankToken,
     removeMonobankToken,
     updateSource,
+    restoreLocalDatabaseFromBackup,
     getMonobankTokenStoreStatus,
     localWebhookRoutePath,
     resolveWebhookSettings,
     monobankRateLimitState,
   );
 
-  app.get(
-    `${localApiRoutePrefix}/app/diagnostics`,
-    {
-      schema: {
-        response: {
-          200: diagnosticsResponseSchema,
-        },
-      },
-    },
-    async (): Promise<DiagnosticsSnapshot> => {
-      const services = await getServices();
-      const tokenStatus = await buildDiagnosticsTokenStatus(services);
-      return collectDiagnostics({
-        db: services.db,
-        queryService: services.queryService,
-        monobankTokenStore,
-        profile: services.profile,
-        source: services.source,
-        databasePath: services.databasePath,
-        tokenStatus,
-      });
-    },
-  );
-
-  app.get(
-    `${localApiRoutePrefix}/app/diagnostics/support-bundle`,
-    {
-      schema: {
-        response: {
-          200: supportBundleResponseSchema,
-        },
-      },
-    },
-    async (): Promise<SupportBundleSnapshot> => {
-      const services = await getServices();
-      const tokenStatus = await buildDiagnosticsTokenStatus(services);
-      return collectSupportBundle({
-        db: services.db,
-        queryService: services.queryService,
-        monobankTokenStore,
-        profile: services.profile,
-        source: services.source,
-        databasePath: services.databasePath,
-        tokenStatus,
-      });
-    },
-  );
+  registerDiagnosticsRoutes(app, {
+    apiPrefix: localApiRoutePrefix,
+    getServices,
+    monobankTokenStore,
+    buildDiagnosticsTokenStatus,
+  });
 
   return {
     get url() {

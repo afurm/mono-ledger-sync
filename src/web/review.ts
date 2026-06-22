@@ -1,4 +1,4 @@
-import type { LedgerEntry } from "./api.js";
+import type { LedgerEntry } from "./api-types.js";
 
 export type LedgerEntryReviewCandidateKind =
   | "duplicate"
@@ -50,9 +50,14 @@ function transferMatch(left: LedgerEntry, right: LedgerEntry): boolean {
 }
 
 function alreadyReviewed(entry: LedgerEntry): boolean {
-  return (
-    entry.tags?.some((tag) => tag.trim().toLowerCase() === "reviewed") ?? false
-  );
+  if (entry.reviewState === "reviewed" || entry.reviewState === "ignored") {
+    return true;
+  }
+
+  return entry.reviewState === undefined
+    ? (entry.tags?.some((tag) => tag.trim().toLowerCase() === "reviewed") ??
+        false)
+    : false;
 }
 
 function needsReview(entry: LedgerEntry): boolean {
@@ -90,9 +95,12 @@ export function findLedgerEntryReviewCandidates(
   const candidates: LedgerEntryReviewCandidate[] = [];
   const pairedEntryIds = new Set<string>();
   const duplicateGroups = new Map<string, LedgerEntry[]>();
-  const sortedEntries = [...entries].sort(
-    (left, right) => left.time - right.time || left.id.localeCompare(right.id),
-  );
+  const sortedEntries = entries
+    .filter((entry) => !alreadyReviewed(entry))
+    .sort(
+      (left, right) =>
+        left.time - right.time || left.id.localeCompare(right.id),
+    );
 
   for (const entry of sortedEntries) {
     const duplicateKey = `${normalizedCounterparty(entry)}:${entry.amount}:${entry.time}`;

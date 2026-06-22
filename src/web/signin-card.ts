@@ -1,4 +1,4 @@
-import type { LocalApiMonobankTokenStatus } from "./api.js";
+import type { LocalApiMonobankTokenStatus } from "./api-types.js";
 
 /**
  * Public Monobank developer portal URL. The local product links here

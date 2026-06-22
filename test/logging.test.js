@@ -36,6 +36,8 @@ test("redacts sensitive structured fields without caller-provided secrets", () =
     token: "live-secret-token",
     monobankToken: "live-monobank-token",
     webhookSecret: "live-webhook-secret",
+    providerPrivateKey:
+      "0000000000000000000000000000000000000000000000000000000000000001",
     headers: {
       Authorization: "Bearer live-secret-token",
       "X-Token": "live-secret-token",
@@ -54,10 +56,15 @@ test("redacts sensitive structured fields without caller-provided secrets", () =
   assert.doesNotMatch(line, /live-secret-token/);
   assert.doesNotMatch(line, /live-monobank-token/);
   assert.doesNotMatch(line, /live-webhook-secret/);
+  assert.doesNotMatch(
+    line,
+    /0000000000000000000000000000000000000000000000000000000000000001/,
+  );
   assert.doesNotMatch(line, /UA213223130000026007233566001/);
   assert.match(line, /"token":"\[redacted\]"/);
   assert.match(line, /"monobankToken":"\[redacted\]"/);
   assert.match(line, /"webhookSecret":"\[redacted\]"/);
+  assert.match(line, /"providerPrivateKey":"\[redacted\]"/);
   assert.match(line, /"Authorization":"\[redacted\]"/);
   assert.match(line, /"X-Token":"\[redacted\]"/);
   assert.match(line, /"payloadJson":"\[redacted\]"/);

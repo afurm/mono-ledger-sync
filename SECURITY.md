@@ -18,3 +18,7 @@ Do not open public issues for vulnerabilities that may expose tokens, account id
 ## Threat model
 
 The full threat model — including the five categories (local token theft, database leakage, malicious webhook traffic, dependency compromise, accidental support data exposure) and the per-threat mitigations and residual risk — lives in [`docs/threat-model.md`](docs/threat-model.md).
+
+## Advisory process
+
+The end-to-end process for handling a security report — supported versions, embargo and coordinated disclosure, the response and disclosure timeline, and the credit policy — is documented in [`docs/security-advisory-process.md`](docs/security-advisory-process.md).

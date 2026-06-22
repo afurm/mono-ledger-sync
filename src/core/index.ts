@@ -1,5 +1,5 @@
 export const packageName = "mono-ledger-sync";
-export const version = "0.1.1";
+export const version = "0.4.0";
 
 export const productArchitecture = {
   ui: "vite",
@@ -35,7 +35,7 @@ export function isLedgerSource(value: string): value is LedgerSource {
 
 export function createSyncPlan(options: CreateSyncPlanOptions = {}): SyncPlan {
   const profile = options.profile?.trim() || "default";
-  const source = options.source ?? "fixture";
+  const source = options.source ?? "monobank";
 
   const plan: SyncPlan = {
     packageName,
@@ -45,7 +45,7 @@ export function createSyncPlan(options: CreateSyncPlanOptions = {}): SyncPlan {
     localOnly: true,
     nextSteps: [
       "start the local web app",
-      "connect fixture or Monobank data source",
+      "save a Monobank personal API token",
       "sync statements into a local SQLite ledger",
       "review and export local financial data",
     ],

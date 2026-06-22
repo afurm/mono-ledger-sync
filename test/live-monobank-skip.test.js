@@ -18,7 +18,6 @@ import { createMonobankHttpAdapter } from "../dist/monobank/index.js";
 test("MonobankHttpAdapter rejects with a structured error when the upstream is unreachable", async () => {
   // 127.0.0.1:1 is a port that is not bound; connect should fail.
   const adapter = createMonobankHttpAdapter({
-    token: "smoke-token",
     baseUrl: "http://127.0.0.1:1",
     maxRetries: 0,
     timeoutMs: 500,
@@ -62,17 +61,44 @@ test("MonobankHttpAdapter rejects with a structured error when the upstream is u
   );
 });
 
-test("MonobankHttpAdapter.getCurrency accepts a non-empty placeholder token for the public /bank/currency endpoint", () => {
-  // The public /bank/currency endpoint on api.monobank.ua requires a
-  // non-empty X-Token header by Monobank's documented behavior, but
-  // the token does not have to be valid. This is a build-time guard:
-  // if the adapter ever starts rejecting empty tokens, the smoke
-  // test's placeholder needs to be updated.
-  assert.doesNotThrow(() => {
-    createMonobankHttpAdapter({
-      token: "non-empty-placeholder",
-      maxRetries: 0,
-      timeoutMs: 1000,
-    });
+test("MonobankHttpAdapter.getCurrency does not require a token for the public /bank/currency endpoint", async () => {
+  const requests = [];
+  const adapter = createMonobankHttpAdapter({
+    fetch: async (url, init) => {
+      requests.push({
+        url: String(url),
+        token: init.headers["X-Token"],
+      });
+
+      return Response.json([
+        {
+          currencyCodeA: 840,
+          currencyCodeB: 980,
+          date: 1775001600,
+          rateBuy: 39.8,
+        },
+      ]);
+    },
+    maxRetries: 0,
+    timeoutMs: 1000,
   });
+
+  const rates = await adapter.getCurrency();
+
+  assert.equal(rates.length, 1);
+  assert.deepEqual(requests, [
+    {
+      url: "https://api.monobank.ua/bank/currency",
+      token: undefined,
+    },
+  ]);
+});
+
+test("MonobankHttpAdapter still requires a token for personal endpoints", async () => {
+  const adapter = createMonobankHttpAdapter({
+    maxRetries: 0,
+    timeoutMs: 1000,
+  });
+
+  await assert.rejects(() => adapter.getClientInfo(), /token must be/);
 });
