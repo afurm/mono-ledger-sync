@@ -171,6 +171,22 @@ async function main() {
       console.log(`route smoke ok: ${routeId}`);
     }
 
+    // Drill into the Exports route and confirm the G3 extended preview
+    // (date range, included columns, excluded sensitive fields) renders
+    // for every supported format.
+    await page.goto(`${baseUrl}/#exports`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="export-preview"]').waitFor();
+    await page.locator('[data-testid="export-preview-rows"]').waitFor();
+    await page.locator('[data-testid="export-preview-date-range"]').waitFor();
+    await page
+      .locator('[data-testid="export-preview-included-columns"]')
+      .waitFor();
+    await page
+      .locator('[data-testid="export-preview-excluded-sensitive"]')
+      .waitFor();
+    console.log("route smoke ok: exports/preview");
+
     // Drill into the Accounts route and confirm the E5 per-account
     // sync health section (last successful window, failed webhooks 24h,
     // cursor age, next allowed pull) renders in the account drawer.
@@ -209,7 +225,6 @@ async function main() {
       .first()
       .waitFor();
     console.log("route smoke ok: accounts/jar-goal-progress");
-
     // Drill into the Sync route Activity tab and confirm the F4 surface
     // (last-24h summary + grouped cards) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
