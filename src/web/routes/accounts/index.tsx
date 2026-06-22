@@ -31,7 +31,12 @@ import type {
   LedgerJar,
   LocalAppSnapshot,
 } from "../../api-types";
-import { currencyLabel, formatDateTime, formatMinorAmount } from "../../format";
+import {
+  currencyLabel,
+  formatDateTime,
+  formatMinorAmount,
+  formatRelativeAge,
+} from "../../format";
 import type { RouteId } from "../../navigation";
 import { statusVariant } from "../../status";
 
@@ -234,9 +239,11 @@ function AccountBalanceSparkline({
 function AccountCard({
   account,
   snapshot,
+  onRouteChange,
 }: {
   account: LedgerAccount;
   snapshot: LocalAppSnapshot;
+  onRouteChange: (routeId: RouteId) => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [transactionPage, setTransactionPage] = useState<
@@ -247,8 +254,22 @@ function AccountCard({
       ? account.maskedPan.join(" · ")
       : "No masked identifiers";
   const accountTransactions = transactionPage?.entries ?? [];
+  const accountWebhookEvents = (snapshot.webhookEvents ?? []).filter(
+    (event) => event.accountId === account.id,
+  );
+  const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const failedWebhooks24h = accountWebhookEvents.filter((event) => {
+    if (event.status !== "failed") {
+      return false;
+    }
+    const received = Date.parse(event.receivedAt);
+    return !Number.isNaN(received) && received >= twentyFourHoursAgo;
+  }).length;
   const oldestTransaction = accountTransactions.at(0);
   const newestTransaction = accountTransactions.at(-1);
+  const cursorAgeLabel = formatRelativeAge(
+    newestTransaction ? newestTransaction.time : undefined,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -386,6 +407,50 @@ function AccountCard({
                     ? "Excluded from reports"
                     : "Included in reports"
                 }
+              />
+            </section>
+            <Separator />
+            <section
+              className="grid gap-3 text-sm"
+              data-testid="account-sync-health"
+            >
+              <h3 className="text-sm font-semibold">Sync health</h3>
+              <AccountDetailRow
+                label="Last successful window"
+                value={
+                  newestTransaction
+                    ? formatDateTime(newestTransaction.time)
+                    : "Not available"
+                }
+                testId="account-sync-health-last-successful-window"
+              />
+              <AccountDetailRow
+                label="Failed webhooks (24h)"
+                value={String(failedWebhooks24h)}
+                testId="account-sync-health-failed-webhooks-24h"
+              />
+              <AccountDetailRow
+                label="Cursor age"
+                value={cursorAgeLabel}
+                testId="account-sync-health-cursor-age"
+              />
+              <AccountDetailRow
+                label="Next allowed pull"
+                value={
+                  <span className="text-muted-foreground">
+                    Not in rate-limit cooldown.{" "}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() => onRouteChange("sync")}
+                    >
+                      Open Sync
+                    </Button>
+                  </span>
+                }
+                testId="account-sync-health-next-allowed-pull"
               />
             </section>
             <Separator />
@@ -622,6 +687,7 @@ export function AccountsRoute({
               account={account}
               key={account.id}
               snapshot={snapshot}
+              onRouteChange={onRouteChange}
             />
           ))}
         </div>
