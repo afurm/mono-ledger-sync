@@ -183,8 +183,16 @@ async function main() {
       .locator('[data-testid="jar-projected-completion"]')
       .first()
       .waitFor();
-    console.log("route smoke ok: accounts/jar-goal-progress");
-
+    console.log("route smoke ok: accounts/jar-goal-progress"); // Drill into the Sync route Activity tab and confirm the F4 surface
+    // (last-24h summary + grouped cards) renders without console errors.
+    await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.getByRole("tab", { name: /^activity$/i }).click();
+    await page.locator('[data-testid="sync-activity-tab"]').waitFor();
+    // After a fixture sync, the activity sources are non-empty so the
+    // summary block (not the empty-state) should be visible.
+    await page.locator('[data-testid="sync-activity-summary"]').waitFor();
+    console.log("route smoke ok: sync/activity-tab");
     // Drill into the Sync route Storage tab and confirm the F3 surface
     // (modified time, copy-path buttons, integrity / migrations / row
     // counts) renders without console errors.
