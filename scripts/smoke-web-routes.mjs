@@ -199,7 +199,6 @@ async function main() {
     await page.locator('[data-testid="storage-database-modified"]').waitFor();
     await page.locator('[data-testid="storage-details"]').waitFor();
     console.log("route smoke ok: sync/storage-tab");
->>>>>>> origin/main
   } finally {
     if (browser) {
       await browser.close();
