@@ -25,6 +25,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Static check for repository secrets
+        run: npm run scan:secrets
       - run: npm audit --omit=dev --audit-level=high
       - name: Static check for unsafe logging patterns
         run: node scripts/check-unsafe-logging.mjs

@@ -10,6 +10,7 @@ import type {
   LedgerSummary,
   MerchantCleanupRule,
   NetWorthTrend,
+  RawStatementItemLookup,
   SavingsGoalProgress,
 } from "../../storage/index.js";
 import {
@@ -593,6 +594,77 @@ export function registerLedgerRoutes(
               : "Monthly category budget could not be deleted.",
         };
       }
+    },
+  );
+
+  const ledgerEntryIdParamsSchema = {
+    type: "object",
+    required: ["id"],
+    properties: {
+      id: { type: "string" },
+    },
+  } as const;
+
+  const ledgerEntryRawResponseSchema = {
+    type: "object",
+    required: ["available"],
+    properties: {
+      available: { type: "boolean" },
+      reason: { enum: ["pruned", "no_raw_id"] },
+      redactedPayload: { type: "object", additionalProperties: true },
+    },
+  } as const;
+
+  app.get(
+    `${context.apiPrefix}/ledger/entries/:id/raw`,
+    {
+      schema: {
+        params: ledgerEntryIdParamsSchema,
+        response: {
+          200: ledgerEntryRawResponseSchema,
+          400: localApiErrorResponseSchema,
+          404: localApiErrorResponseSchema,
+        },
+      },
+    },
+    async (
+      request,
+      reply,
+    ): Promise<
+      | RawStatementItemLookup
+      | {
+          error: string;
+          message: string;
+        }
+    > => {
+      const services = await context.getServices();
+      const params = request.params as { id?: string };
+      const entryId = params.id?.trim() ?? "";
+
+      if (!entryId) {
+        reply.code(400);
+
+        return {
+          error: "invalid_entry",
+          message: "Entry ID is required.",
+        };
+      }
+
+      const lookup = await services.queryService.getRawStatementItemForEntry(
+        entryId,
+        services.profile,
+      );
+
+      if (!lookup.available && lookup.reason === "entry_not_found") {
+        reply.code(404);
+
+        return {
+          error: "entry_not_found",
+          message: "Ledger entry could not be found.",
+        };
+      }
+
+      return lookup;
     },
   );
 }
