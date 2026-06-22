@@ -183,7 +183,9 @@ async function main() {
       .locator('[data-testid="jar-projected-completion"]')
       .first()
       .waitFor();
-    console.log("route smoke ok: accounts/jar-goal-progress"); // Drill into the Sync route Activity tab and confirm the F4 surface
+    console.log("route smoke ok: accounts/jar-goal-progress");
+
+    // Drill into the Sync route Activity tab and confirm the F4 surface
     // (last-24h summary + grouped cards) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
     await page.waitForSelector("main");
