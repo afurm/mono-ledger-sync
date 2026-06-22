@@ -1382,6 +1382,18 @@ export async function initializeWorkspace(): Promise<
   });
 }
 
+export async function updateLocalAppSource(
+  source: "fixture" | "monobank",
+): Promise<LocalAppSnapshot["config"]> {
+  return requestJson<LocalAppSnapshot["config"]>("/api/app/source", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ source }),
+  });
+}
+
 export async function updateLocalAppSettings(
   update: LocalAppSettingsUpdate,
 ): Promise<LocalAppSnapshot["config"]> {

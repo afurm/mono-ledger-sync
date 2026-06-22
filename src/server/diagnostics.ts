@@ -19,7 +19,11 @@ import type {
 
 export type { MonobankTokenStoreStatus };
 
-export type SecureStorageBackend = "keychain" | "secret-service" | "session";
+export type SecureStorageBackend =
+  | "keychain"
+  | "credential-manager"
+  | "secret-service"
+  | "session";
 
 export interface DiagnosticsSecureStorage {
   available: boolean;
@@ -119,6 +123,7 @@ const STALE_CURSOR_HOURS_DEFAULT = 24;
 
 function backendForPlatform(platform: NodeJS.Platform): SecureStorageBackend {
   if (platform === "darwin") return "keychain";
+  if (platform === "win32") return "credential-manager";
   if (platform === "linux") return "secret-service";
   return "session";
 }

@@ -10,7 +10,7 @@ Local-first TypeScript app for syncing Monobank transactions into a private pers
 
 ## Status
 
-This package ships a local-first Monobank personal finance workspace: a Fastify local app, SQLite-backed storage, a typed Monobank HTTP adapter, ledger queries, webhook hint recording, CSV/JSON exports, and a compact browser UI. The product talks to the real Monobank personal API at `https://api.monobank.ua` for a real user session. Sanitized JSON fixtures exist only to drive offline development, tests, and contributor onboarding; they are never used to render data for a real user.
+This package ships a local-first Monobank personal finance workspace: a Fastify local app, SQLite-backed storage, a typed Monobank HTTP adapter, ledger queries, webhook hint recording, deterministic exports, and a compact browser UI. The product talks to the real Monobank personal API at `https://api.monobank.ua` for a real user session. A clearly labeled first-run demo uses synthetic fixtures and is erased before a valid live token is activated.
 
 ## Live by default
 
@@ -35,22 +35,47 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 - Support explicit fixture-backed development for tests and offline contributor workflows.
 - Provide a small TypeScript API, local server boundary, and browser UI that can grow into SQLite storage, exports, reports, and a Vite web app.
 
-## Install
+## Quick start
 
 ```sh
-npm install mono-ledger-sync
+npx mono-ledger-sync
 ```
 
-## Local UI
+Open `http://127.0.0.1:3000`, then choose one path:
+
+1. Select **Explore demo data** to inspect a synthetic local ledger without a
+   token. Every route displays a demo-data warning.
+2. For live data, create a personal token at `https://api.monobank.ua/`, open
+   **Settings**, paste the token, confirm local-only handling, and save it.
+3. Run sync, review transactions, configure budgets/recurring payments, then
+   use the Export wizard or create a local backup.
+
+Saving a valid live token while demo mode is active clears every demo ledger
+row before switching sources. Demo and live transactions are never mixed.
+
+The app stores its SQLite database in the local application data directory. Use
+`MONO_LEDGER_SYNC_DATA_DIR` to select another location before first startup.
+Recovery and profile moves are documented in
+[Migration and recovery](docs/migration-and-recovery.md).
+
+## Screenshots
+
+![Daily money overview](docs/assets/overview.png)
+
+![Transaction review workflow](docs/assets/transactions.png)
+
+![Export wizard and privacy preview](docs/assets/exports.png)
+
+## Local development
 
 ```sh
+npm install
 npm run dev
 ```
 
 `npm run dev` builds the package and starts the local Fastify server at
-`http://127.0.0.1:3000`. The browser UI starts in Monobank API mode. Save a
-personal API token in Settings, then run sync to fetch accounts, jars,
-statements, and currency rates into the local SQLite ledger.
+`http://127.0.0.1:3000`. The browser UI starts in Monobank API mode. The
+first-run demo is available without changing development environment variables.
 
 Export presets are available through the local API and browser UI for
 `accountant-handoff`, `monthly-personal-finance`, `bookkeeping`,
@@ -79,7 +104,9 @@ const plan = createSyncPlan({
 - No hosted token relay.
 - No default cloud storage.
 - No hosted account is required for local browsing, local backups, or local exports.
-- Personal API tokens are stored through OS secure storage when available, with a session-only fallback when no secure provider is available.
+- Personal API tokens use macOS Keychain Services, Windows Credential
+  Manager/Credential Locker, or Linux Secret Service, with an explicit
+  session-only fallback when the provider is unavailable.
 - Use personal Monobank API tokens only for your own data on your own machine; do not use this project as a hosted or shared service for other people's banking data.
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
@@ -162,11 +189,11 @@ adapter. It skips unless `MONO_LEDGER_SYNC_LIVE_MONOBANK_TESTS=1` and
 calls the live API. This is the only supported use of `MONOBANK_TOKEN`.
 
 The local API token endpoint stores saved Monobank tokens through the default
-token store. Linux uses Secret Service when available. macOS and Windows keep
-session-only handling until a packaged desktop host can bridge Keychain Services
-and Credential Manager without passing secrets through shell arguments.
-Unsupported or unavailable secure stores fall back to the running session
-instead of writing plaintext credentials to SQLite or config files.
+token store. Linux uses Secret Service, macOS uses Keychain Services, and
+Windows uses Credential Manager/Credential Locker. Secrets travel through
+stdin, not command arguments. Unsupported or unavailable secure stores fall
+back to the running session instead of writing plaintext credentials to SQLite
+or config files.
 
 ### Rotating a Monobank token
 
@@ -192,6 +219,14 @@ Release automation is documented in [docs/release.md](docs/release.md).
 Domain contracts are documented in [docs/domain-model.md](docs/domain-model.md).
 The privacy and security threat model is documented in
 [docs/threat-model.md](docs/threat-model.md).
+The v1 distribution, accessibility, localization, release, recovery, and
+support contracts are documented in
+[distribution](docs/decisions/0012-v1-distribution.md),
+[accessibility](docs/accessibility.md),
+[localization](docs/decisions/0013-localization.md),
+[release checklist](docs/v1-release-checklist.md),
+[migration and recovery](docs/migration-and-recovery.md), and
+[support boundary](docs/support-boundary.md).
 Common local workflows are documented in
 [examples/sample-workflows](examples/sample-workflows).
 Start with the

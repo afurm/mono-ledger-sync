@@ -2749,6 +2749,14 @@ test("tracks rate-limit in sync run stats on adapter failures", async () => {
       assert.equal(runs[0].itemsInserted, 0);
       assert.equal(runs[0].itemsUpdated, 0);
       assert.equal(runs[0].itemsSkipped, 0);
+      assert.equal(
+        runs[0].details?.accounts[0]?.accountId,
+        "rate-limit-account",
+      );
+      assert.equal(runs[0].details?.accounts[0]?.status, "failed");
+      assert.equal(runs[0].details?.accounts[0]?.failedWindowFrom, 1);
+      assert.equal(runs[0].details?.accounts[0]?.failedWindowTo, 10);
+      assert.equal(typeof runs[0].details?.accounts[0]?.nextRetryAt, "string");
     } finally {
       await db.close();
     }
@@ -2843,6 +2851,19 @@ test("records a partial run when sync is interrupted and resumes after the compl
       assert.equal(runs[0].itemsInserted, 1);
       assert.equal(runs[0].itemsUpdated, 0);
       assert.equal(runs[0].itemsSkipped, 0);
+      assert.deepEqual(runs[0].details?.accounts, [
+        {
+          accountId: "interrupted-account",
+          status: "failed",
+          from: 1,
+          to: 10_000,
+          windowsFetched: 1,
+          itemsSeen: 1,
+          failedWindowFrom: 4,
+          failedWindowTo: 6,
+          errorMessage: "Sync was interrupted",
+        },
+      ]);
       const interruptedCursor = await db.getSyncCursor(
         profile,
         "interrupted-account",
@@ -2991,6 +3012,7 @@ test("migrates legacy first-migration sqlite DB and preserves baseline queries",
         "0024_local_exports",
         "0025_raw_statement_retention",
         "0026_bi_views",
+        "0027_sync_run_details",
       ]);
       assert.equal(afterMigration.accounts, 1);
       assert.equal(afterMigration.ledgerEntries, 0);
@@ -3035,7 +3057,7 @@ test("migrates prior fixture ledger data to the latest sqlite schema", async () 
         const afterMigration = await db.getDatabaseInfo(profile);
         assert.equal(afterMigration.ledgerEntries, 2);
         assert.equal(afterMigration.syncRuns, 1);
-        assert.equal(afterMigration.migrations.at(-1), "0026_bi_views");
+        assert.equal(afterMigration.migrations.at(-1), "0027_sync_run_details");
 
         const summary = await db.getLedgerSummary(profile);
         assert.equal(summary.ledgerEntries, 2);

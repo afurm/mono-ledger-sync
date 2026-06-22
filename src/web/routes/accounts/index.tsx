@@ -85,6 +85,20 @@ function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
     : "Waiting for first sync";
 }
 
+function accountTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    black: "Black card / Чорна картка",
+    white: "White card / Біла картка",
+    platinum: "Platinum / Платинова картка",
+    iron: "Iron / Залізна картка",
+    fop: "FOP account / Рахунок ФОП",
+    yellow: "Yellow card / Жовта картка",
+    eAid: "eAid / єПідтримка",
+  };
+
+  return labels[type] ?? type;
+}
+
 function latestSyncRunSummary(
   run: LocalAppSnapshot["syncRuns"][number] | undefined,
 ): string {
@@ -324,7 +338,7 @@ function AccountCard({
       </CardHeader>
       <CardContent className="grid gap-3 text-sm">
         <AccountBalanceSparkline entries={accountTransactions} />
-        <AccountDetailRow label="Type" value={account.type} />
+        <AccountDetailRow label="Type" value={accountTypeLabel(account.type)} />
         <AccountDetailRow
           label="Credit limit"
           value={formatMinorAmount(account.creditLimit, account.currencyCode)}
@@ -351,7 +365,8 @@ function AccountCard({
           <SheetHeader className="pr-12">
             <SheetTitle>{account.id}</SheetTitle>
             <SheetDescription>
-              {currencyLabel(account.currencyCode)} {account.type}
+              {currencyLabel(account.currencyCode)}{" "}
+              {accountTypeLabel(account.type)}
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-5 px-4 pb-4">
@@ -362,7 +377,10 @@ function AccountCard({
                 label="Currency"
                 value={currencyLabel(account.currencyCode)}
               />
-              <AccountDetailRow label="Type" value={account.type} />
+              <AccountDetailRow
+                label="Type"
+                value={accountTypeLabel(account.type)}
+              />
               <AccountDetailRow
                 label="Credit limit"
                 value={formatMinorAmount(

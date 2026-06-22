@@ -32,6 +32,12 @@ const routes = [
 ];
 
 const screenshotDir = process.env.SMOKE_WEB_SCREENSHOT_DIR?.trim();
+const screenshotRouteIds = new Set(
+  (process.env.SMOKE_WEB_SCREENSHOT_ROUTES ?? "")
+    .split(",")
+    .map((routeId) => routeId.trim())
+    .filter(Boolean),
+);
 
 function localUrl(server) {
   const url = server.resolvedUrls?.local[0];
@@ -88,7 +94,9 @@ async function main() {
     await vite.listen();
 
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    const page = await browser.newPage({
+      viewport: { width: 1440, height: 900 },
+    });
     const consoleErrors = [];
     const pageErrors = [];
     const missingFavicons = [];
@@ -135,6 +143,84 @@ async function main() {
       const overlayCount = await page.locator("vite-error-overlay").count();
       assert.equal(overlayCount, 0, `${routeId} rendered Vite error overlay`);
 
+      const accessibilityViolations = await page.evaluate(() => {
+        const visible = (element) => {
+          const style = window.getComputedStyle(element);
+          return (
+            element.getClientRects().length > 0 &&
+            style.visibility !== "hidden" &&
+            style.display !== "none"
+          );
+        };
+        const name = (element) => {
+          const labelledBy = (element.getAttribute("aria-labelledby") ?? "")
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((id) => document.getElementById(id)?.textContent)
+            .join(" ");
+
+          return [
+            element.getAttribute("aria-label"),
+            labelledBy,
+            element.closest("label")?.textContent,
+            element.getAttribute("title"),
+            element.textContent,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+        };
+        const violations = [];
+
+        for (const control of document.querySelectorAll(
+          "button, a[href], input, textarea, select",
+        )) {
+          if (
+            !visible(control) ||
+            control.getAttribute("aria-hidden") === "true"
+          ) {
+            continue;
+          }
+
+          if (
+            control.matches("input, textarea, select") &&
+            control.getAttribute("type") !== "hidden"
+          ) {
+            const hasLabel =
+              control.labels?.length > 0 ||
+              Boolean(control.getAttribute("aria-label")) ||
+              Boolean(control.getAttribute("aria-labelledby"));
+            if (!hasLabel) {
+              violations.push(`${control.tagName.toLowerCase()} missing label`);
+            }
+          } else if (!name(control)) {
+            violations.push(`${control.tagName.toLowerCase()} missing name`);
+          }
+        }
+
+        const ids = [...document.querySelectorAll("[id]")].map(
+          (element) => element.id,
+        );
+        for (const id of new Set(ids)) {
+          if (ids.filter((value) => value === id).length > 1) {
+            violations.push(`duplicate id: ${id}`);
+          }
+        }
+
+        for (const image of document.querySelectorAll("img")) {
+          if (!image.hasAttribute("alt")) {
+            violations.push("img missing alt");
+          }
+        }
+
+        return violations;
+      });
+      assert.deepEqual(
+        accessibilityViolations,
+        [],
+        `${routeId} has accessibility violations`,
+      );
+
       const faviconStatus = await page.evaluate(async () => {
         const response = await fetch("/favicon.ico", { cache: "no-store" });
         return response.status;
@@ -161,15 +247,29 @@ async function main() {
         `${routeId} requested a missing favicon`,
       );
 
-      if (screenshotDir) {
+      if (
+        screenshotDir &&
+        (screenshotRouteIds.size === 0 || screenshotRouteIds.has(routeId))
+      ) {
         await page.screenshot({
           path: path.join(screenshotDir, `${routeId}.png`),
-          fullPage: true,
+          fullPage: false,
         });
       }
 
       console.log(`route smoke ok: ${routeId}`);
     }
+
+    await page.goto(`${baseUrl}/#overview`, { waitUntil: "networkidle" });
+    assert.equal(
+      await page.getByRole("link", { name: "Skip to main content" }).count(),
+      1,
+    );
+    assert.equal(
+      (await page.locator('[aria-live="polite"]').count()) > 0,
+      true,
+    );
+    console.log("route smoke ok: accessibility-navigation");
 
     // Drill into the Settings route and confirm the F5 'Copy backup
     // directory' button renders next to the Recent backups section.

@@ -163,12 +163,152 @@ function createLinuxSecretServiceMonobankTokenStore(
   };
 }
 
+function createMacOsKeychainMonobankTokenStore(
+  options: Required<
+    Pick<MonobankTokenStoreOptions, "serviceName" | "runCommand">
+  >,
+): MonobankTokenStore {
+  return {
+    async getToken(profile) {
+      try {
+        const result = await options.runCommand("security", [
+          "find-generic-password",
+          "-s",
+          options.serviceName,
+          "-a",
+          tokenAccount(profile),
+          "-w",
+        ]);
+
+        return result.stdout.trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async setToken(profile, token) {
+      await options.runCommand(
+        "security",
+        [
+          "add-generic-password",
+          "-U",
+          "-s",
+          options.serviceName,
+          "-a",
+          tokenAccount(profile),
+          "-w",
+        ],
+        { input: `${token}\n` },
+      );
+    },
+    async deleteToken(profile) {
+      try {
+        await options.runCommand("security", [
+          "delete-generic-password",
+          "-s",
+          options.serviceName,
+          "-a",
+          tokenAccount(profile),
+        ]);
+      } catch {
+        // Missing credentials are already deleted from the product perspective.
+      }
+    },
+    async getStatus() {
+      return {
+        storage: "secure",
+        persistence: "persistent",
+      };
+    },
+  };
+}
+
+const windowsCredentialScript = String.raw`
+$ErrorActionPreference = 'Stop'
+$vault = New-Object Windows.Security.Credentials.PasswordVault
+$resource = $args[0]
+$profile = $args[1]
+$operation = $args[2]
+if ($operation -eq 'set') {
+  $secret = [Console]::In.ReadToEnd()
+  try {
+    $existing = $vault.Retrieve($resource, $profile)
+    $vault.Remove($existing)
+  } catch {}
+  $vault.Add((New-Object Windows.Security.Credentials.PasswordCredential($resource, $profile, $secret)))
+} elseif ($operation -eq 'get') {
+  $credential = $vault.Retrieve($resource, $profile)
+  $credential.RetrievePassword()
+  [Console]::Out.Write($credential.Password)
+} elseif ($operation -eq 'delete') {
+  try {
+    $credential = $vault.Retrieve($resource, $profile)
+    $vault.Remove($credential)
+  } catch {}
+}
+`;
+
+function createWindowsCredentialManagerMonobankTokenStore(
+  options: Required<
+    Pick<MonobankTokenStoreOptions, "serviceName" | "runCommand">
+  >,
+): MonobankTokenStore {
+  const commandArgs = (
+    profile: string,
+    operation: "get" | "set" | "delete",
+  ): readonly string[] => [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    windowsCredentialScript,
+    options.serviceName,
+    tokenAccount(profile),
+    operation,
+  ];
+
+  return {
+    async getToken(profile) {
+      try {
+        const result = await options.runCommand(
+          "powershell.exe",
+          commandArgs(profile, "get"),
+        );
+
+        return result.stdout.trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async setToken(profile, token) {
+      await options.runCommand("powershell.exe", commandArgs(profile, "set"), {
+        input: token,
+      });
+    },
+    async deleteToken(profile) {
+      await options.runCommand(
+        "powershell.exe",
+        commandArgs(profile, "delete"),
+      );
+    },
+    async getStatus() {
+      return {
+        storage: "secure",
+        persistence: "persistent",
+      };
+    },
+  };
+}
+
 function createSecureMonobankTokenStore(
   options: Required<MonobankTokenStoreOptions>,
 ): MonobankTokenStore | undefined {
   switch (options.platform) {
+    case "darwin":
+      return createMacOsKeychainMonobankTokenStore(options);
     case "linux":
       return createLinuxSecretServiceMonobankTokenStore(options);
+    case "win32":
+      return createWindowsCredentialManagerMonobankTokenStore(options);
     default:
       return undefined;
   }

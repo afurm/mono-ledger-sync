@@ -323,6 +323,7 @@ interface SqliteSyncRunRow {
   items_updated: number;
   items_skipped: number;
   rate_limited: number;
+  details_json: string | null;
 }
 
 interface SqliteWebhookEventRow {
@@ -1607,6 +1608,13 @@ const migrations: readonly SqliteMigration[] = [
           AND categories.id = budgets.category_id;
     `,
   },
+  {
+    id: "0027_sync_run_details",
+    description: "Track per-account sync completion and failed windows",
+    sql: `
+      ALTER TABLE sync_runs ADD COLUMN details_json TEXT;
+    `,
+  },
 ];
 
 function nowIso(): string {
@@ -2473,6 +2481,18 @@ function mapSyncRunRow(row: SqliteSyncRunRow): SyncRun {
     run.errorMessage = row.error_message;
   }
 
+  if (row.details_json !== null) {
+    try {
+      const details = JSON.parse(row.details_json) as SyncRun["details"];
+
+      if (details && Array.isArray(details.accounts)) {
+        run.details = details;
+      }
+    } catch {
+      // Keep older/corrupt optional detail payloads from hiding the run itself.
+    }
+  }
+
   return run;
 }
 
@@ -3027,12 +3047,14 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           INSERT INTO sync_runs (
             id, profile, source, status, started_at, finished_at,
             error_message,
-            api_calls, windows_fetched, items_seen, items_inserted, items_updated, items_skipped, rate_limited
+            api_calls, windows_fetched, items_seen, items_inserted, items_updated, items_skipped, rate_limited,
+            details_json
           )
           VALUES (
             @id, @profile, @source, @status, @startedAt, @finishedAt,
             @errorMessage,
-            @apiCalls, @windowsFetched, @itemsSeen, @itemsInserted, @itemsUpdated, @itemsSkipped, @rateLimited
+            @apiCalls, @windowsFetched, @itemsSeen, @itemsInserted, @itemsUpdated, @itemsSkipped, @rateLimited,
+            @detailsJson
           )
           ON CONFLICT(id) DO UPDATE SET
             status = excluded.status,
@@ -3044,7 +3066,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
             items_inserted = excluded.items_inserted,
             items_updated = excluded.items_updated,
             items_skipped = excluded.items_skipped,
-            rate_limited = excluded.rate_limited
+            rate_limited = excluded.rate_limited,
+            details_json = excluded.details_json
         `,
       )
       .run({
@@ -3062,6 +3085,7 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
         itemsUpdated: run.itemsUpdated,
         itemsSkipped: run.itemsSkipped,
         rateLimited: run.rateLimited,
+        detailsJson: run.details ? JSON.stringify(run.details) : null,
       });
   }
 
@@ -4887,7 +4911,8 @@ class BetterSqliteLedgerDb implements SqliteLedgerDb {
           SELECT
             id, profile, source, status, started_at, finished_at,
             error_message,
-            api_calls, windows_fetched, items_seen, items_inserted, items_updated, items_skipped, rate_limited
+            api_calls, windows_fetched, items_seen, items_inserted, items_updated, items_skipped, rate_limited,
+            details_json
           FROM sync_runs
           WHERE profile = ?
           ORDER BY started_at DESC

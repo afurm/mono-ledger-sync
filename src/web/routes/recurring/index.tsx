@@ -1186,6 +1186,18 @@ function RecurringDetailDrawer({
         ...(stream.merchantName ? { merchantName: stream.merchantName } : {}),
       })
     : "#transactions";
+  const matchingTransactions = stream
+    ? snapshot.transactions.entries
+        .filter(
+          (entry) =>
+            entry.accountId === stream.accountId &&
+            (stream.categoryId === undefined ||
+              entry.categoryId === stream.categoryId) &&
+            (stream.merchantName === undefined ||
+              entry.merchantName === stream.merchantName),
+        )
+        .slice(0, 5)
+    : [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1269,6 +1281,34 @@ function RecurringDetailDrawer({
                     <p className="text-xs text-muted-foreground">
                       {payment.daysOverdue} days overdue
                     </p>
+                  </div>
+                ))
+              )}
+            </section>
+            <Separator />
+            <section className="grid gap-3">
+              <h3 className="text-sm font-medium">Recent history</h3>
+              {matchingTransactions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No linked transactions are loaded in the current page.
+                </p>
+              ) : (
+                matchingTransactions.map((entry) => (
+                  <div
+                    className="flex items-center justify-between gap-3 rounded-md border border-border p-3"
+                    key={entry.id}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {entry.merchantName ?? entry.description}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDateTime(entry.time)}
+                      </p>
+                    </div>
+                    <span className="text-sm font-medium tabular-nums">
+                      {formatMinorAmount(entry.amount, entry.currencyCode)}
+                    </span>
                   </div>
                 ))
               )}

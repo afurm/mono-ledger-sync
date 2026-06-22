@@ -769,3 +769,79 @@ test("POST /api/app/source rejects fixture mode outside explicit development con
     });
   });
 });
+
+test("first-run demo mode loads synthetic data and clears it before live token promotion", async () => {
+  const handler = createMonobankMockHttpHandler({
+    clientInfo: okClientInfo(),
+    currencyRates: [],
+    statementByAccount: {},
+  });
+
+  await withMockMonobankServer(handler, async (mockBaseUrl) => {
+    await withTempLedger(async ({ tempRoot }) => {
+      const server = createLocalApiServer({
+        profile: "demo",
+        dataDir: tempRoot,
+        host: "127.0.0.1",
+        port: 55710,
+        monobankTokenStore: createSessionMonobankTokenStore(),
+        monobankBaseUrl: mockBaseUrl,
+        validateMonobankTokenOnSave: true,
+        monobankTokenProbeAdapter: createMonobankHttpAdapter({
+          token: "first-run-live-token",
+          baseUrl: mockBaseUrl,
+          maxRetries: 0,
+          timeoutMs: 5000,
+        }),
+      });
+
+      try {
+        const demoSource = await server.inject({
+          method: "POST",
+          url: "/api/app/source",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source: "fixture" }),
+        });
+        assert.equal(demoSource.statusCode, 200);
+        assert.equal(demoSource.json().source, "fixture");
+
+        const demoSync = await server.inject({
+          method: "POST",
+          url: "/api/sync/run",
+        });
+        assert.equal(demoSync.statusCode, 200);
+
+        const demoSummary = await server.inject({
+          method: "GET",
+          url: "/api/ledger/summary",
+        });
+        assert.equal(demoSummary.json().ledgerEntries > 0, true);
+
+        const saveToken = await server.inject({
+          method: "POST",
+          url: "/api/app/token",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profile: "demo",
+            token: "first-run-live-token",
+          }),
+        });
+        assert.equal(saveToken.statusCode, 200);
+
+        const liveConfig = await server.inject({
+          method: "GET",
+          url: "/api/app/config",
+        });
+        const liveSummary = await server.inject({
+          method: "GET",
+          url: "/api/ledger/summary",
+        });
+        assert.equal(liveConfig.json().source, "monobank");
+        assert.equal(liveSummary.json().ledgerEntries, 0);
+        assert.equal(liveSummary.json().accounts, 0);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+});
