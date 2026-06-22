@@ -185,7 +185,9 @@ async function main() {
     await page
       .locator('[data-testid="export-preview-excluded-sensitive"]')
       .waitFor();
-    console.log("route smoke ok: exports/preview"); // Drill into the Sync route Storage tab and confirm the F3 surface    // Drill into the Sync route Activity tab and confirm the F4 surface
+    console.log("route smoke ok: exports/preview");
+
+    // Drill into the Sync route Activity tab and confirm the F4 surface
     // (last-24h summary + grouped cards) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
     await page.waitForSelector("main");
@@ -196,7 +198,8 @@ async function main() {
     await page.locator('[data-testid="sync-activity-summary"]').waitFor();
     console.log("route smoke ok: sync/activity-tab");
 
-    // Drill into the Sync route Storage tab and confirm the F3 surface    // (modified time, copy-path buttons, integrity / migrations / row
+    // Drill into the Sync route Storage tab and confirm the F3 surface
+    // (modified time, copy-path buttons, integrity / migrations / row
     // counts) renders without console errors.
     await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
     await page.waitForSelector("main");
