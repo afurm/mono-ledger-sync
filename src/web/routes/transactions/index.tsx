@@ -70,6 +70,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
   createCategoryRule,
+  loadLedgerEntryRawPayload,
   loadLedgerTransactions,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
@@ -80,6 +81,7 @@ import type {
   CategoryRuleInput,
   LedgerEntry,
   LedgerEntryPage,
+  LedgerEntryRawPayloadView,
   LedgerTransactionFilters,
   LedgerTransactionSortDirection,
   LedgerTransactionSortField,
@@ -1164,6 +1166,9 @@ function TransactionDetailDrawer({
   rulePreviewEntries = [],
   syncRuns = [],
   webhookEvents = [],
+  rawPayloadLoadState = "idle",
+  rawPayloadView,
+  rawPayloadError,
 }: {
   entry: LedgerEntry | undefined;
   open: boolean;
@@ -1176,6 +1181,9 @@ function TransactionDetailDrawer({
   rulePreviewEntries?: readonly LedgerEntry[];
   syncRuns: readonly SyncRun[] | undefined;
   webhookEvents: readonly WebhookEvent[] | undefined;
+  rawPayloadLoadState?: "idle" | "loading" | "error";
+  rawPayloadView?: LedgerEntryRawPayloadView;
+  rawPayloadError?: string;
 }) {
   const [note, setNote] = useState("");
   const [tags, setTags] = useState("");
@@ -1963,10 +1971,79 @@ function TransactionDetailDrawer({
                 />
               </dl>
             </section>
+            <TransactionRawPayloadSection
+              entryId={entry.id}
+              loadState={rawPayloadLoadState}
+              view={rawPayloadView}
+              error={rawPayloadError}
+            />
           </div>
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+function TransactionRawPayloadSection({
+  entryId,
+  loadState,
+  view,
+  error,
+}: {
+  entryId: string;
+  loadState: "idle" | "loading" | "error";
+  view: LedgerEntryRawPayloadView | undefined;
+  error: string | undefined;
+}) {
+  return (
+    <section
+      className="grid gap-2 border-t pt-4"
+      data-testid="transaction-raw-payload-section"
+    >
+      <header className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Raw Monobank payload</h3>
+        <span className="text-xs text-muted-foreground">
+          Redaction-safe preview of the original statement item
+        </span>
+      </header>
+      {loadState === "loading" ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="transaction-raw-payload-loading"
+        >
+          Loading raw payload for entry <code>{entryId}</code>…
+        </p>
+      ) : null}
+      {loadState === "error" && error !== undefined ? (
+        <Alert
+          variant="destructive"
+          data-testid="transaction-raw-payload-error"
+        >
+          <AlertCircleIcon />
+          <AlertTitle>Could not load raw payload</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {loadState === "idle" && view !== undefined ? (
+        view.available ? (
+          <pre
+            className="max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed"
+            data-testid="transaction-raw-payload-json"
+          >
+            <code>{JSON.stringify(view.redactedPayload, null, 2)}</code>
+          </pre>
+        ) : (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="transaction-raw-payload-empty"
+          >
+            {view.reason === "pruned"
+              ? "Raw payload was pruned per your retention settings. Increase the raw statement retention window in Settings to keep originals longer."
+              : "This entry has no raw payload recorded."}
+          </p>
+        )
+      ) : null}
+    </section>
   );
 }
 
@@ -1988,6 +2065,13 @@ export function TransactionsRoute({
   const [selectedTransaction, setSelectedTransaction] = useState<
     LedgerEntry | undefined
   >();
+  const [rawPayloadView, setRawPayloadView] = useState<
+    LedgerEntryRawPayloadView | undefined
+  >();
+  const [rawPayloadLoadState, setRawPayloadLoadState] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+  const [rawPayloadError, setRawPayloadError] = useState<string | undefined>();
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -2438,6 +2522,27 @@ export function TransactionsRoute({
     },
     [handleTransactionUpdated, rememberUndo],
   );
+
+  const openRawPayloadForEntry = useCallback((entry: LedgerEntry): void => {
+    setSelectedTransaction(entry);
+    setRawPayloadLoadState("loading");
+    setRawPayloadView(undefined);
+    setRawPayloadError(undefined);
+
+    void loadLedgerEntryRawPayload(entry.id)
+      .then((view) => {
+        setRawPayloadView(view);
+        setRawPayloadLoadState("idle");
+      })
+      .catch((error: unknown) => {
+        setRawPayloadError(
+          error instanceof Error
+            ? error.message
+            : "Raw payload could not be loaded.",
+        );
+        setRawPayloadLoadState("error");
+      });
+  }, []);
 
   const setTransactionSelected = useCallback(
     (entryId: string, selected: boolean): void => {
@@ -3001,6 +3106,7 @@ export function TransactionsRoute({
             sortDirection={filters.sortDirection}
             onSortChange={setSort}
             onViewDetails={setSelectedTransaction}
+            onViewRawPayload={openRawPayloadForEntry}
             onReviewStateChange={updateTransactionReviewState}
             selectedEntryIds={selectedTransactionIds}
             onSelectionChange={setTransactionSelected}
@@ -3029,6 +3135,9 @@ export function TransactionsRoute({
           onEntryUpdated={handleTransactionUpdated}
           onBeforeLocalEdit={(entry) => rememberUndo([entry])}
           onRuleCreated={onRefresh}
+          rawPayloadLoadState={rawPayloadLoadState}
+          {...(rawPayloadView !== undefined ? { rawPayloadView } : {})}
+          {...(rawPayloadError !== undefined ? { rawPayloadError } : {})}
           onOpenChange={(open) => {
             if (!open) {
               setSelectedTransaction(undefined);
