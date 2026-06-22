@@ -181,6 +181,21 @@ async function main() {
     // summary block (not the empty-state) should be visible.
     await page.locator('[data-testid="sync-activity-summary"]').waitFor();
     console.log("route smoke ok: sync/activity-tab");
+
+    // Drill into the Sync route Storage tab and confirm the F3 surface
+    // (modified time, copy-path buttons, integrity / migrations / row
+    // counts) renders without console errors.
+    await page.goto(`${baseUrl}/#sync`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    // The default tab is "Runs"; click the Storage tab trigger.
+    await page.getByRole("tab", { name: /^storage$/i }).click();
+    await page.locator('[data-testid="sync-storage-tab"]').waitFor();
+    await page.locator('[data-testid="storage-database-path"]').waitFor();
+    await page.locator('[data-testid="storage-copy-database-path"]').waitFor();
+    await page.locator('[data-testid="storage-copy-data-directory"]').waitFor();
+    await page.locator('[data-testid="storage-database-modified"]').waitFor();
+    await page.locator('[data-testid="storage-details"]').waitFor();
+    console.log("route smoke ok: sync/storage-tab");
   } finally {
     if (browser) {
       await browser.close();
