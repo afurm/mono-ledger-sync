@@ -7,6 +7,7 @@ import {
   BanIcon,
   CheckCheckIcon,
   EyeIcon,
+  FileJsonIcon,
   MoreHorizontalIcon,
   RefreshCwIcon,
   SplitIcon,
@@ -297,10 +298,12 @@ function TransactionSelectionCell({
 function TransactionRowActions({
   entry,
   onViewDetails,
+  onViewRawPayload,
   onReviewStateChange,
 }: {
   entry: LedgerEntry;
   onViewDetails: (entry: LedgerEntry) => void;
+  onViewRawPayload?: (entry: LedgerEntry) => void;
   onReviewStateChange?: (
     entry: LedgerEntry,
     reviewState: TransactionReviewState,
@@ -329,6 +332,16 @@ function TransactionRowActions({
             <EyeIcon />
             View details
           </DropdownMenuItem>
+          {onViewRawPayload !== undefined ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                onViewRawPayload(entry);
+              }}
+            >
+              <FileJsonIcon />
+              Show raw payload
+            </DropdownMenuItem>
+          ) : null}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
@@ -400,6 +413,7 @@ const TransactionTableRow = memo(function TransactionTableRow({
   selected,
   onSelectionChange,
   onViewDetails,
+  onViewRawPayload,
   onReviewStateChange,
 }: {
   entry: LedgerEntry;
@@ -409,6 +423,7 @@ const TransactionTableRow = memo(function TransactionTableRow({
     | ((entryId: string, selected: boolean) => void)
     | undefined;
   onViewDetails?: ((entry: LedgerEntry) => void) | undefined;
+  onViewRawPayload?: ((entry: LedgerEntry) => void) | undefined;
   onReviewStateChange?:
     | ((
         entry: LedgerEntry,
@@ -436,6 +451,7 @@ const TransactionTableRow = memo(function TransactionTableRow({
           <TransactionRowActions
             entry={entry}
             onViewDetails={onViewDetails}
+            {...(onViewRawPayload ? { onViewRawPayload } : {})}
             {...(onReviewStateChange ? { onReviewStateChange } : {})}
           />
         </TableCell>
@@ -450,6 +466,7 @@ export function TransactionTable({
   sortDirection,
   onSortChange,
   onViewDetails,
+  onViewRawPayload,
   onReviewStateChange,
   selectedEntryIds,
   onSelectionChange,
@@ -462,6 +479,7 @@ export function TransactionTable({
   sortDirection?: LedgerTransactionSortDirection;
   onSortChange?: (field: LedgerTransactionSortField) => void;
   onViewDetails?: (entry: LedgerEntry) => void;
+  onViewRawPayload?: (entry: LedgerEntry) => void;
   onReviewStateChange?: (
     entry: LedgerEntry,
     reviewState: TransactionReviewState,
@@ -569,6 +587,7 @@ export function TransactionTable({
             selectionEnabled={selectionEnabled}
             selected={selectedEntryIds?.has(entry.id) ?? false}
             onViewDetails={onViewDetails}
+            onViewRawPayload={onViewRawPayload}
             onReviewStateChange={onReviewStateChange}
             onSelectionChange={onSelectionChange}
           />

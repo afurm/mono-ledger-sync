@@ -50,6 +50,8 @@ jobs:
           fi
 
       - run: npm ci
+      - name: Static check for repository secrets
+        run: npm run scan:secrets
       - run: npm run typecheck
       - run: npm test
       - name: Install browser smoke dependencies
