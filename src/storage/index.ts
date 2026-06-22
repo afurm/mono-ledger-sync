@@ -67,6 +67,8 @@ import type {
   ledgerEntrySortFields,
 } from "../domain/index.js";
 
+export type { RawStatementItemLookup } from "../domain/index.js";
+
 export type {
   AccountBalance,
   BudgetProgress,

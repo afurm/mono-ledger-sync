@@ -1,9 +1,34 @@
 node_modules/
 dist/
 coverage/
+output/
+.playwright-mcp/
 *.log
 .DS_Store
 .env
 .env.*
 !.env.example
 
+# Local ledger data, exports, archives, and credentials.
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.parquet
+*.csv
+*.jsonl
+*.ndjson
+*.backup
+*.dump
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.pem
+*.p12
+*.pfx
+*.key
+*.crt
+*.cer
