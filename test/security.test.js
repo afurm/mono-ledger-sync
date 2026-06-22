@@ -26,23 +26,76 @@ test("session monobank token store keeps tokens per profile", async () => {
   assert.equal(await store.getToken("other"), "other-token");
 });
 
-test("default monobank token store uses session storage on darwin until a safe Keychain bridge exists", async () => {
+test("default monobank token store uses macOS Keychain without putting the token in command arguments", async () => {
   const calls = [];
   const store = createDefaultMonobankTokenStore({
     platform: "darwin",
-    async runCommand(file, args) {
-      calls.push({ file, args });
+    serviceName: "test-ledger-token-store",
+    async runCommand(file, args, options) {
+      calls.push({ file, args, input: options?.input });
+
+      if (args[0] === "find-generic-password") {
+        return { stdout: "stored-token\n", stderr: "" };
+      }
 
       return { stdout: "", stderr: "" };
     },
   });
 
   await store.setToken("demo", "saved-token");
-  assert.equal(await store.getToken("demo"), "saved-token");
+  assert.equal(await store.getToken("demo"), "stored-token");
+  assert.deepEqual(await store.getStatus("demo"), {
+    storage: "secure",
+    persistence: "persistent",
+  });
   await store.deleteToken("demo");
 
-  assert.equal(await store.getToken("demo"), undefined);
-  assert.deepEqual(calls, []);
+  assert.equal(calls.length, 3);
+  assert.equal(
+    calls.every((call) => call.file === "security"),
+    true,
+  );
+  assert.equal(
+    calls.every((call) => !call.args.includes("saved-token")),
+    true,
+  );
+  assert.equal(calls[0].input, "saved-token\n");
+});
+
+test("default monobank token store uses Windows PasswordVault without putting the token in command arguments", async () => {
+  const calls = [];
+  const store = createDefaultMonobankTokenStore({
+    platform: "win32",
+    serviceName: "test-ledger-token-store",
+    async runCommand(file, args, options) {
+      calls.push({ file, args, input: options?.input });
+
+      if (args.at(-1) === "get") {
+        return { stdout: "stored-token", stderr: "" };
+      }
+
+      return { stdout: "", stderr: "" };
+    },
+  });
+
+  await store.setToken("demo", "saved-token");
+  assert.equal(await store.getToken("demo"), "stored-token");
+  assert.deepEqual(await store.getStatus("demo"), {
+    storage: "secure",
+    persistence: "persistent",
+  });
+  await store.deleteToken("demo");
+
+  assert.equal(calls.length, 3);
+  assert.equal(
+    calls.every((call) => call.file === "powershell.exe"),
+    true,
+  );
+  assert.equal(
+    calls.every((call) => !call.args.includes("saved-token")),
+    true,
+  );
+  assert.equal(calls[0].input, "saved-token");
 });
 
 test("default monobank token store passes token through stdin for Linux Secret Service", async () => {

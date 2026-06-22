@@ -1287,7 +1287,7 @@ export function createLocalApiServer(
         await db.migrate();
         const settings = await db.getLocalAppSettings(profile);
 
-        if (settings?.source === "monobank") {
+        if (settings?.source !== undefined) {
           source = settings.source;
         }
 
@@ -1642,6 +1642,9 @@ export function createLocalApiServer(
     if (source === "monobank") {
       return;
     }
+
+    const services = await getServices();
+    await services.db.clearProfileLedgerData(services.profile);
     await updateSource("monobank");
   }
 
@@ -1654,7 +1657,11 @@ export function createLocalApiServer(
   }
 
   async function updateSource(nextSource: LedgerSource): Promise<void> {
-    if (nextSource === "fixture" && configuredSource !== "fixture") {
+    if (
+      nextSource === "fixture" &&
+      configuredSource !== undefined &&
+      configuredSource !== "fixture"
+    ) {
       throw new DomainError(
         "Fixture source is only available when explicitly configured for development.",
         "config_invalid",
@@ -1666,6 +1673,28 @@ export function createLocalApiServer(
     if (source === nextSource) {
       await persistSource(nextSource);
       return;
+    }
+
+    if (nextSource === "fixture" && configuredSource === undefined) {
+      const services = await getServices();
+      const [summary, storedToken] = await Promise.all([
+        services.db.getLedgerSummary(services.profile),
+        monobankTokenStore.getToken(services.profile),
+      ]);
+
+      if (
+        monobankToken !== undefined ||
+        storedToken !== undefined ||
+        summary.accounts > 0 ||
+        summary.ledgerEntries > 0
+      ) {
+        throw new DomainError(
+          "Demo mode is only available for an empty profile without a saved Monobank token.",
+          "config_invalid",
+          "config",
+          { source: nextSource },
+        );
+      }
     }
 
     source = nextSource;

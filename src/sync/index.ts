@@ -11,7 +11,7 @@ import type {
   LedgerWriteStats,
   SyncRun,
 } from "../storage/index.js";
-import { DomainError } from "../domain/index.js";
+import { DomainError, type SyncRunAccountDetail } from "../domain/index.js";
 
 export interface LedgerCategoryMatch {
   categoryId: string;
@@ -636,6 +636,18 @@ export async function syncLedgerWithMonobank(
   const statsState = {
     current: emptySyncStats(),
   };
+  const accountResults: SyncLedgerAccountResult[] = [];
+  const accountDetails: SyncRunAccountDetail[] = [];
+  let currentAttempt:
+    | {
+        accountId: string;
+        from: number;
+        to: number;
+        windowsFetched: number;
+        itemsSeen: number;
+        window?: StatementSyncWindow;
+      }
+    | undefined;
 
   try {
     const clientInfo = await callAdapter(statsState, () =>
@@ -652,8 +664,6 @@ export async function syncLedgerWithMonobank(
       await options.db.upsertJars(clientInfo.jars ?? []);
       await options.db.upsertCurrencyRates(currencyRates);
     }
-
-    const accountResults: SyncLedgerAccountResult[] = [];
 
     for (const account of clientInfo.accounts.filter((item) =>
       shouldFetchAccount(item.id, options.accountIds),
@@ -700,8 +710,16 @@ export async function syncLedgerWithMonobank(
       let accountItemsSeen = 0;
       let accountWindowsFetched = 0;
       let accountCompletedWindowCount = 0;
+      currentAttempt = {
+        accountId: account.id,
+        from: accountFrom,
+        to: accountTo,
+        windowsFetched: 0,
+        itemsSeen: 0,
+      };
 
       for (const window of windows) {
+        currentAttempt.window = window;
         throwIfAborted(options.signal);
 
         const statementWindow = await fetchStatementWindowPages(
@@ -742,6 +760,8 @@ export async function syncLedgerWithMonobank(
 
         accountItemsSeen += statementItems.length;
         accountWindowsFetched += statementWindow.windowsFetched;
+        currentAttempt.itemsSeen = accountItemsSeen;
+        currentAttempt.windowsFetched = accountWindowsFetched;
         accountStats = addWriteStats(accountStats, writeStats);
         statsState.current = statsFromWriteStats(
           statsState.current,
@@ -769,6 +789,15 @@ export async function syncLedgerWithMonobank(
         itemsSeen: accountItemsSeen,
         writeStats: accountStats,
       });
+      accountDetails.push({
+        accountId: account.id,
+        status: "completed",
+        from: accountFrom,
+        to: accountTo,
+        windowsFetched: accountWindowsFetched,
+        itemsSeen: accountItemsSeen,
+      });
+      currentAttempt = undefined;
     }
 
     const itemsSeen = accountResults.reduce((total, account) => {
@@ -780,6 +809,7 @@ export async function syncLedgerWithMonobank(
       finishedAt: nowIso(),
       ...statsState.current,
       itemsSeen,
+      details: { accounts: accountDetails },
     };
 
     if (!options.dryRun) {
@@ -804,15 +834,40 @@ export async function syncLedgerWithMonobank(
     };
   } catch (error) {
     const stats = statsState.current;
+    const errorMessage =
+      error instanceof Error ? error.message : "Sync failed before completion.";
+    if (currentAttempt !== undefined) {
+      accountDetails.push({
+        accountId: currentAttempt.accountId,
+        status: "failed",
+        from: currentAttempt.from,
+        to: currentAttempt.to,
+        windowsFetched: currentAttempt.windowsFetched,
+        itemsSeen: currentAttempt.itemsSeen,
+        ...(currentAttempt.window
+          ? {
+              failedWindowFrom: currentAttempt.window.from,
+              failedWindowTo: currentAttempt.window.to,
+            }
+          : {}),
+        ...(stats.rateLimited > 0
+          ? { nextRetryAt: new Date(Date.now() + 60_000).toISOString() }
+          : {}),
+        errorMessage,
+      });
+    }
     const failedRun: SyncRun = {
       ...run,
-      status: options.signal?.aborted ? "partial" : "failed",
+      status:
+        options.signal?.aborted ||
+        accountResults.length > 0 ||
+        (currentAttempt?.windowsFetched ?? 0) > 0
+          ? "partial"
+          : "failed",
       finishedAt: nowIso(),
-      errorMessage:
-        error instanceof Error
-          ? error.message
-          : "Sync failed before completion.",
+      errorMessage,
       ...stats,
+      details: { accounts: accountDetails },
     };
 
     if (!options.dryRun) {

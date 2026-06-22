@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,9 @@ import {
   createMonobankMockServer,
   withMockMonobankServer,
 } from "./monobank-mock-server.js";
+
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3");
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -534,6 +538,65 @@ test("large fixture snapshot powers pagination, filters, and export/report workf
       assert.equal(
         groceriesRows.length,
         largeStatement.filter((item) => item.mcc === 5411).length,
+      );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+test("10k-row transaction fixture stays paginated within the query guardrail", async () => {
+  await withTempLedger(async ({ databasePath }) => {
+    const profile = "fixture-10k-performance";
+    const db = createSqliteLedgerDb({ filePath: databasePath, profile });
+    const query = createLedgerQueryService({ db, defaultProfile: profile });
+
+    try {
+      await db.migrate();
+      const raw = new Database(databasePath);
+      try {
+        const insert = raw.prepare(`
+          INSERT INTO ledger_entries (
+            profile, id, account_id, time, description, amount,
+            operation_amount, currency_code, category_id, category_name,
+            merchant_name, raw_statement_item_id, hold, balance,
+            created_at, updated_at
+          ) VALUES (
+            @profile, @id, 'fixture-account-10k-performance', @time,
+            @description, -1000, -1000, 980, 'groceries', 'Groceries',
+            'Fixture Merchant', @id, 0, @balance, @createdAt, @createdAt
+          )
+        `);
+        const insertAll = raw.transaction(() => {
+          for (let index = 0; index < 10_000; index += 1) {
+            insert.run({
+              profile,
+              id: `fixture-performance-${String(index).padStart(5, "0")}`,
+              time: 1_775_001_600 + index,
+              description: `Fixture performance transaction ${index}`,
+              balance: 10_000_000 - index * 1_000,
+              createdAt: "2026-04-01T00:00:00.000Z",
+            });
+          }
+        });
+        insertAll();
+      } finally {
+        raw.close();
+      }
+
+      const startedAt = performance.now();
+      const page = await query.listLedgerEntries({
+        limit: 50,
+        sortBy: "time",
+        sortDirection: "desc",
+      });
+      const durationMs = performance.now() - startedAt;
+
+      assert.equal(page.total, 10_000);
+      assert.equal(page.entries.length, 50);
+      assert.ok(
+        durationMs < 1_500,
+        `10k-row first-page query took ${durationMs.toFixed(1)}ms`,
       );
     } finally {
       await db.close();

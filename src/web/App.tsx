@@ -161,6 +161,7 @@ import {
   createCategoryRule,
   loadLocalAppSnapshot,
   runLedgerSync,
+  updateLocalAppSource,
   updateLedgerTransactionAnnotation,
   updateLedgerTransactionSplitPlan,
 } from "./api";
@@ -819,12 +820,16 @@ function RouteContent({
   loading,
   onRouteChange,
   onRefresh,
+  onExploreDemo,
+  demoStarting,
 }: {
   activeRoute: RouteId;
   snapshot: LocalAppSnapshot | undefined;
   loading: boolean;
   onRouteChange: (routeId: RouteId) => void;
   onRefresh: () => Promise<void>;
+  onExploreDemo: () => void;
+  demoStarting: boolean;
 }) {
   if (loading && !snapshot) {
     return <RouteLoadingSkeleton routeId={activeRoute} />;
@@ -840,6 +845,8 @@ function RouteContent({
         <FirstRunEmptyStatePrompt
           view={view}
           onOpenSettings={() => onRouteChange("settings")}
+          onExploreDemo={onExploreDemo}
+          demoStarting={demoStarting}
         />
       </div>
     );
@@ -982,6 +989,29 @@ export default function App() {
     }
   }, [refresh]);
 
+  const exploreDemo = useCallback(async () => {
+    setSyncing(true);
+
+    try {
+      await updateLocalAppSource("fixture");
+      await runLedgerSync();
+      await refresh();
+      toast.success("Demo workspace ready", {
+        description:
+          "Synthetic Monobank fixtures are loaded locally and clearly separated from live data.",
+      });
+    } catch (error) {
+      toast.error("Demo workspace could not start", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "The local fixture ledger could not be loaded.",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }, [refresh]);
+
   useEffect(() => {
     const snapshot = loadState.data;
 
@@ -1009,6 +1039,12 @@ export default function App() {
 
   return (
     <TooltipProvider>
+      <a
+        className="sr-only fixed left-4 top-4 z-50 rounded-md bg-background px-3 py-2 text-sm font-medium shadow focus:not-sr-only"
+        href="#main-content"
+      >
+        Skip to main content
+      </a>
       <SidebarProvider>
         <AppSidebar
           activeRoute={activeRoute}
@@ -1060,7 +1096,14 @@ export default function App() {
             </div>
           </header>
 
-          <main className="flex flex-1 flex-col gap-4 p-4 md:p-6">
+          <main
+            className="flex flex-1 flex-col gap-4 p-4 md:p-6"
+            id="main-content"
+            tabIndex={-1}
+          >
+            <p aria-live="polite" className="sr-only">
+              {route.title} loaded
+            </p>
             {loadState.status === "error" && !snapshot && (
               <Alert variant="destructive">
                 <AlertCircleIcon />
@@ -1097,11 +1140,25 @@ export default function App() {
               </AlertDescription>
             </Alert>
 
+            {snapshot?.config.source === "fixture" ? (
+              <Alert data-testid="demo-data-banner" variant="warning">
+                <DatabaseIcon />
+                <AlertTitle>Demo data</AlertTitle>
+                <AlertDescription>
+                  This profile contains synthetic fixtures, not live Monobank
+                  transactions. Saving a valid token clears these demo rows
+                  before switching to live sync.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             <RouteContent
               activeRoute={activeRoute}
               loading={loading}
               onRouteChange={onRouteChange}
               onRefresh={refresh}
+              onExploreDemo={() => void exploreDemo()}
+              demoStarting={syncing}
               snapshot={snapshot}
             />
           </main>

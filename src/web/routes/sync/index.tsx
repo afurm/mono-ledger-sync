@@ -761,6 +761,7 @@ export function RecentSyncRunsCard({
                 <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
               </div>
               <SyncRunStats run={run} />
+              <SyncRunAccountDetails run={run} />
               {run.errorMessage ? (
                 <p className="text-xs text-muted-foreground">
                   {run.errorMessage}
@@ -771,6 +772,60 @@ export function RecentSyncRunsCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function SyncRunAccountDetails({ run }: { run: SyncRun }) {
+  const accounts = run.details?.accounts ?? [];
+
+  if (accounts.length === 0 || run.status === "running") {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-2" data-testid={`sync-run-details-${run.id}`}>
+      {accounts.map((account) => (
+        <div
+          className="grid gap-1 rounded-md border border-border bg-muted/20 p-2 text-xs"
+          key={`${run.id}:${account.accountId}:${account.status}`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-mono">{account.accountId}</span>
+            <Badge
+              variant={
+                account.status === "completed" ? "default" : "destructive"
+              }
+            >
+              {account.status}
+            </Badge>
+          </div>
+          <span className="text-muted-foreground">
+            {account.windowsFetched} windows · {account.itemsSeen} items ·{" "}
+            {formatDateTime(new Date(account.from * 1000).toISOString())} to{" "}
+            {formatDateTime(new Date(account.to * 1000).toISOString())}
+          </span>
+          {account.failedWindowFrom !== undefined &&
+          account.failedWindowTo !== undefined ? (
+            <span className="text-muted-foreground">
+              Failed window:{" "}
+              {formatDateTime(
+                new Date(account.failedWindowFrom * 1000).toISOString(),
+              )}{" "}
+              to{" "}
+              {formatDateTime(
+                new Date(account.failedWindowTo * 1000).toISOString(),
+              )}
+            </span>
+          ) : null}
+          {account.nextRetryAt ? (
+            <span className="text-muted-foreground">
+              Next retry: {formatDateTime(account.nextRetryAt)}
+            </span>
+          ) : null}
+          {account.errorMessage ? <span>{account.errorMessage}</span> : null}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -824,6 +879,7 @@ function SyncRunsTable({ runs }: { runs: readonly SyncRun[] }) {
                       {run.errorMessage}
                     </span>
                   ) : null}
+                  <SyncRunAccountDetails run={run} />
                 </div>
               </TableCell>
               <TableCell>

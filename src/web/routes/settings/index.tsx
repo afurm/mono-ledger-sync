@@ -244,9 +244,13 @@ function localConfigurationPreview(input: string):
 export function FirstRunEmptyStatePrompt({
   view,
   onOpenSettings,
+  onExploreDemo,
+  demoStarting,
 }: {
   view: FirstRunEmptyStateView;
   onOpenSettings: () => void;
+  onExploreDemo: () => void;
+  demoStarting: boolean;
 }) {
   return (
     <Card data-testid="empty-state-signin-prompt">
@@ -289,7 +293,22 @@ export function FirstRunEmptyStatePrompt({
           >
             {view.openSettingsLabel}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            onClick={onExploreDemo}
+            disabled={demoStarting}
+            data-testid="empty-state-explore-demo"
+          >
+            <DatabaseIcon data-icon="inline-start" />
+            {demoStarting ? "Loading demo" : "Explore demo data"}
+          </Button>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Demo mode uses synthetic fixture data. Saving a real Monobank token
+          removes the demo ledger before the first live sync.
+        </p>
       </CardContent>
     </Card>
   );

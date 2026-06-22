@@ -27,7 +27,9 @@ configuration, and direct filesystem behavior.
   merchant, hold status, local notes, tags, split plans, and source reference.
 - `SyncCursor` records the last successful statement window per profile,
   account, and source.
-- `SyncRun` records lifecycle and summary counters for a sync attempt.
+- `SyncRun` records lifecycle and summary counters for a sync attempt;
+  `SyncRunDetails` and `SyncRunAccountDetail` preserve completed accounts,
+  failed statement windows, retry time, and user-facing failure reasons.
 
 ## Finance workflow types
 

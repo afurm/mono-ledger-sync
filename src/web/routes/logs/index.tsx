@@ -180,10 +180,14 @@ export function LogsRoute({
             ))}
           </div>
           <div className="space-y-2">
-            <Label className="text-xs font-medium text-muted-foreground">
+            <Label
+              className="text-xs font-medium text-muted-foreground"
+              htmlFor="log-search"
+            >
               Search event messages
             </Label>
             <Input
+              id="log-search"
               type="search"
               placeholder="Search by title, details, or reference"
               value={search}

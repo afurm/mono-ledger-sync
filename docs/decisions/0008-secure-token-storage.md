@@ -27,8 +27,9 @@ value.
 
 Provider selection:
 
-- macOS: Keychain Services through the packaged desktop host.
-- Windows: Credential Manager through the packaged desktop host.
+- macOS: Keychain Services through the local Node.js runtime.
+- Windows: Credential Manager/Credential Locker through the local Node.js
+  runtime.
 - Linux: Secret Service when a session keyring is available.
 - CI and tests: no persistent provider by default; live validation continues to
   use explicit environment variables.
@@ -41,15 +42,15 @@ that limitation in the local UI.
 ## Consequences
 
 The TypeScript server uses the secure-storage boundary for tokens saved through
-the local API. Linux can use Secret Service directly because `secret-tool store`
-accepts the secret through stdin. macOS and Windows continue through the
-session-only fallback until a packaged desktop host can bridge Keychain Services
-and Credential Manager without passing secrets through shell arguments or adding
-a native dependency to the core package.
+the local API. Linux uses `secret-tool`; macOS uses the `security` Keychain CLI;
+Windows uses the `Windows.Security.Credentials.PasswordVault` API through a
+non-interactive PowerShell bridge. Token values are passed through stdin and
+never command arguments. If the provider or secure write is unavailable, the
+same boundary reports and uses session-only token handling.
 
-Packaged desktop work should add or replace platform adapters behind the
-secure-storage boundary instead of widening SQLite tables or writing tokens to
-app config files.
+Future packaged desktop work may replace platform adapters behind the
+secure-storage boundary without widening SQLite tables or writing tokens to app
+config files.
 
 Token rotation uses the same boundary as initial token save. Users should save
 the replacement token through the settings UI or `POST /api/app/token`, verify a

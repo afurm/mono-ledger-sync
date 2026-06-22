@@ -423,11 +423,19 @@ function BudgetProgressCard({
     snapshot.accounts[0]?.currencyCode ??
     snapshot.categorySpending[0]?.currencyCode ??
     980;
+  const currencyCodes = [
+    ...new Set([
+      ...snapshot.accounts.map((account) => account.currencyCode),
+      ...snapshot.categorySpending.map((category) => category.currencyCode),
+      defaultCurrencyCode,
+    ]),
+  ];
   const suggestedCategories = snapshot.categorySpending
     .filter((category) => isExpenseCategory(category.categoryId))
     .slice(0, 4);
   const [categoryId, setCategoryId] = useState(defaultCategoryId);
   const [month, setMonth] = useState(currentBudgetMonth);
+  const [currencyCode, setCurrencyCode] = useState(defaultCurrencyCode);
   const [amount, setAmount] = useState("");
   const [rollover, setRollover] = useState(false);
   const [deletingBudgetPeriodId, setDeletingBudgetPeriodId] = useState<
@@ -452,7 +460,7 @@ function BudgetProgressCard({
   const suggestedSpend = snapshot.categorySpending.find(
     (category) =>
       category.categoryId === categoryId &&
-      category.currencyCode === defaultCurrencyCode,
+      category.currencyCode === currencyCode,
   );
   const suggestedLimit = suggestedSpend
     ? Math.ceil((suggestedSpend.amount * 1.1) / 100) * 100
@@ -482,7 +490,7 @@ function BudgetProgressCard({
     try {
       await createMonthlyCategoryBudget({
         categoryId,
-        currencyCode: defaultCurrencyCode,
+        currencyCode,
         month,
         amountLimit: Math.round(parsedAmount * 100),
         rollover,
@@ -736,7 +744,7 @@ function BudgetProgressCard({
               Choose month, currency, category, target limit, and rollover.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[1.2fr_0.8fr_0.8fr_auto]">
+          <div className="grid gap-2 sm:grid-cols-[1.2fr_0.7fr_0.8fr_0.8fr_auto]">
             <Select value={categoryId} onValueChange={setCategoryId}>
               <SelectTrigger aria-label="Budget category">
                 <SelectValue placeholder="Category" />
@@ -746,6 +754,23 @@ function BudgetProgressCard({
                   {categories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(currencyCode)}
+              onValueChange={(value) => setCurrencyCode(Number(value))}
+            >
+              <SelectTrigger aria-label="Budget currency">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {currencyCodes.map((code) => (
+                    <SelectItem key={code} value={String(code)}>
+                      {currencyLabel(code)}
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -788,7 +813,7 @@ function BudgetProgressCard({
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 p-2">
               <span className="text-xs text-muted-foreground">
                 Suggested from history:{" "}
-                {formatMinorAmount(suggestedLimit, defaultCurrencyCode)}
+                {formatMinorAmount(suggestedLimit, currencyCode)}
               </span>
               <Button
                 size="sm"
@@ -815,6 +840,7 @@ function BudgetProgressCard({
                     variant="outline"
                     onClick={() => {
                       setCategoryId(category.categoryId);
+                      setCurrencyCode(category.currencyCode);
                       setAmount(
                         minorAmountToInputValue(
                           Math.ceil((category.amount * 1.1) / 100) * 100,

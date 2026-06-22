@@ -843,6 +843,24 @@ export interface SyncRun {
   itemsUpdated: number;
   itemsSkipped: number;
   rateLimited: number;
+  details?: SyncRunDetails;
+}
+
+export interface SyncRunAccountDetail {
+  accountId: string;
+  status: "completed" | "failed";
+  from: number;
+  to: number;
+  windowsFetched: number;
+  itemsSeen: number;
+  failedWindowFrom?: number;
+  failedWindowTo?: number;
+  nextRetryAt?: string;
+  errorMessage?: string;
+}
+
+export interface SyncRunDetails {
+  accounts: readonly SyncRunAccountDetail[];
 }
 
 export interface LedgerWriteStats {

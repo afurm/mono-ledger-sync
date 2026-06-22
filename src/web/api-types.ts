@@ -869,6 +869,20 @@ export interface SyncRun {
   itemsUpdated: number;
   itemsSkipped: number;
   rateLimited: number;
+  details?: {
+    accounts: readonly {
+      accountId: string;
+      status: "completed" | "failed";
+      from: number;
+      to: number;
+      windowsFetched: number;
+      itemsSeen: number;
+      failedWindowFrom?: number;
+      failedWindowTo?: number;
+      nextRetryAt?: string;
+      errorMessage?: string;
+    }[];
+  };
 }
 
 export interface WebhookEvent {

@@ -46,7 +46,9 @@ const diagnosticsResponseSchema = {
       properties: {
         available: { type: "boolean" },
         platform: { type: "string" },
-        backend: { enum: ["keychain", "secret-service", "session"] },
+        backend: {
+          enum: ["keychain", "credential-manager", "secret-service", "session"],
+        },
         reason: { type: "string" },
       },
     },

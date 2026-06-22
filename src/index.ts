@@ -55,6 +55,8 @@ export {
   type SubscriptionIncreaseAlert,
   type SyncCursor,
   type SyncRun,
+  type SyncRunAccountDetail,
+  type SyncRunDetails,
   type UpcomingRecurringPayment,
 } from "./storage/index.js";
 export {
@@ -117,6 +119,8 @@ export {
   type SubscriptionIncreaseAlert as DomainSubscriptionIncreaseAlert,
   type SyncCursor as DomainSyncCursor,
   type SyncRun as DomainSyncRun,
+  type SyncRunAccountDetail as DomainSyncRunAccountDetail,
+  type SyncRunDetails as DomainSyncRunDetails,
   type UpcomingRecurringPayment as DomainUpcomingRecurringPayment,
 } from "./domain/index.js";
 export {

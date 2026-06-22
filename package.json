@@ -56,6 +56,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "examples/sample-workflows",
     "README.md",
     "LICENSE",
