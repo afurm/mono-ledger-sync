@@ -809,6 +809,16 @@ export interface LedgerEntryPage {
   offset: number;
 }
 
+export type LedgerEntryRawPayloadView =
+  | {
+      available: true;
+      redactedPayload: Record<string, unknown>;
+    }
+  | {
+      available: false;
+      reason: "pruned" | "no_raw_id";
+    };
+
 export type LedgerTransactionSortField =
   | "time"
   | "merchant"
