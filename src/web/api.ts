@@ -67,6 +67,7 @@ import type {
   LedgerEntryCategoryRestoreEntry,
   MonthlyCategoryBudgetInput,
   LedgerEntryPage,
+  LedgerEntryRawPayloadView,
   LedgerTransactionSortField,
   LedgerTransactionSortDirection,
   LedgerTransactionFilters,
@@ -147,6 +148,7 @@ export type {
   LedgerEntryCategoryRestoreEntry,
   MonthlyCategoryBudgetInput,
   LedgerEntryPage,
+  LedgerEntryRawPayloadView,
   LedgerTransactionSortField,
   LedgerTransactionSortDirection,
   LedgerTransactionFilters,
@@ -877,6 +879,17 @@ export async function loadLedgerTransactions(
   return requestJson<LedgerEntryPage>(
     `/api/ledger/transactions${queryString ? `?${queryString}` : ""}`,
   );
+}
+
+export async function loadLedgerEntryRawPayload(
+  entryId: string,
+): Promise<LedgerEntryRawPayloadView> {
+  const encoded = encodeURIComponent(entryId);
+  const response = await requestJson<LedgerEntryRawPayloadView>(
+    `/api/ledger/entries/${encoded}/raw`,
+  );
+
+  return response;
 }
 
 export async function updateLedgerTransactionAnnotation(

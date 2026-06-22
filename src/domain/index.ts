@@ -260,6 +260,16 @@ export interface StatementWindow {
   to: number;
 }
 
+export type RawStatementItemLookup =
+  | {
+      available: true;
+      redactedPayload: MonobankStatementItem;
+    }
+  | {
+      available: false;
+      reason: "entry_not_found" | "pruned" | "no_raw_id";
+    };
+
 export interface MonobankStatementItemWebhookEvent {
   type: "StatementItem";
   data: {
