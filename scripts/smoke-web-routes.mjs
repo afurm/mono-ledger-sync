@@ -171,6 +171,13 @@ async function main() {
       console.log(`route smoke ok: ${routeId}`);
     }
 
+    // Drill into the Settings route and confirm the F5 'Copy backup
+    // directory' button renders next to the Recent backups section.
+    await page.goto(`${baseUrl}/#settings`, { waitUntil: "networkidle" });
+    await page.waitForSelector("main");
+    await page.locator('[data-testid="backup-copy-directory"]').waitFor();
+    console.log("route smoke ok: settings/backup-copy-directory");
+
     // Drill into the Exports route and confirm the G3 extended preview
     // (date range, included columns, excluded sensitive fields) renders
     // for every supported format.
@@ -235,7 +242,6 @@ async function main() {
     // summary block (not the empty-state) should be visible.
     await page.locator('[data-testid="sync-activity-summary"]').waitFor();
     console.log("route smoke ok: sync/activity-tab");
-
     // Drill into the Sync route Storage tab and confirm the F3 surface
     // (modified time, copy-path buttons, integrity / migrations / row
     // counts) renders without console errors.

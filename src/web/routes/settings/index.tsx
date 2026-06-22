@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
+  CopyIcon,
   DatabaseIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -68,6 +69,7 @@ import type {
   LocalAppSnapshot,
 } from "../../api-types";
 import { currencyLabel, formatDateTime } from "../../format";
+import { useCopyToClipboard } from "../../clipboard";
 import type { FirstRunEmptyStateView } from "../../empty-state";
 import { buildFirstRunSignInCardView } from "../../signin-card";
 import { tokenStateLabel } from "../../status";
@@ -590,6 +592,7 @@ export function SettingsRoute({
   const [providerSpikeMessage, setProviderSpikeMessage] = useState<
     string | undefined
   >();
+  const backupDirectoryCopy = useCopyToClipboard();
 
   useEffect(() => {
     if (!snapshot) {
@@ -1231,9 +1234,31 @@ export function SettingsRoute({
             </div>
           </div>
           <div className="grid gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              Recent backups
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Recent backups
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={
+                  backupDirectoryCopy.state.status === "copied" ||
+                  !snapshot.storage.backupDirectory
+                }
+                onClick={() => {
+                  void backupDirectoryCopy.copy(
+                    snapshot.storage.backupDirectory,
+                  );
+                }}
+                data-testid="backup-copy-directory"
+              >
+                <CopyIcon data-icon="inline-start" />
+                {backupDirectoryCopy.state.status === "copied"
+                  ? "Copied backup directory"
+                  : "Copy backup directory"}
+              </Button>
+            </div>
             {snapshot.storage.backups.length === 0 ? (
               <p className="rounded-md border border-border p-3 text-muted-foreground">
                 No backups have been created for this profile.
