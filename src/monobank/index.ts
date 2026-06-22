@@ -17,6 +17,19 @@ import type {
   StatementWindow as DomainStatementWindow,
 } from "../domain/index.js";
 
+export {
+  createMonobankProviderSignedHeaders,
+  createMonobankProviderSignaturePayload,
+  getMonobankProviderPublicKeyHex,
+  signMonobankProviderRequest,
+  verifyMonobankProviderSignature,
+  type MonobankProviderSignedHeaders,
+  type MonobankProviderSignedHeadersInput,
+  type MonobankProviderSignaturePayloadInput,
+  type MonobankProviderSignatureVerificationInput,
+  type MonobankProviderSigningInput,
+} from "./provider.js";
+
 export type MonobankAccount = DomainMonobankAccount;
 
 export type MonobankJar = DomainMonobankJar;
@@ -78,7 +91,7 @@ export function createMonobankRateLimitState(): MonobankRateLimitState {
 }
 
 export interface MonobankHttpAdapterOptions {
-  token: string;
+  token?: string;
   baseUrl?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
@@ -215,15 +228,22 @@ function assertNumber(value: unknown, path: string): asserts value is number {
   }
 }
 
-function assertBoolean(value: unknown, path: string): asserts value is boolean {
-  if (typeof value !== "boolean") {
-    throw new MonobankValidationError(path, "a boolean");
+// Optional fields can be absent (undefined) or present-but-empty ("") —
+// Monobank uses "" as the sentinel for "no webhook set / no permission" on
+// /personal/client-info rather than omitting the key. The TS type `?: string`
+// matches this contract; rejecting "" here would incorrectly fail the live
+// token probe and prevent tokens from being saved.
+function assertOptionalString(value: unknown, path: string): void {
+  if (value !== undefined && value !== null) {
+    if (typeof value !== "string") {
+      throw new MonobankValidationError(path, "a string");
+    }
   }
 }
 
-function assertOptionalString(value: unknown, path: string): void {
-  if (value !== undefined) {
-    assertString(value, path);
+function assertBoolean(value: unknown, path: string): asserts value is boolean {
+  if (typeof value !== "boolean") {
+    throw new MonobankValidationError(path, "a boolean");
   }
 }
 
@@ -610,7 +630,7 @@ function rateLimitKey(endpoint: string): "personal" | "bank" {
 export function createMonobankHttpAdapter(
   options: MonobankHttpAdapterOptions,
 ): MonobankAdapter {
-  const token = options.token.trim();
+  const token = options.token?.trim() ?? "";
   const baseUrl = normalizeMonobankBaseUrl(options.baseUrl);
   const fetchImpl = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
@@ -624,10 +644,6 @@ export function createMonobankHttpAdapter(
   // we re-read the latest allowed-at each time rather than caching.
   // (The state is the single source of truth; this closure just
   // dispatches reads to it.)
-
-  if (!token) {
-    throw new MonobankValidationError("token", "a non-empty string");
-  }
 
   async function waitForRateLimit(endpoint: string): Promise<void> {
     const key = rateLimitKey(endpoint);
@@ -647,6 +663,12 @@ export function createMonobankHttpAdapter(
     endpoint: string,
     init: RequestInit = {},
   ): Promise<Response> {
+    const needsToken = rateLimitKey(endpoint) === "personal";
+
+    if (needsToken && !token) {
+      throw new MonobankValidationError("token", "a non-empty string");
+    }
+
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       await waitForRateLimit(endpoint);
 
@@ -660,7 +682,7 @@ export function createMonobankHttpAdapter(
           ...init,
           signal: init.signal ?? controller.signal,
           headers: {
-            "X-Token": token,
+            ...(needsToken ? { "X-Token": token } : {}),
             accept: "application/json",
             "user-agent": userAgent,
             ...init.headers,

@@ -8,16 +8,16 @@ import {
   version,
 } from "../dist/index.js";
 
-test("creates a fixture-backed local sync plan by default", () => {
+test("creates a Monobank-backed local sync plan by default", () => {
   assert.deepEqual(createSyncPlan(), {
     packageName,
     version,
     profile: "default",
-    source: "fixture",
+    source: "monobank",
     localOnly: true,
     nextSteps: [
       "start the local web app",
-      "connect fixture or Monobank data source",
+      "save a Monobank personal API token",
       "sync statements into a local SQLite ledger",
       "review and export local financial data",
     ],

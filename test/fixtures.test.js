@@ -723,7 +723,7 @@ test("fixture adapter serves offline client, currency, and statement data", asyn
   assert.deepEqual(missingAccount, []);
 });
 
-test("http adapter calls personal Monobank endpoints with X-Token", async () => {
+test("http adapter sends X-Token only to personal Monobank endpoints", async () => {
   const clientInfo = await readFixture("client-info.json");
   const currencyRates = await readFixture("currency-rates.json");
   const statement = await readFixture("statements/uah-main-2026-04.json");
@@ -786,7 +786,7 @@ test("http adapter calls personal Monobank endpoints with X-Token", async () => 
 
   assert.deepEqual(
     requests.map((request) => request.token),
-    ["fixture-token", "fixture-token", "fixture-token", "fixture-token"],
+    ["fixture-token", undefined, "fixture-token", "fixture-token"],
   );
   assert.equal(requests[3].method, "POST");
   assert.deepEqual(rateLimitSleeps, [60_000, 60_000]);
@@ -865,7 +865,7 @@ test("http adapter integration works against a local mock Monobank server", asyn
     assert.equal(recorded.length, 5);
     assert.deepEqual(
       recorded.map((request) => request.token),
-      [token, token, token, token, token],
+      [token, undefined, token, token, token],
     );
     assert.equal(recorded[4].endpoint, "POST /personal/webhook");
     assert.equal(recorded[4].contentType, "application/json");

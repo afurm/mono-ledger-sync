@@ -69,11 +69,25 @@ export interface DomainErrorDescriptor {
 export interface LocalAppSettings {
   profile: string;
   source?: "fixture" | "monobank";
+  syncSchedule?: "manual" | "hourly" | "daily" | "app_start";
+  excludedAccountIds?: readonly string[];
+  exportDirectory?: string;
+  budgetWarningThreshold?: number;
+  rawStatementRetentionDays?: number;
+  lastBackupAt?: string;
+  lastCompactAt?: string;
   updatedAt: string;
 }
 
 export interface LocalAppSettingsUpdate {
   source?: "fixture" | "monobank";
+  syncSchedule?: "manual" | "hourly" | "daily" | "app_start";
+  excludedAccountIds?: readonly string[];
+  exportDirectory?: string | null;
+  budgetWarningThreshold?: number;
+  rawStatementRetentionDays?: number;
+  lastBackupAt?: string;
+  lastCompactAt?: string;
 }
 
 export function domainErrorCategoryForCode(
@@ -111,6 +125,7 @@ export const syncRunStatuses = [
   "success",
   "partial",
   "failed",
+  "interrupted",
 ] as const;
 
 export type SyncRunStatus = (typeof syncRunStatuses)[number];
@@ -245,6 +260,16 @@ export interface StatementWindow {
   to: number;
 }
 
+export type RawStatementItemLookup =
+  | {
+      available: true;
+      redactedPayload: MonobankStatementItem;
+    }
+  | {
+      available: false;
+      reason: "entry_not_found" | "pruned" | "no_raw_id";
+    };
+
 export interface MonobankStatementItemWebhookEvent {
   type: "StatementItem";
   data: {
@@ -288,6 +313,7 @@ export interface LedgerAccount {
   balance: number;
   creditLimit: number;
   maskedPan?: readonly string[];
+  includedInReports?: boolean;
   updatedAt: string;
 }
 
@@ -563,11 +589,13 @@ export interface BudgetProgress {
   currencyCode: number;
   periodStart: string;
   periodEnd: string;
+  periodStatus?: "open" | "closed";
   amountLimit: number;
   actualAmount: number;
   remainingAmount: number;
   progressPercentage: number;
   status: "on_track" | "near_limit" | "overspent";
+  rollover?: boolean;
 }
 
 export interface NetWorthTrendPoint {
@@ -680,6 +708,7 @@ export interface SavingsGoalProgress {
 }
 
 export type LedgerEntryCategorySource = "system_rule" | "user_rule" | "manual";
+export type LedgerEntryReviewState = "needs_review" | "reviewed" | "ignored";
 
 export interface LedgerEntry {
   id: string;
@@ -703,6 +732,9 @@ export interface LedgerEntry {
     category: string;
     amount: number;
   }[];
+  reviewState?: LedgerEntryReviewState;
+  reviewedAt?: string;
+  reviewedSource?: string;
   rawStatementItemId: string;
   createdAt?: string;
   updatedAt?: string;
@@ -717,6 +749,8 @@ export interface LedgerEntryBulkEditUpdate {
   categoryId?: string;
   merchantName?: string;
   tags?: readonly string[];
+  reviewState?: LedgerEntryReviewState;
+  reviewedSource?: string;
 }
 
 export interface LedgerEntryCategoryRestoreEntry {
@@ -746,10 +780,14 @@ export interface Tag {
 export interface LedgerEntryQuery {
   profile: string;
   accountId?: string;
+  excludedAccountIds?: readonly string[];
+  includeExcludedAccounts?: boolean;
   categoryId?: string;
   merchantName?: string;
   tag?: string;
   status?: "hold" | "posted";
+  reviewState?: LedgerEntryReviewState;
+  currencyCode?: number;
   amountMin?: number;
   amountMax?: number;
   search?: string;
@@ -797,6 +835,7 @@ export interface SyncRun {
   status: SyncRunStatus;
   startedAt: string;
   finishedAt?: string;
+  errorMessage?: string;
   apiCalls: number;
   windowsFetched: number;
   itemsSeen: number;
@@ -823,6 +862,21 @@ export interface StoredWebhookEvent {
   processedAt?: string;
 }
 
+export interface LocalExportRecord {
+  id: string;
+  profile: string;
+  format: string;
+  preset?: string;
+  filters: Record<string, unknown>;
+  rowCount: number;
+  destination: "browser_download" | "local_folder" | "database_copy";
+  filePath?: string;
+  status: "success" | "failed";
+  createdAt: string;
+  completedAt?: string;
+  errorMessage?: string;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -847,6 +901,17 @@ export interface CategoryRule {
   isEnabled?: boolean;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface CategoryRuleInput {
+  categoryId: string;
+  name?: string;
+  merchantContains?: string;
+  descriptionContains?: string;
+  mcc?: number;
+  amountDirection?: "income" | "expense" | "any";
+  priority?: number;
+  isEnabled?: boolean;
 }
 
 export interface Merchant {

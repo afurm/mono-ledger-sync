@@ -94,7 +94,7 @@ export const routes = [
     label: "Exports",
     title: "Local export flows",
     description:
-      "CSV, JSON, JSONL, and SQLite snapshots created from local ledger data.",
+      "CSV, JSON, JSONL, journal CSV, Parquet, and redacted SQLite snapshots.",
     icon: DownloadIcon,
   },
   {

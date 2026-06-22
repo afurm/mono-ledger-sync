@@ -28,12 +28,14 @@ import type {
   LedgerEntryPage,
   Category,
   CategoryRule,
+  CategoryRuleInput,
   LedgerEntryQuery,
   LedgerEntrySplitPlanUpdate,
   LedgerSummary,
   LedgerWriteStats,
   LedgerCategorySpending,
   LedgerJar,
+  LocalExportRecord,
   ReportCurrencyConversionRate,
   SavingsGoalProgress,
   LocalAppSettings,
@@ -65,6 +67,8 @@ import type {
   ledgerEntrySortFields,
 } from "../domain/index.js";
 
+export type { RawStatementItemLookup } from "../domain/index.js";
+
 export type {
   AccountBalance,
   BudgetProgress,
@@ -75,6 +79,7 @@ export type {
   SavingsGoalProgress,
   LedgerEntry,
   LedgerEntryCategorySource,
+  LedgerEntryReviewState,
   LedgerEntryAnnotationUpdate,
   LedgerEntryBulkEditUpdate,
   LedgerEntryCategoryRestoreEntry,
@@ -99,10 +104,12 @@ export type {
   MerchantTrendReportPoint,
   Category,
   CategoryRule,
+  CategoryRuleInput,
   Budget,
   BudgetPeriod,
   LedgerEntryQuery,
   LedgerSummary,
+  LocalExportRecord,
   LocalAppSettings,
   LocalAppSettingsUpdate,
   Merchant,
@@ -170,6 +177,7 @@ export {
   type LedgerSyncStateQueryService,
   type LedgerTransactionQueryService,
   type LedgerWriteService,
+  type ManualRecurringItemInput,
   type MonthlyCategoryBudgetInput,
 } from "./services.js";
 
@@ -212,12 +220,22 @@ export interface LedgerDb {
     update: LocalAppSettingsUpdate,
   ): Promise<LocalAppSettings>;
   recordSyncRun(run: SyncRun): Promise<void>;
+  interruptStaleSyncRuns(
+    profile: string,
+    staleBefore: string,
+    interruptedAt: string,
+    reason: string,
+  ): Promise<number>;
   listCategories(profile?: string): Promise<readonly Category[]>;
   listCategorySpending(
     profile?: string,
   ): Promise<readonly LedgerCategorySpending[]>;
   listJars(profile?: string): Promise<readonly LedgerJar[]>;
   listCategoryRules(profile?: string): Promise<readonly CategoryRule[]>;
+  upsertCategoryRule(
+    profile: string,
+    rule: CategoryRule,
+  ): Promise<CategoryRule>;
   listMerchants(profile?: string): Promise<readonly Merchant[]>;
   listMerchantCleanupRules(
     profile?: string,

@@ -6,7 +6,7 @@
 
 Local-first TypeScript app for syncing Monobank transactions into a private personal finance ledger.
 
-`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data should stay on the user's machine, fixture-backed workflows should work without network access, and future live sync code should preserve raw Monobank payloads separately from normalized ledger entries.
+`mono-ledger-sync` is an early TypeScript app/package for building a local-first Monobank ledger workflow. The product direction is a local web app backed by a local API server and SQLite. The project is designed for people who want to own their financial data locally: tokens and transaction data stay on the user's machine, production sync talks to Monobank directly, and raw Monobank payloads are preserved separately from normalized ledger entries.
 
 ## Status
 
@@ -22,7 +22,9 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 ## Release notes
 
-- [v0.2.0 — Live by default](docs/release/0.2.0.md): first-run greeting leads with Sign in with Monobank, every route shows a sign-in prompt instead of fixture demo data when no token is saved, Re-check Monobank connection button, live bank/currency smoke test, and a new privacy test suite.
+- [v0.4.0](docs/release/0.4.0.md): adds Parquet ledger exports, redacted SQLite snapshots, DuckDB-friendly BI views, local BI/accountant handoff docs, raw payload retention controls, and a mock-only Monobank provider/FOP spike behind an experimental Settings flag. Provider mode does not graduate; the personal-token local app remains the default path. Test count 239 pass / 0 fail / 4 skipped.
+- [v0.3.0](docs/release/0.3.0.md): modularization of the local API server (`src/server/index.ts` 4419 → 1765 lines, 11 route modules under `src/server/routes/`) and the Vite web app (`src/web/App.tsx` 11154 → 1111 lines, 10 per-route components under `src/web/routes/`, new `src/web/api-types.ts`). Adds manual recurring items, on-the-fly category-rule creation, ledger review states (migration `0022`), local cockpit workflow settings (migration `0023`), the `local_exports` audit log (migration `0024`), richer ledger export filters, an `includedInReports` account toggle, and transfer-aware cashflow and savings-rate reports. Release workflow now runs `npm run smoke:web` (Playwright) as a gate. Test count 232 pass / 0 fail / 4 skipped.
+- [v0.2.0](docs/release/0.2.0.md): live-by-default sign-in flow, bulk edit, category version history, diagnostics endpoint, reporting suite, recurring-payments engine, and a long-running privacy/security hardening pass. 228 commits since `v0.1.1`; test count 226 pass / 0 fail / 4 skipped.
 - v0.1.1: GitHub Release `v0.1.1`; `mono-ledger-sync@0.1.1` on npm. Public discoverability metadata follow-up.
 - v0.1.0: Initial public package release. `mono-ledger-sync@0.1.0`; initial commit `5b1b6c2`.
 
@@ -30,7 +32,7 @@ The Monobank personal API is for the user's own data on their own machine. Do no
 
 - Sync personal Monobank transactions into a durable local ledger.
 - Keep banking tokens and personal finance data off hosted project servers.
-- Support fixture-first development for tests, demos, and offline workflows.
+- Support explicit fixture-backed development for tests and offline contributor workflows.
 - Provide a small TypeScript API, local server boundary, and browser UI that can grow into SQLite storage, exports, reports, and a Vite web app.
 
 ## Install
@@ -46,14 +48,18 @@ npm run dev
 ```
 
 `npm run dev` builds the package and starts the local Fastify server at
-`http://127.0.0.1:3000`. Fixture mode is the default, so the browser UI works
-without network access or banking credentials.
+`http://127.0.0.1:3000`. The browser UI starts in Monobank API mode. Save a
+personal API token in Settings, then run sync to fetch accounts, jars,
+statements, and currency rates into the local SQLite ledger.
 
 Export presets are available through the local API and browser UI for
 `accountant-handoff`, `monthly-personal-finance`, `bookkeeping`,
-`budget-analysis`, and `raw-transaction-archive`. Export file contents are
-deterministic for the same database state and filters so users can diff or
-version their own local data.
+`budget-analysis`, and `raw-transaction-archive`. CSV, JSON, JSONL, journal
+CSV, Parquet, and redacted SQLite snapshot exports are deterministic for the
+same database state and filters so users can diff or version their own local
+data. See [DuckDB workflow](docs/integrations/duckdb.md),
+[local BI](docs/integrations/local-bi.md), and
+[accountant handoff](docs/accountant-handoff.md).
 
 The in-app sign-in flow is the supported way to start syncing a real Monobank account: open `http://127.0.0.1:3000`, paste a personal API token from `https://api.monobank.ua/`, and the local server validates it before saving. `MONOBANK_TOKEN` is for the opt-in live smoke test only — see **Live by default** above.
 
@@ -64,7 +70,7 @@ import { createSyncPlan } from "mono-ledger-sync";
 
 const plan = createSyncPlan({
   profile: "default",
-  source: "fixture",
+  source: "monobank",
 });
 ```
 
@@ -72,8 +78,8 @@ const plan = createSyncPlan({
 
 - No hosted token relay.
 - No default cloud storage.
-- No cloud account is required for fixture-backed setup, local browsing, local backups, or local exports.
-- Personal API tokens should be stored in OS secure storage once live sync is implemented.
+- No hosted account is required for local browsing, local backups, or local exports.
+- Personal API tokens are stored through OS secure storage when available, with a session-only fallback when no secure provider is available.
 - Use personal Monobank API tokens only for your own data on your own machine; do not use this project as a hosted or shared service for other people's banking data.
 - Webhook events should be treated as hints and reconciled through statement pulls.
 - Logs and errors must redact tokens and sensitive financial identifiers.
@@ -82,6 +88,9 @@ const plan = createSyncPlan({
   use OS credential stores for packaged builds, keep SQLite out of token
   storage, and fall back to session-only handling when no secure provider is
   available.
+- Raw statement payload retention defaults to 90 days and can be set to `0` to
+  keep raw payloads indefinitely. See
+  [privacy and retention review](docs/privacy-retention-review.md).
 
 ## Webhook endpoint safety
 
@@ -136,9 +145,9 @@ The app exposes the browser UI at `/`, health and configuration endpoints,
 ledger summary/account/transaction endpoints, sync run endpoints, webhook
 hint ingestion, and CSV/JSON/JSONL exports. The default product path is
 live — the local server talks to `https://api.monobank.ua` once a personal
-API token is saved in the in-app sign-in flow. Sanitized fixture endpoints
-remain available for development; pass `MONO_LEDGER_SYNC_SOURCE=fixture npm
-run dev` to skip live calls.
+API token is saved in the in-app sign-in flow. Sanitized fixtures remain
+available only through explicit development mode; pass
+`MONO_LEDGER_SYNC_SOURCE=fixture npm run dev` to skip live calls.
 Use `MONO_LEDGER_SYNC_PORT=3001 npm run dev` if port 3000 is already in use.
 The local API binds to `127.0.0.1` by default. Binding to a non-loopback host
 requires `MONO_LEDGER_SYNC_ACCESS_PASSCODE`; the server protects the browser UI
