@@ -56,12 +56,23 @@ import type {
 } from "./index.js";
 
 import type { LedgerDbTransaction } from "./index.js";
+import { redactSensitiveText } from "../privacy/index.js";
+import type {
+  MonobankStatementItem,
+  RawStatementItemLookup,
+} from "../domain/index.js";
 import type { SqliteLedgerDb } from "../sqlite/index.js";
+
+export type { MonobankStatementItem, RawStatementItemLookup };
 
 export interface LedgerTransactionQueryService {
   listLedgerEntries(
     query: Omit<LedgerEntryQuery, "profile"> & { profile?: string },
   ): Promise<LedgerEntryPage>;
+  getRawStatementItemForEntry(
+    entryId: string,
+    profile?: string,
+  ): Promise<RawStatementItemLookup>;
 }
 
 export interface LedgerBalanceQueryService {
@@ -3162,6 +3173,21 @@ export function createLedgerQueryService({
         profile: resolvedProfile,
       });
     },
+    async getRawStatementItemForEntry(entryId, profile) {
+      const resolvedProfile = coerceProfile(profile, defaultProfile);
+      const lookup = await db.getRawStatementItemForEntry(
+        resolvedProfile,
+        entryId,
+      );
+
+      if (!lookup.available) {
+        return lookup;
+      }
+
+      const redactedJson = redactSensitiveText(lookup.payload.payload_json);
+      const redactedPayload = JSON.parse(redactedJson) as MonobankStatementItem;
+      return { available: true, redactedPayload };
+    },
     listSyncRuns(profile, limit) {
       return db.listSyncRuns(coerceProfile(profile, defaultProfile), limit);
     },
@@ -3182,6 +3208,7 @@ export function createLedgerQueryServices(
   return {
     transactions: {
       listLedgerEntries: query.listLedgerEntries,
+      getRawStatementItemForEntry: query.getRawStatementItemForEntry,
     },
     balances: {
       getLedgerSummary: query.getLedgerSummary,
