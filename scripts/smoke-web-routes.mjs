@@ -177,7 +177,10 @@ async function main() {
     await page.goto(`${baseUrl}/#accounts`, { waitUntil: "networkidle" });
     await page.waitForSelector("main");
     // The "Details" button is the trigger; click the first one.
-    await page.getByRole("button", { name: /^details$/i }).first().click();
+    await page
+      .getByRole("button", { name: /^details$/i })
+      .first()
+      .click();
     await page.locator('[data-testid="account-sync-health"]').waitFor();
     await page
       .locator('[data-testid="account-sync-health-last-successful-window"]')
