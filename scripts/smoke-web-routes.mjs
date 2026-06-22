@@ -178,10 +178,7 @@ async function main() {
     await page.waitForSelector("main");
     await page.locator('[data-testid="jar-card"]').first().waitFor();
     await page.locator('[data-testid="jar-remaining"]').first().waitFor();
-    await page
-      .locator('[data-testid="jar-latest-movement"]')
-      .first()
-      .waitFor();
+    await page.locator('[data-testid="jar-latest-movement"]').first().waitFor();
     await page
       .locator('[data-testid="jar-projected-completion"]')
       .first()

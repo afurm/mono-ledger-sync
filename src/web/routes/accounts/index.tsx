@@ -481,11 +481,7 @@ function JarCard({
         />
         <AccountDetailRow
           label="Remaining"
-          value={
-            hasGoal
-              ? formatMinorAmount(remaining, jar.currencyCode)
-              : "—"
-          }
+          value={hasGoal ? formatMinorAmount(remaining, jar.currencyCode) : "—"}
           testId="jar-remaining"
         />
         <div className="h-2 overflow-hidden rounded-full bg-muted">
