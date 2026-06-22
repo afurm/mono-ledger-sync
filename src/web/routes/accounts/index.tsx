@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AlertCircleIcon, ChevronRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -32,6 +32,7 @@ import type {
   LocalAppSnapshot,
 } from "../../api-types";
 import { currencyLabel, formatDateTime, formatMinorAmount } from "../../format";
+import type { RouteId } from "../../navigation";
 import { statusVariant } from "../../status";
 
 type TransactionFilterFormState = {
@@ -197,11 +198,24 @@ function BalanceSparkline({
     </div>
   );
 }
-function AccountDetailRow({ label, value }: { label: string; value: string }) {
+function AccountDetailRow({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value: ReactNode;
+  testId?: string;
+}) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate font-medium">{value}</span>
+      <span
+        className="min-w-0 truncate text-right font-medium"
+        {...(testId !== undefined ? { "data-testid": testId } : {})}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -398,14 +412,57 @@ function AccountCard({
   );
 }
 
-function JarCard({ jar }: { jar: LedgerJar }) {
+function JarCard({
+  jar,
+  onOpenRecurring,
+}: {
+  jar: LedgerJar;
+  onOpenRecurring: () => void;
+}) {
   const progress =
     jar.goal > 0
       ? Math.min(100, Math.max(0, (jar.balance / jar.goal) * 100))
       : 0;
+  const remaining = Math.max(0, jar.goal - jar.balance);
+  const hasGoal = jar.goal > 0;
+
+  const [latestMovement, setLatestMovement] = useState<
+    LedgerEntry | undefined
+  >();
+  const [latestMovementLoaded, setLatestMovementLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLatestMovementLoaded(false);
+    void (async () => {
+      try {
+        const page = await loadLedgerTransactions({
+          accountId: jar.id,
+          limit: 1,
+          sortBy: "time",
+          sortDirection: "desc",
+        });
+        if (cancelled) {
+          return;
+        }
+        setLatestMovement(page.entries[0]);
+      } catch {
+        if (!cancelled) {
+          setLatestMovement(undefined);
+        }
+      } finally {
+        if (!cancelled) {
+          setLatestMovementLoaded(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jar.id]);
 
   return (
-    <Card size="sm">
+    <Card size="sm" data-testid="jar-card">
       <CardHeader>
         <CardDescription>{jar.id}</CardDescription>
         <CardTitle>{jar.title}</CardTitle>
@@ -420,7 +477,12 @@ function JarCard({ jar }: { jar: LedgerJar }) {
         />
         <AccountDetailRow
           label="Goal"
-          value={formatMinorAmount(jar.goal, jar.currencyCode)}
+          value={hasGoal ? formatMinorAmount(jar.goal, jar.currencyCode) : "—"}
+        />
+        <AccountDetailRow
+          label="Remaining"
+          value={hasGoal ? formatMinorAmount(remaining, jar.currencyCode) : "—"}
+          testId="jar-remaining"
         />
         <div className="h-2 overflow-hidden rounded-full bg-muted">
           <div
@@ -428,6 +490,38 @@ function JarCard({ jar }: { jar: LedgerJar }) {
             style={{ width: `${progress}%` }}
           />
         </div>
+        <AccountDetailRow
+          label="Latest movement"
+          value={
+            !latestMovementLoaded
+              ? "Loading..."
+              : latestMovement !== undefined
+                ? `${formatMinorAmount(
+                    latestMovement.amount,
+                    latestMovement.currencyCode,
+                  )} · ${formatDateTime(latestMovement.time * 1000)}`
+                : "No transactions yet"
+          }
+          testId="jar-latest-movement"
+        />
+        <AccountDetailRow
+          label="Projected completion"
+          value={
+            <span className="text-muted-foreground">
+              Set up a recurring contribution to see projected completion.{" "}
+              <Button
+                type="button"
+                size="sm"
+                variant="link"
+                className="h-auto p-0"
+                onClick={onOpenRecurring}
+              >
+                Open Recurring
+              </Button>
+            </span>
+          }
+          testId="jar-projected-completion"
+        />
         <p className="text-xs text-muted-foreground">{jar.description}</p>
       </CardContent>
       <CardFooter className="text-xs text-muted-foreground">
@@ -439,8 +533,10 @@ function JarCard({ jar }: { jar: LedgerJar }) {
 
 export function AccountsRoute({
   snapshot,
+  onRouteChange,
 }: {
   snapshot: LocalAppSnapshot | undefined;
+  onRouteChange: (routeId: RouteId) => void;
 }) {
   if (!snapshot) {
     return (
@@ -534,7 +630,11 @@ export function AccountsRoute({
       {snapshot.jars.length === 0 ? null : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {snapshot.jars.map((jar) => (
-            <JarCard jar={jar} key={jar.id} />
+            <JarCard
+              jar={jar}
+              key={jar.id}
+              onOpenRecurring={() => onRouteChange("recurring")}
+            />
           ))}
         </div>
       )}
