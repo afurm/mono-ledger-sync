@@ -30,6 +30,8 @@
     "src/sync/**/*.ts",
     "src/web/api.ts",
     "src/web/empty-state.ts",
+    "src/web/format.ts",
+    "src/web/i18n.ts",
     "src/web/review.ts",
     "src/web/signin-card.ts",
     "src/web/sync-summary.ts",

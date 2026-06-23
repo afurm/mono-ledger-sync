@@ -1,4 +1,5 @@
 import type { LocalActivityEventType, LocalAppSnapshot } from "./api-types";
+import { messages } from "./i18n";
 
 export function statusVariant(
   status: string,
@@ -39,27 +40,26 @@ export function tokenStateLabel(token: LocalAppSnapshot["config"]["token"]): {
 } {
   if (token.hasToken && token.persistence === "persistent") {
     return {
-      state: "Configured",
+      state: messages.token.configured,
       variant: "default",
-      description: "A Monobank token is available from secure local storage.",
+      description: messages.token.configuredDescription,
     };
   }
 
   if (token.hasToken) {
     return {
-      state: "Session only",
+      state: messages.token.sessionOnly,
       variant: "secondary",
       description:
         token.fallbackReason === "secure_storage_write_failed"
-          ? "Secure storage was unavailable during save, so the token is available only until this server stops."
-          : "A Monobank token is available only for the running server session.",
+          ? messages.token.sessionWriteFailedDescription
+          : messages.token.sessionDescription,
     };
   }
 
   return {
-    state: "Not configured",
+    state: messages.token.notConfigured,
     variant: "outline",
-    description:
-      "No token is configured for this workspace. Monobank sync will not run.",
+    description: messages.token.notConfiguredDescription,
   };
 }

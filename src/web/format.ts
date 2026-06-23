@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE, messages } from "./i18n.js";
+
 export function currencyLabel(currencyCode: number): string {
   switch (currencyCode) {
     case 840:
@@ -12,7 +14,7 @@ export function currencyLabel(currencyCode: number): string {
 }
 
 export function formatMinorAmount(amount: number, currencyCode = 980): string {
-  return `${(amount / 100).toLocaleString("en-US", {
+  return `${(amount / 100).toLocaleString(DEFAULT_LOCALE, {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })} ${currencyLabel(currencyCode)}`;
@@ -20,20 +22,20 @@ export function formatMinorAmount(amount: number, currencyCode = 980): string {
 
 export function formatDateTime(value: string | number | undefined): string {
   if (value === undefined) {
-    return "Not synced";
+    return messages.format.notSynced;
   }
 
   const date =
     typeof value === "number" ? new Date(value * 1000) : new Date(value);
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
 export function formatDate(value: number): string {
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
     day: "2-digit",
     month: "short",
   }).format(new Date(value * 1000));
@@ -48,32 +50,36 @@ export function formatRelativeAge(
   referenceTimestampMs: number = Date.now(),
 ): string {
   if (value === undefined) {
-    return "Not available";
+    return messages.format.notAvailable;
   }
 
   const date =
     typeof value === "number" ? new Date(value * 1000) : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return "Not available";
+    return messages.format.notAvailable;
   }
 
   const diffMs = referenceTimestampMs - date.getTime();
   if (diffMs < 0) {
-    return "Just now";
+    return messages.format.justNow;
   }
 
   if (diffMs < RELATIVE_MINUTE_MS) {
-    return "Just now";
+    return messages.format.justNow;
   }
+  const relativeFormatter = new Intl.RelativeTimeFormat(DEFAULT_LOCALE, {
+    numeric: "auto",
+  });
+
   if (diffMs < RELATIVE_HOUR_MS) {
     const minutes = Math.floor(diffMs / RELATIVE_MINUTE_MS);
-    return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+    return relativeFormatter.format(-minutes, "minute");
   }
   if (diffMs < RELATIVE_DAY_MS) {
     const hours = Math.floor(diffMs / RELATIVE_HOUR_MS);
-    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+    return relativeFormatter.format(-hours, "hour");
   }
   const days = Math.floor(diffMs / RELATIVE_DAY_MS);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  return relativeFormatter.format(-days, "day");
 }

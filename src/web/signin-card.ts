@@ -1,4 +1,5 @@
 import type { LocalApiMonobankTokenStatus } from "./api-types.js";
+import { messages } from "./i18n.js";
 
 /**
  * Public Monobank developer portal URL. The local product links here
@@ -37,13 +38,12 @@ export function buildFirstRunSignInCardView(
 
   if (!hasToken) {
     return {
-      heading: "Sign in with Monobank",
-      description:
-        "Paste a personal API token from Monobank to load your real accounts, jars, and statements into this local workspace. The token stays on this device.",
-      ctaLabel: "Get token on api.monobank.ua",
+      heading: messages.firstRun.missingHeading,
+      description: messages.firstRun.missingDescription,
+      ctaLabel: messages.firstRun.getTokenLabel,
       ctaHref: MONOBANK_PUBLIC_TOKEN_URL,
       inventoryStatus: "missing",
-      inventoryLabel: "No token saved",
+      inventoryLabel: messages.firstRun.noTokenSaved,
       hasToken: false,
       profile,
     };
@@ -55,25 +55,24 @@ export function buildFirstRunSignInCardView(
 
   if (clientInfo === undefined || accounts === 0) {
     return {
-      heading: "Monobank is connected",
-      description:
-        "A Monobank token is saved for this profile. Run a sync to populate the masked account summary.",
-      ctaLabel: "Re-check Monobank connection",
+      heading: messages.firstRun.connectedHeading,
+      description: messages.firstRun.awaitingSyncDescription,
+      ctaLabel: messages.firstRun.recheckConnectionLabel,
       ctaHref: MONOBANK_PUBLIC_TOKEN_URL,
       inventoryStatus: "awaiting-sync",
-      inventoryLabel: "Awaiting first sync",
+      inventoryLabel: messages.firstRun.awaitingFirstSync,
       hasToken: true,
       profile,
     };
   }
 
   return {
-    heading: "Monobank is connected",
-    description: `Monobank account: ${name} · ${accounts} accounts · ${jars} jars`,
-    ctaLabel: "Re-check Monobank connection",
+    heading: messages.firstRun.connectedHeading,
+    description: messages.firstRun.liveDescription(name, accounts, jars),
+    ctaLabel: messages.firstRun.recheckConnectionLabel,
     ctaHref: MONOBANK_PUBLIC_TOKEN_URL,
     inventoryStatus: "live",
-    inventoryLabel: "Live inventory",
+    inventoryLabel: messages.firstRun.liveInventory,
     hasToken: true,
     profile,
   };

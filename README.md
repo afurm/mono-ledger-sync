@@ -14,7 +14,7 @@ This package ships a local-first Monobank personal finance workspace: a Fastify 
 
 ## Live by default
 
-For a real user, every account, jar, statement, currency rate, and webhook comes from that user's own Monobank account via the personal API. The first-run flow leads with **Sign in with Monobank**: open `https://api.monobank.ua/` to create a personal API token, paste it into the local app, and the local Fastify server validates the token with a live `GET /personal/client-info` before saving it. The product never sends the token to any server controlled by this project.
+For a real user, every account, jar, statement, currency rate, and webhook comes from that user's own Monobank account via the personal API. The Ukrainian first-run flow leads with **Увійдіть через Monobank**: open `https://api.monobank.ua/` to create a personal API token, paste it into the local app, and the local Fastify server validates the token with a live `GET /personal/client-info` before saving it. The product never sends the token to any server controlled by this project.
 
 The Monobank personal API is for the user's own data on their own machine. Do not use this project as a hosted, team, or business service for other people's banking data.
 
@@ -44,12 +44,13 @@ npx mono-ledger-sync
 
 Open `http://127.0.0.1:3000`, then choose one path:
 
-1. Select **Explore demo data** to inspect a synthetic local ledger without a
-   token. Every route displays a demo-data warning.
+1. Select **Переглянути демо-дані** to inspect a synthetic local ledger without
+   a token. Every route displays a demo-data warning.
 2. For live data, create a personal token at `https://api.monobank.ua/`, open
-   **Settings**, paste the token, confirm local-only handling, and save it.
-3. Run sync, review transactions, configure budgets/recurring payments, then
-   use the Export wizard or create a local backup.
+   **Налаштування**, paste the token, confirm local-only handling, and save it.
+3. Run sync from **Синхронізувати**, review transactions, configure
+   budgets/recurring payments, then use the Export wizard or create a local
+   backup.
 
 Saving a valid live token while demo mode is active clears every demo ledger
 row before switching sources. Demo and live transactions are never mixed.

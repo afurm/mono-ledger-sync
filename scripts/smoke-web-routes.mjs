@@ -9,27 +9,33 @@ import { createServer as createViteServer } from "vite";
 
 import { createSessionMonobankTokenStore } from "../dist/security/index.js";
 import { createLocalApiServer } from "../dist/server/index.js";
+import { messages } from "../dist/web/i18n.js";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 
-const routes = [
-  ["overview", "Money at a glance"],
-  ["transactions", "Ledger transactions"],
-  ["categories", "Category spending"],
-  ["budgets", "Budget progress"],
-  ["recurring", "Recurring payments"],
-  ["reports", "Local reports"],
-  ["rules", "Automation rules"],
-  ["sync", "Sync control center"],
-  ["accounts", "Connected accounts"],
-  ["exports", "Local export flows"],
-  ["logs", "Diagnostics timeline"],
-  ["settings", "Local workspace settings"],
-  ["help", "Local setup help"],
+const routeIds = [
+  "overview",
+  "transactions",
+  "categories",
+  "budgets",
+  "recurring",
+  "reports",
+  "rules",
+  "sync",
+  "accounts",
+  "exports",
+  "logs",
+  "settings",
+  "help",
 ];
+
+const routes = routeIds.map((routeId) => [
+  routeId,
+  messages.routes[routeId].title,
+]);
 
 const screenshotDir = process.env.SMOKE_WEB_SCREENSHOT_DIR?.trim();
 const screenshotRouteIds = new Set(
@@ -262,7 +268,9 @@ async function main() {
 
     await page.goto(`${baseUrl}/#overview`, { waitUntil: "networkidle" });
     assert.equal(
-      await page.getByRole("link", { name: "Skip to main content" }).count(),
+      await page
+        .getByRole("link", { name: messages.shell.skipToMainContent })
+        .count(),
       1,
     );
     assert.equal(

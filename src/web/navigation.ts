@@ -16,109 +16,72 @@ import {
   WalletCardsIcon,
 } from "lucide-react";
 
+import { messages } from "./i18n.js";
+
 export const routes = [
   {
     id: "overview",
-    label: "Overview",
-    title: "Money at a glance",
-    description:
-      "Balances, sync health, recent movement, and local ledger freshness.",
+    ...messages.routes.overview,
     icon: GaugeIcon,
   },
   {
     id: "transactions",
-    label: "Transactions",
-    title: "Ledger transactions",
-    description:
-      "Search, filter, review, and inspect normalized local transaction rows.",
+    ...messages.routes.transactions,
     icon: ArrowDownUpIcon,
   },
   {
     id: "categories",
-    label: "Categories",
-    title: "Category spending",
-    description:
-      "Category totals, trend movement, and drill-downs into expense rows.",
+    ...messages.routes.categories,
     icon: TagsIcon,
   },
   {
     id: "budgets",
-    label: "Budgets",
-    title: "Budget progress",
-    description:
-      "Monthly category budgets, rollover choices, and overspend state.",
+    ...messages.routes.budgets,
     icon: PiggyBankIcon,
   },
   {
     id: "recurring",
-    label: "Recurring",
-    title: "Recurring payments",
-    description:
-      "Detected subscriptions, missed payments, upcoming charges, and calendar.",
+    ...messages.routes.recurring,
     icon: CalendarClockIcon,
   },
   {
     id: "reports",
-    label: "Reports",
-    title: "Local reports",
-    description:
-      "Spending, cashflow, savings, projection, category, and merchant reports.",
+    ...messages.routes.reports,
     icon: ChartNoAxesCombinedIcon,
   },
   {
     id: "rules",
-    label: "Rules & Mappings",
-    title: "Automation rules",
-    description:
-      "Categorization, merchant cleanup, duplicate review, and export mappings.",
+    ...messages.routes.rules,
     icon: ListChecksIcon,
   },
   {
     id: "sync",
-    label: "Sync & Webhooks",
-    title: "Sync control center",
-    description:
-      "Monobank connection, webhook delivery, schedules, storage, and activity.",
+    ...messages.routes.sync,
     icon: ActivityIcon,
   },
   {
     id: "accounts",
-    label: "Accounts",
-    title: "Connected accounts",
-    description:
-      "Cards, balances, currencies, jars, and local statement cursor context.",
+    ...messages.routes.accounts,
     icon: WalletCardsIcon,
   },
   {
     id: "exports",
-    label: "Exports",
-    title: "Local export flows",
-    description:
-      "CSV, JSON, JSONL, journal CSV, Parquet, and redacted SQLite snapshots.",
+    ...messages.routes.exports,
     icon: DownloadIcon,
   },
   {
     id: "logs",
-    label: "Logs",
-    title: "Diagnostics timeline",
-    description:
-      "Redacted sync, webhook, export, rule, warning, and error activity.",
+    ...messages.routes.logs,
     icon: FileClockIcon,
   },
   {
     id: "settings",
-    label: "Settings",
-    title: "Local workspace settings",
-    description:
-      "Profile, database path, token status, privacy, backups, and deletion.",
+    ...messages.routes.settings,
     icon: SettingsIcon,
   },
   {
     id: "help",
-    label: "Help",
-    title: "Local setup help",
-    description:
-      "Token setup, backups, export recipes, troubleshooting, and privacy model.",
+    ...messages.routes.help,
     icon: BadgeHelpIcon,
   },
 ] as const;
@@ -127,11 +90,11 @@ export type RouteId = (typeof routes)[number]["id"];
 
 export const secondaryRoutes = [
   {
-    label: "Local database",
+    label: messages.secondaryRoutes.localDatabase,
     icon: DatabaseIcon,
   },
   {
-    label: "Privacy model",
+    label: messages.secondaryRoutes.privacyModel,
     icon: BookOpenIcon,
   },
 ] as const;
