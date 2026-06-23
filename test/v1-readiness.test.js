@@ -21,11 +21,12 @@ test("documents the v1 distribution, localization, recovery, and support contrac
 
   assert.match(distribution, /Version 1 ships as an npm CLI/);
   assert.match(distribution, /SHA-256 checksums/);
-  assert.match(localization, /English interface copy/);
+  assert.match(localization, /Ukrainian interface copy/);
+  assert.match(localization, /uk-UA/);
   assert.match(localization, /Чорна картка/);
   assert.match(recovery, /Recover a stuck sync/);
   assert.match(recovery, /Tokens are not recoverable from the database/);
-  assert.match(release, /Explore demo data/);
+  assert.match(release, /Переглянути демо-дані/);
   assert.match(release, /npm pack --dry-run/);
   assert.match(accessibility, /all 13\s+top-level routes/);
   assert.match(accessibility, /skip link/);
@@ -37,7 +38,7 @@ test("README ships current fixture-safe UI screenshots and quick start", async (
   const readme = await readFile("README.md", "utf8");
 
   assert.match(readme, /npx mono-ledger-sync/);
-  assert.match(readme, /Explore demo data/);
+  assert.match(readme, /Переглянути демо-дані/);
   assert.match(readme, /docs\/assets\/overview\.png/);
   assert.match(readme, /docs\/assets\/transactions\.png/);
   assert.match(readme, /docs\/assets\/exports\.png/);
@@ -53,14 +54,15 @@ test("README ships current fixture-safe UI screenshots and quick start", async (
 });
 
 test("web shell exposes demo separation and keyboard route announcements", async () => {
-  const [app, settings, accountRoute] = await Promise.all([
+  const [app, i18n, settings, accountRoute] = await Promise.all([
     readFile("src/web/App.tsx", "utf8"),
+    readFile("src/web/i18n.ts", "utf8"),
     readFile("src/web/routes/settings/index.tsx", "utf8"),
     readFile("src/web/routes/accounts/index.tsx", "utf8"),
   ]);
 
   assert.match(app, /data-testid="demo-data-banner"/);
-  assert.match(app, /Skip to main content/);
+  assert.match(i18n, /Перейти до основного вмісту/);
   assert.match(app, /aria-live="polite"/);
   assert.match(settings, /data-testid="empty-state-explore-demo"/);
   assert.match(accountRoute, /FOP account \/ Рахунок ФОП/);

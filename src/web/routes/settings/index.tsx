@@ -69,6 +69,7 @@ import type {
   LocalAppSnapshot,
 } from "../../api-types";
 import { currencyLabel, formatDateTime } from "../../format";
+import { messages } from "../../i18n";
 import { useCopyToClipboard } from "../../clipboard";
 import type { FirstRunEmptyStateView } from "../../empty-state";
 import { buildFirstRunSignInCardView } from "../../signin-card";
@@ -302,12 +303,13 @@ export function FirstRunEmptyStatePrompt({
             data-testid="empty-state-explore-demo"
           >
             <DatabaseIcon data-icon="inline-start" />
-            {demoStarting ? "Loading demo" : "Explore demo data"}
+            {demoStarting
+              ? messages.firstRun.loadingDemo
+              : messages.firstRun.exploreDemoData}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Demo mode uses synthetic fixture data. Saving a real Monobank token
-          removes the demo ledger before the first live sync.
+          {messages.firstRun.demoDescription}
         </p>
       </CardContent>
     </Card>

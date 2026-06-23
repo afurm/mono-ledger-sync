@@ -171,6 +171,7 @@ import {
   formatDateTime,
   formatMinorAmount,
 } from "./format";
+import { messages } from "./i18n";
 import { type RouteId, isRouteId, routes, secondaryRoutes } from "./navigation";
 import {
   BalanceProjectionReportCard,
@@ -321,11 +322,16 @@ function routeContextLine(
   snapshot: LocalAppSnapshot | undefined,
 ): string {
   const metadata = routeMetadata(routeId);
-  const localContext = snapshot
-    ? `${snapshot.config.profile} profile / ${snapshot.config.source} source`
-    : "Waiting for local API";
 
-  return `${metadata.description} ${localContext}.`;
+  if (!snapshot) {
+    return messages.shell.routeLoadingContext(metadata.description);
+  }
+
+  return messages.shell.routeReadyContext(
+    metadata.description,
+    snapshot.config.profile,
+    messages.shell.sourceLabel(snapshot.config.source),
+  );
 }
 
 function isThemeMode(value: string | null): value is ThemeMode {
@@ -373,24 +379,25 @@ function applyThemeMode(themeMode: ThemeMode): void {
 function themeModeLabel(themeMode: ThemeMode): string {
   switch (themeMode) {
     case "dark":
-      return "Dark";
+      return messages.theme.dark;
     case "light":
-      return "Light";
+      return messages.theme.light;
     case "system":
-      return "System";
+      return messages.theme.system;
   }
 }
 
 function dataFreshnessLabel(lastSyncedAt: string | undefined): string {
   return lastSyncedAt
-    ? `Updated ${formatDateTime(lastSyncedAt)}`
-    : "Waiting for first sync";
+    ? messages.shell.updatedAt(formatDateTime(lastSyncedAt))
+    : messages.shell.waitingForFirstSync;
 }
 
 function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
-  const profile = snapshot?.config.profile ?? "Loading";
+  const profile = snapshot?.config.profile ?? messages.shell.loading;
   const source = snapshot?.config.source ?? "monobank";
-  const databasePath = snapshot?.config.databasePath ?? "Waiting for local API";
+  const databasePath =
+    snapshot?.config.databasePath ?? messages.shell.waitingForLocalApi;
   const accessHost =
     snapshot?.config.access?.host ?? snapshot?.config.webhook.host;
 
@@ -408,7 +415,7 @@ function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel>Local profile</DropdownMenuLabel>
+        <DropdownMenuLabel>{messages.shell.localProfile}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={profile}>
           <DropdownMenuRadioItem value={profile}>
             {profile}
@@ -418,7 +425,7 @@ function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
         <DropdownMenuGroup>
           <DropdownMenuItem disabled>
             <DatabaseIcon data-icon="inline-start" />
-            {source} source
+            {messages.shell.sourceLabel(source)}
           </DropdownMenuItem>
           <DropdownMenuItem disabled>
             <FileClockIcon data-icon="inline-start" />
@@ -426,7 +433,9 @@ function ProfileMenu({ snapshot }: { snapshot: LocalAppSnapshot | undefined }) {
           </DropdownMenuItem>
           <DropdownMenuItem disabled>
             <ShieldCheckIcon data-icon="inline-start" />
-            {accessHost ? `${accessHost} bind` : "local bind"}
+            {accessHost
+              ? messages.shell.bindLabel(accessHost)
+              : messages.shell.localBind}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
@@ -455,14 +464,16 @@ function ThemeModeControl({
           <DropdownMenuTrigger asChild>
             <Button size="icon" type="button" variant="outline">
               <ThemeIcon data-icon="inline-start" />
-              <span className="sr-only">Theme mode</span>
+              <span className="sr-only">{messages.theme.mode}</span>
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Theme: {themeModeLabel(themeMode)}</TooltipContent>
+        <TooltipContent>
+          {messages.theme.tooltip(themeModeLabel(themeMode))}
+        </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuLabel>{messages.theme.label}</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={themeMode}
           onValueChange={(value) => {
@@ -473,15 +484,15 @@ function ThemeModeControl({
         >
           <DropdownMenuRadioItem value="system">
             <LaptopIcon data-icon="inline-start" />
-            System
+            {messages.theme.system}
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="light">
             <SunIcon data-icon="inline-start" />
-            Light
+            {messages.theme.light}
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="dark">
             <MoonIcon data-icon="inline-start" />
-            Dark
+            {messages.theme.dark}
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
@@ -501,8 +512,9 @@ function AppSidebar({
   const healthStatus = snapshot?.health.status ?? "checking";
   const appVersion = snapshot?.health.version
     ? `v${snapshot.health.version}`
-    : "pending";
-  const databasePath = snapshot?.config.databasePath ?? "Waiting for local API";
+    : messages.shell.pending;
+  const databasePath =
+    snapshot?.config.databasePath ?? messages.shell.waitingForLocalApi;
 
   return (
     <Sidebar collapsible="icon">
@@ -514,14 +526,14 @@ function AppSidebar({
           <div className="grid min-w-0 text-sm">
             <span className="truncate font-semibold">mono-ledger-sync</span>
             <span className="truncate text-xs text-sidebar-foreground/70">
-              Local ledger
+              {messages.shell.localLedger}
             </span>
           </div>
         </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupLabel>{messages.shell.workspace}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {routes.map((route) => (
@@ -540,7 +552,7 @@ function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>Local context</SidebarGroupLabel>
+          <SidebarGroupLabel>{messages.shell.localContext}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {secondaryRoutes.map((route) => (
@@ -558,18 +570,22 @@ function AppSidebar({
       <SidebarFooter>
         <div className="flex flex-col gap-3 rounded-lg border bg-sidebar-accent/55 p-3 text-xs group-data-[collapsible=icon]:hidden">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium">Local status</span>
+            <span className="font-medium">{messages.shell.localStatus}</span>
             <Badge variant={healthStatus === "ok" ? "default" : "secondary"}>
               {healthStatus}
             </Badge>
           </div>
           <div className="grid gap-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sidebar-foreground/70">Version</span>
+              <span className="text-sidebar-foreground/70">
+                {messages.shell.version}
+              </span>
               <span className="font-medium">{appVersion}</span>
             </div>
             <div className="grid gap-1">
-              <span className="text-sidebar-foreground/70">Database</span>
+              <span className="text-sidebar-foreground/70">
+                {messages.shell.database}
+              </span>
               <p className="line-clamp-2 break-all text-sidebar-foreground/80">
                 {databasePath}
               </p>
@@ -583,17 +599,17 @@ function AppSidebar({
             onClick={() => onRouteChange("logs")}
           >
             <FileClockIcon data-icon="inline-start" />
-            Diagnostics
+            {messages.shell.diagnostics}
           </Button>
         </div>
         <SidebarMenu className="hidden group-data-[collapsible=icon]:flex">
           <SidebarMenuItem>
             <SidebarMenuButton
-              tooltip="Diagnostics"
+              tooltip={messages.shell.diagnostics}
               onClick={() => onRouteChange("logs")}
             >
               <FileClockIcon />
-              <span>Diagnostics</span>
+              <span>{messages.shell.diagnostics}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -614,14 +630,14 @@ function MobileNav({
       <SheetTrigger asChild>
         <Button className="md:hidden" size="icon" variant="outline">
           <MenuIcon data-icon="inline-start" />
-          <span className="sr-only">Open navigation</span>
+          <span className="sr-only">{messages.shell.openNavigation}</span>
         </Button>
       </SheetTrigger>
       <SheetContent side="left">
         <SheetHeader>
-          <SheetTitle>Navigation</SheetTitle>
+          <SheetTitle>{messages.shell.navigation}</SheetTitle>
           <SheetDescription className="sr-only">
-            Choose a workspace route.
+            {messages.shell.chooseWorkspaceRoute}
           </SheetDescription>
         </SheetHeader>
         <nav className="flex flex-col gap-1 px-4">
@@ -680,7 +696,7 @@ function TableLoadingSkeleton({
 
 function TransactionsLoadingSkeleton() {
   return (
-    <Card aria-busy="true" aria-label="Transactions loading">
+    <Card aria-busy="true" aria-label={messages.shell.transactionsLoading}>
       <CardHeader>
         <Skeleton className="h-5 w-32" />
         <Skeleton className="h-4 w-72 max-w-full" />
@@ -709,7 +725,7 @@ function SyncLoadingSkeleton() {
   return (
     <div
       aria-busy="true"
-      aria-label="Sync and webhooks loading"
+      aria-label={messages.shell.syncLoading}
       className="flex flex-col gap-2"
     >
       <div className="flex gap-2">
@@ -734,7 +750,7 @@ function AccountsLoadingSkeleton() {
   return (
     <div
       aria-busy="true"
-      aria-label="Accounts loading"
+      aria-label={messages.shell.accountsLoading}
       className="flex flex-col gap-4"
     >
       <Card>
@@ -765,7 +781,10 @@ function PlaceholderLoadingSkeleton({ routeId }: { routeId: RouteId }) {
   const metadata = routeMetadata(routeId);
 
   return (
-    <Card aria-busy="true" aria-label={`${metadata.title} loading`}>
+    <Card
+      aria-busy="true"
+      aria-label={messages.shell.routeLoading(metadata.title)}
+    >
       <CardHeader>
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-4 w-80 max-w-full" />
@@ -801,7 +820,7 @@ function RouteLoadingSkeleton({ routeId }: { routeId: RouteId }) {
 
 function SettingsLoadingSkeleton() {
   return (
-    <Card aria-busy="true" aria-label="Settings loading">
+    <Card aria-busy="true" aria-label={messages.shell.settingsLoading}>
       <CardHeader>
         <Skeleton className="h-5 w-36" />
         <Skeleton className="h-4 w-80 max-w-full" />
@@ -923,7 +942,10 @@ export default function App() {
       setLoadState((current) => ({
         status: "error",
         ...(current.data ? { data: current.data } : {}),
-        error: error instanceof Error ? error.message : "Local API unavailable",
+        error:
+          error instanceof Error
+            ? error.message
+            : messages.shell.loadErrorFallback,
       }));
     }
   }, []);
@@ -974,15 +996,15 @@ export default function App() {
     try {
       await runLedgerSync();
       await refresh();
-      toast.success("Local sync complete", {
-        description: "SQLite ledger data refreshed from the configured source.",
+      toast.success(messages.shell.syncCompleteTitle, {
+        description: messages.shell.syncCompleteDescription,
       });
     } catch (error) {
-      toast.error("Local sync failed", {
+      toast.error(messages.shell.syncFailedTitle, {
         description:
           error instanceof Error
             ? error.message
-            : "The local Fastify API could not complete sync.",
+            : messages.shell.syncFailedDescription,
       });
     } finally {
       setSyncing(false);
@@ -996,16 +1018,15 @@ export default function App() {
       await updateLocalAppSource("fixture");
       await runLedgerSync();
       await refresh();
-      toast.success("Demo workspace ready", {
-        description:
-          "Synthetic Monobank fixtures are loaded locally and clearly separated from live data.",
+      toast.success(messages.shell.demoReadyTitle, {
+        description: messages.shell.demoReadyDescription,
       });
     } catch (error) {
-      toast.error("Demo workspace could not start", {
+      toast.error(messages.shell.demoStartFailedTitle, {
         description:
           error instanceof Error
             ? error.message
-            : "The local fixture ledger could not be loaded.",
+            : messages.shell.demoStartFailedDescription,
       });
     } finally {
       setSyncing(false);
@@ -1043,7 +1064,7 @@ export default function App() {
         className="sr-only fixed left-4 top-4 z-50 rounded-md bg-background px-3 py-2 text-sm font-medium shadow focus:not-sr-only"
         href="#main-content"
       >
-        Skip to main content
+        {messages.shell.skipToMainContent}
       </a>
       <SidebarProvider>
         <AppSidebar
@@ -1061,7 +1082,7 @@ export default function App() {
               />
               <div className="min-w-0 py-2">
                 <div className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
-                  <span>Workspace</span>
+                  <span>{messages.shell.workspace}</span>
                   <ChevronRightIcon className="size-3" aria-hidden="true" />
                   <span className="truncate">{route.label}</span>
                 </div>
@@ -1084,14 +1105,18 @@ export default function App() {
                 <TooltipTrigger asChild>
                   <Button size="icon" variant="outline" onClick={refresh}>
                     <RefreshCwIcon data-icon="inline-start" />
-                    <span className="sr-only">Refresh local data</span>
+                    <span className="sr-only">
+                      {messages.shell.refreshLocalData}
+                    </span>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Refresh local data</TooltipContent>
+                <TooltipContent>
+                  {messages.shell.refreshLocalData}
+                </TooltipContent>
               </Tooltip>
               <Button disabled={syncing} onClick={runSync}>
                 <RefreshCwIcon data-icon="inline-start" />
-                {syncing ? "Syncing" : "Run Sync"}
+                {syncing ? messages.shell.syncing : messages.shell.runSync}
               </Button>
             </div>
           </header>
@@ -1102,12 +1127,12 @@ export default function App() {
             tabIndex={-1}
           >
             <p aria-live="polite" className="sr-only">
-              {route.title} loaded
+              {messages.shell.routeLoaded(route.title)}
             </p>
             {loadState.status === "error" && !snapshot && (
               <Alert variant="destructive">
                 <AlertCircleIcon />
-                <AlertTitle>Local API unavailable</AlertTitle>
+                <AlertTitle>{messages.shell.localApiUnavailable}</AlertTitle>
                 <AlertDescription>{loadState.error}</AlertDescription>
               </Alert>
             )}
@@ -1132,22 +1157,18 @@ export default function App() {
 
             <Alert>
               <ShieldCheckIcon />
-              <AlertTitle>Local-first workspace</AlertTitle>
+              <AlertTitle>{messages.shell.localFirstWorkspaceTitle}</AlertTitle>
               <AlertDescription>
-                Tokens and financial data stay on this machine. The UI reads the
-                local Fastify API and writes to the profile-scoped SQLite
-                ledger.
+                {messages.shell.localFirstWorkspaceDescription}
               </AlertDescription>
             </Alert>
 
             {snapshot?.config.source === "fixture" ? (
               <Alert data-testid="demo-data-banner" variant="warning">
                 <DatabaseIcon />
-                <AlertTitle>Demo data</AlertTitle>
+                <AlertTitle>{messages.shell.demoDataTitle}</AlertTitle>
                 <AlertDescription>
-                  This profile contains synthetic fixtures, not live Monobank
-                  transactions. Saving a valid token clears these demo rows
-                  before switching to live sync.
+                  {messages.shell.demoDataDescription}
                 </AlertDescription>
               </Alert>
             ) : null}

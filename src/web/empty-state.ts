@@ -2,6 +2,7 @@ import type {
   LocalApiMonobankTokenStatus,
   LocalAppSnapshot,
 } from "./api-types.js";
+import { messages } from "./i18n.js";
 import type { RouteId } from "./navigation.js";
 
 /**
@@ -98,12 +99,11 @@ export function buildFirstRunEmptyStateView(
   token: LocalApiMonobankTokenStatus,
 ): FirstRunEmptyStateView {
   return {
-    heading: "Sign in with Monobank to see this view",
-    description:
-      "This screen needs a saved Monobank token to load real accounts, jars, transactions, and statements. The token stays on this device and is never sent anywhere else.",
-    getTokenLabel: "Get token on api.monobank.ua",
+    heading: messages.firstRun.emptyStateHeading,
+    description: messages.firstRun.emptyStateDescription,
+    getTokenLabel: messages.firstRun.getTokenLabel,
     getTokenHref: "https://api.monobank.ua/",
-    openSettingsLabel: "Open Settings to paste token",
+    openSettingsLabel: messages.firstRun.openSettingsLabel,
     profile: token.profile,
     routeId,
   };

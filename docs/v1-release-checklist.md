@@ -6,7 +6,7 @@ empty data directory. Record the OS, Node version, package version, and result.
 - [ ] Install Node.js 20 or newer and run `npx mono-ledger-sync --help`.
 - [ ] Start `npx mono-ledger-sync`; confirm it binds to loopback and opens the
       working finance workspace without a hosted account.
-- [ ] Choose **Explore demo data**; confirm every route labels the data as demo.
+- [ ] Choose **Переглянути демо-дані**; confirm every route labels the data as demo.
 - [ ] Save a valid personal Monobank token; confirm demo rows are removed before
       the source changes to live.
 - [ ] Run sync; inspect successful and partial-run account/window details.

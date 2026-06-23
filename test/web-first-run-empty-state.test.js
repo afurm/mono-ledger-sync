@@ -180,12 +180,15 @@ test("buildFirstRunEmptyStateView exposes the developer portal link", () => {
     "transactions",
     token({ profile: "personal" }),
   );
-  assert.equal(view.heading, "Sign in with Monobank to see this view");
+  assert.equal(
+    view.heading,
+    "Увійдіть через Monobank, щоб переглянути цей розділ",
+  );
   assert.equal(view.getTokenHref, "https://api.monobank.ua/");
-  assert.match(view.description, /token/i);
+  assert.match(view.description, /токена Monobank/);
   assert.equal(view.profile, "personal");
   assert.equal(view.routeId, "transactions");
-  assert.match(view.openSettingsLabel, /Settings/);
+  assert.match(view.openSettingsLabel, /налаштування/);
 });
 
 test("empty state view never leaks token value or header names", () => {

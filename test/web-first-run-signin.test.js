@@ -41,32 +41,32 @@ test("MONOBANK_PUBLIC_TOKEN_URL points to the developer portal", () => {
   assert.equal(MONOBANK_PUBLIC_TOKEN_URL, "https://api.monobank.ua/");
 });
 
-test("missing-token greeting leads with Sign in with Monobank", () => {
+test("missing-token greeting leads with the Ukrainian Monobank sign-in copy", () => {
   const view = buildFirstRunSignInCardView(
     token({ profile: "personal", hasToken: false }),
   );
-  assert.equal(view.heading, "Sign in with Monobank");
-  assert.equal(view.ctaLabel, "Get token on api.monobank.ua");
+  assert.equal(view.heading, "Увійдіть через Monobank");
+  assert.equal(view.ctaLabel, "Отримати токен на api.monobank.ua");
   assert.equal(view.ctaHref, MONOBANK_PUBLIC_TOKEN_URL);
   assert.equal(view.inventoryStatus, "missing");
-  assert.equal(view.inventoryLabel, "No token saved");
+  assert.equal(view.inventoryLabel, "Токен не збережено");
   assert.equal(view.hasToken, false);
   assert.equal(view.profile, "personal");
-  assert.match(view.description, /Paste a personal API token from Monobank/);
-  assert.match(view.description, /local workspace/);
+  assert.match(view.description, /персональний API-токен Monobank/);
+  assert.match(view.description, /локальний простір/);
 });
 
 test("saved token without clientInfo shows awaiting-sync state", () => {
   const view = buildFirstRunSignInCardView(
     token({ profile: "personal", hasToken: true }),
   );
-  assert.equal(view.heading, "Monobank is connected");
+  assert.equal(view.heading, "Monobank підключено");
   assert.equal(view.inventoryStatus, "awaiting-sync");
-  assert.equal(view.inventoryLabel, "Awaiting first sync");
-  assert.equal(view.ctaLabel, "Re-check Monobank connection");
+  assert.equal(view.inventoryLabel, "Очікує першої синхронізації");
+  assert.equal(view.ctaLabel, "Перевірити підключення Monobank");
   assert.equal(view.ctaHref, MONOBANK_PUBLIC_TOKEN_URL);
   assert.equal(view.hasToken, true);
-  assert.match(view.description, /Run a sync/);
+  assert.match(view.description, /Запустіть синхронізацію/);
 });
 
 test("saved token with accounts shows live masked inventory summary", () => {
@@ -83,12 +83,12 @@ test("saved token with accounts shows live masked inventory summary", () => {
       },
     }),
   );
-  assert.equal(view.heading, "Monobank is connected");
+  assert.equal(view.heading, "Monobank підключено");
   assert.equal(view.inventoryStatus, "live");
-  assert.equal(view.inventoryLabel, "Live inventory");
+  assert.equal(view.inventoryLabel, "Актуальна інвентаризація");
   assert.equal(
     view.description,
-    "Monobank account: Andrii F. · 3 accounts · 1 jars",
+    "Рахунок Monobank: Andrii F. · рахунків: 3 · банок: 1",
   );
   assert.equal(view.hasToken, true);
 });
@@ -108,9 +108,9 @@ test("saved token with zero accounts falls back to awaiting-sync copy", () => {
     }),
   );
   assert.equal(view.inventoryStatus, "awaiting-sync");
-  assert.equal(view.inventoryLabel, "Awaiting first sync");
+  assert.equal(view.inventoryLabel, "Очікує першої синхронізації");
   assert.equal(view.hasToken, true);
-  assert.match(view.description, /Run a sync/);
+  assert.match(view.description, /Запустіть синхронізацію/);
 });
 
 test("view model never leaks token value, only masked counts", () => {
